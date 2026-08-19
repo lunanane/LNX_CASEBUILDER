@@ -63,13 +63,29 @@ and the browser. Ctrl+C stops it.
 
 ### In the editor
 
-Left: the part library, click to drop one into the scene. Middle: the 3D view —
-drag a part to move it in XY, shift+drag for Z, arrows nudge (shift = 0.1 mm),
-`R` rotates 90°, `Del` removes. Right: placements, the selected part's numbers,
-and the live issue list — click an issue to select the part it blames. Mated
-parts (the screen on the Pi) can't be dragged; they follow their parent, and you
-change `gap` instead. Toggles for the generated case layers and the plug
-corridors are in the header.
+Left: the part library, click to drop one into the scene. Middle: the 3D view.
+Right: placements, the selected part's numbers, and the live issue list — click
+an issue to select the part it blames.
+
+Selecting a part puts a gizmo on it: an amber **move pivot** on its centre with
+the two axes it slides along, and a blue **rotate ring** further out with one
+handle. Drag the pivot or the part body to slide it in its plane; drag the ring
+handle to turn it (hold shift for 15° steps); drag empty space to orbit the
+camera. The ring is a fixed size rather than scaled to the part, so it stays the
+same target whether you grabbed a 25 mm breakout or the 128 mm Eurorack panel.
+`90°` buttons in the header and in the inspector turn the selection a quarter
+turn, as does `R`. Arrows nudge 1 mm, shift+arrows 0.1 mm, `Del` removes.
+
+Rotation pivots on the part's own centre, not its local origin — otherwise every
+`origin: min` part would swing around a corner and fly off the bench.
+
+Parts named by an error render **ghosted red**; everything clean renders solid,
+so you can shove things around and read the result without looking away from the
+viewport. The case outline and the issue list update live during the drag.
+
+Mated parts (the screen on the Pi) can't be dragged; they follow their parent,
+and you change `gap` instead. Toggles for the case layers, the plug corridors and
+the panel plane are in the header.
 
 Every move re-posts the scene to the backend, so the issue list is always the
 engine's opinion, never the browser's guess. `save` writes back to

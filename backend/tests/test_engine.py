@@ -273,3 +273,43 @@ def test_flip_mirrors_z_about_the_board_plane(lib):
     tall_down = next(s for s in down.solids if s.name == "tall")
     assert tall_up.z == pytest.approx((1.6, 11.6))
     assert tall_down.z == pytest.approx((-11.6, -1.6))
+
+
+# --------------------------------------------------------------------------
+# the editor's rotate-about-centre formula
+# --------------------------------------------------------------------------
+
+def _footprint_center(res, pid):
+    xs, ys = [], []
+    for s in res.solids:
+        if s.placement == pid:
+            x0, y0, x1, y1 = s.poly.bounds
+            xs += [x0, x1]
+            ys += [y0, y1]
+    return ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+
+
+@pytest.mark.parametrize("deg", [90.0, -90.0, 37.5, 180.0])
+def test_rotating_about_the_centre_keeps_the_centre_put(lib, deg):
+    """The editor's rotate gizmo turns a part about its own centre, which
+    `rot_z` alone does not do -- it spins about the local origin, a corner for
+    every `origin: min` part. The editor compensates by swinging `pos` around
+    the same centre:  pos' = C + Rz(d) * (pos - C).  If that formula is wrong,
+    grabbing the ring flings the board across the bench.
+    """
+    import math
+
+    scene = load_scene(SCENE)
+    pl = next(p for p in scene.placements if p.id == "encoders")
+    before = _footprint_center(resolve(scene, lib), "encoders")
+
+    a = math.radians(deg)
+    dx, dy = pl.pos[0] - before[0], pl.pos[1] - before[1]
+    pl.pos = (before[0] + dx * math.cos(a) - dy * math.sin(a),
+              before[1] + dx * math.sin(a) + dy * math.cos(a),
+              pl.pos[2])
+    pl.rot_z = (pl.rot_z + deg) % 360
+
+    after = _footprint_center(resolve(scene, lib), "encoders")
+    assert after[0] == pytest.approx(before[0], abs=1e-6)
+    assert after[1] == pytest.approx(before[1], abs=1e-6)

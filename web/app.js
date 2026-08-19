@@ -229,6 +229,11 @@ function buildCase(caseModel) {
 
 const gizmo = { center: null, radius: 0, ring: null, handle: null };
 
+// The rotate ring is a FIXED size rather than scaled to the part: sized to the
+// part it became a 73 mm hoop around the AMYboard panel and a dot around a
+// breakout. This keeps it the same grabbable target for everything.
+const RING_MIN = 14, RING_MAX = 26, PIVOT_R = 3.4, AXIS_LEN = 15;
+
 function placementBounds(id) {
   const solids = (state.resolved?.solids || []).filter((s) => s.placement === id);
   if (!solids.length) return null;
@@ -240,6 +245,17 @@ function placementBounds(id) {
   return { x0, y0, z0, x1, y1, z1 };
 }
 
+function placementCenter(id) {
+  const b = placementBounds(id);
+  return b ? [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2] : null;
+}
+
+function tagGizmo(obj, kind) {
+  obj.userData.gizmo = kind;
+  obj.traverse?.((o) => { o.userData.gizmo = kind; });
+  return obj;
+}
+
 function buildGizmo() {
   gizmoGroup.clear();
   gizmo.ring = gizmo.handle = gizmo.center = null;
@@ -248,33 +264,66 @@ function buildGizmo() {
   const b = placementBounds(pl.id);
   if (!b) return;
 
-  const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, z = b.z1 + 1.5;
-  const r = Math.max(b.x1 - b.x0, b.y1 - b.y0) / 2 + 9;
+  const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, z = b.z1 + 2.0;
+  const half = Math.max(b.x1 - b.x0, b.y1 - b.y0) / 2;
+  const r = Math.min(RING_MAX, Math.max(RING_MIN, half + 6));
   gizmo.center = new THREE.Vector3(cx, cy, z);
   gizmo.radius = r;
 
+  // --- the move pivot: a disc on the part's centre, with the two axes it
+  // --- slides along. Grab any of it to drag the part in its plane.
+  const disc = new THREE.Mesh(
+    new THREE.CircleGeometry(PIVOT_R, 28),
+    new THREE.MeshBasicMaterial({ color: 0xffc24b, transparent: true, opacity: 0.95,
+                                  side: THREE.DoubleSide, depthTest: false }));
+  disc.position.set(cx, cy, z);
+  disc.renderOrder = 10;
+  gizmoGroup.add(tagGizmo(disc, 'move'));
+
+  const ringOutline = new THREE.Mesh(
+    new THREE.TorusGeometry(PIVOT_R + 1.6, 0.45, 6, 28),
+    new THREE.MeshBasicMaterial({ color: 0x14161a, transparent: true, opacity: 0.8,
+                                  depthTest: false }));
+  ringOutline.position.set(cx, cy, z);
+  ringOutline.renderOrder = 11;
+  gizmoGroup.add(tagGizmo(ringOutline, 'move'));
+
+  for (const [dir, color] of [[[1, 0, 0], 0xff7b6b], [[0, 1, 0], 0x7bd88f]]) {
+    const arrow = new THREE.ArrowHelper(
+      new THREE.Vector3(...dir), new THREE.Vector3(cx, cy, z), AXIS_LEN, color, 4.5, 3);
+    arrow.line.material.depthTest = false;
+    arrow.cone.material.depthTest = false;
+    arrow.renderOrder = 10;
+    gizmoGroup.add(tagGizmo(arrow, 'move'));
+  }
+
+  // --- the rotate ring, well outside the pivot so the two never fight ---
   const ring = new THREE.Mesh(
-    new THREE.TorusGeometry(r, 0.7, 8, 96),
-    new THREE.MeshBasicMaterial({ color: 0x57c7ff, transparent: true, opacity: 0.55 }));
+    new THREE.TorusGeometry(r, 0.6, 8, 96),
+    new THREE.MeshBasicMaterial({ color: 0x57c7ff, transparent: true, opacity: 0.45,
+                                  depthTest: false }));
   ring.position.set(cx, cy, z);
-  ring.userData.gizmo = 'ring';
-  gizmoGroup.add(ring);
+  ring.renderOrder = 9;
+  gizmoGroup.add(tagGizmo(ring, 'ring'));
   gizmo.ring = ring;
 
   const a = THREE.MathUtils.degToRad(pl.rot_z || 0);
   const handle = new THREE.Mesh(
-    new THREE.SphereGeometry(3.2, 20, 16),
-    new THREE.MeshBasicMaterial({ color: 0x57c7ff }));
+    new THREE.SphereGeometry(2.8, 20, 16),
+    new THREE.MeshBasicMaterial({ color: 0x57c7ff, depthTest: false }));
   handle.position.set(cx + Math.cos(a) * r, cy + Math.sin(a) * r, z);
-  handle.userData.gizmo = 'handle';
-  gizmoGroup.add(handle);
+  handle.renderOrder = 12;
+  gizmoGroup.add(tagGizmo(handle, 'handle'));
   gizmo.handle = handle;
+}
 
-  // a stub from the centre so the current angle is readable at a glance
-  gizmoGroup.add(new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(cx, cy, z), handle.position.clone()]),
-    new THREE.LineBasicMaterial({ color: 0x57c7ff, transparent: true, opacity: 0.4 })));
+function moveHandleTo(deg) {
+  if (!gizmo.handle || !gizmo.center) return;
+  const a = THREE.MathUtils.degToRad(deg);
+  gizmo.handle.position.set(
+    gizmo.center.x + Math.cos(a) * gizmo.radius,
+    gizmo.center.y + Math.sin(a) * gizmo.radius,
+    gizmo.center.z);
 }
 
 // ---------------------------------------------------------------------------
@@ -368,25 +417,41 @@ function renderParts() {
   }
 }
 
+let placementsSig = null;
+
 function renderPlacements() {
   const list = $('placement-list');
-  list.innerHTML = '';
-  for (const pl of state.scene.placements) {
-    const part = state.partsById.get(pl.part);
-    const row = document.createElement('div');
-    row.className = 'row' + (pl.id === state.selection ? ' sel' : '');
-    if (state.badPlacements.has(pl.id)) row.style.color = 'var(--err)';
-    row.innerHTML =
-      `<div class="name">${pl.id}${pl.locked ? ' &#128274;' : ''}</div>` +
-      `<div class="meta">${part ? part.name : pl.part}` +
-      `${pl.parent ? ` &rarr; ${pl.parent}` : ''}</div>`;
-    row.onclick = () => select(pl.id);
-    list.appendChild(row);
+  const sig = state.scene.placements.map((p) => `${p.id}:${p.part}:${p.parent || ''}`).join('|');
+  if (sig !== placementsSig) {
+    list.innerHTML = '';
+    for (const pl of state.scene.placements) {
+      const part = state.partsById.get(pl.part);
+      const row = document.createElement('div');
+      row.dataset.id = pl.id;
+      row.className = 'row';
+      row.innerHTML =
+        `<div class="name">${pl.id}${pl.locked ? ' &#128274;' : ''}</div>` +
+        `<div class="meta">${part ? part.name : pl.part}` +
+        `${pl.parent ? ` &rarr; ${pl.parent}` : ''}</div>`;
+      row.onclick = () => select(pl.id);
+      list.appendChild(row);
+    }
+    placementsSig = sig;
+  }
+  // selection and error state are cheap attribute flips, never a rebuild
+  for (const row of list.children) {
+    row.classList.toggle('sel', row.dataset.id === state.selection);
+    row.style.color = state.badPlacements.has(row.dataset.id) ? 'var(--err)' : '';
   }
 }
 
+let issuesSig = null;
+
 function renderIssues(issues) {
   const list = $('issue-list');
+  const sig = issues.map((i) => `${i.level}${i.code}${i.message}`).join('|');
+  if (sig === issuesSig) return;
+  issuesSig = sig;
   list.innerHTML = '';
   const errors = issues.filter((i) => i.level === 'error').length;
   const warns = issues.filter((i) => i.level === 'warning').length;
@@ -450,7 +515,9 @@ function buildSelectionShell(pl) {
       ${attached ? 'disabled' : ''}></div>
     <div class="field"><label>z</label><input id="f-z" type="number" step="0.5"
       ${solvedZ ? 'disabled' : ''}></div>
-    <div class="field"><label>rot</label><input id="f-r" type="number" step="15"></div>
+    <div class="field"><label>rot</label><input id="f-r" type="number" step="15">
+      <button id="b-ccw" title="rotate 90&deg; counter-clockwise">&#8634;90</button>
+      <button id="b-cw" title="rotate 90&deg; clockwise">90&#8635;</button></div>
     ${attached ? '<div class="field"><label>gap</label><input id="f-g" type="number" step="0.5"></div>' : `
       <div class="field"><label>panel</label><select id="f-panel">
         <option value="">-- free --</option>
@@ -482,6 +549,13 @@ function buildSelectionShell(pl) {
   };
   sel('f-panel', (v) => (pl.on_panel = v || null));
   sel('f-panelref', (v) => (pl.panel_ref = v));
+
+  const turn = (id, deg) => {
+    const el = $(id);
+    if (el) el.onclick = () => { rotateBy(pl, deg); scheduleResolve(0); };
+  };
+  turn('b-ccw', 90);
+  turn('b-cw', -90);
 }
 
 function updateSelectionValues(pl) {
@@ -570,10 +644,7 @@ function descendants(id) {
  *      pos' = C + Rz(d) * (pos - C)
  */
 function rotateBy(pl, deltaDeg, centerXY) {
-  const c = centerXY || (() => {
-    const b = placementBounds(pl.id);
-    return b ? [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2] : [pl.pos[0], pl.pos[1]];
-  })();
+  const c = centerXY || placementCenter(pl.id) || [pl.pos[0], pl.pos[1]];
   const a = THREE.MathUtils.degToRad(deltaDeg);
   const ca = Math.cos(a), sa = Math.sin(a);
   const dx = pl.pos[0] - c[0], dy = pl.pos[1] - c[1];
@@ -612,8 +683,9 @@ function updateRay(ev) {
 }
 
 function pickGizmo() {
-  const hits = raycaster.intersectObjects(gizmoGroup.children, false);
+  const hits = raycaster.intersectObjects(gizmoGroup.children, true);
   return hits.find((h) => h.object.userData.gizmo === 'handle')
+      || hits.find((h) => h.object.userData.gizmo === 'move')
       || hits.find((h) => h.object.userData.gizmo === 'ring') || null;
 }
 
@@ -632,7 +704,13 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   updateRay(ev);
 
   const g = pickGizmo();
-  if (g) { ev.stopPropagation(); ev.preventDefault(); startRotate(ev); return; }
+  if (g) {
+    ev.stopPropagation();
+    ev.preventDefault();
+    if (g.object.userData.gizmo === 'move') startMove(ev, g.point);
+    else startRotate(ev);
+    return;
+  }
 
   const hit = pickPart();
   if (!hit) return;                       // empty space -> let the camera have it
@@ -647,16 +725,17 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
     hint(pl?.locked ? `${id} is locked` : `${id} follows ${pl?.parent} -- move the parent`);
     return;
   }
-  startMove(ev, hit);
+  startMove(ev, hit.point);
 }, { capture: true });
 
-function startMove(ev, hit) {
+function startMove(ev, point) {
   const pl = currentPlacement();
+  if (!pl || pl.locked || pl.parent) return;
   const vertical = ev.shiftKey && !pl.on_panel;   // z is solved for panel riders
   const normal = vertical
-    ? new THREE.Vector3().subVectors(camera.position, hit.point).setZ(0).normalize()
+    ? new THREE.Vector3().subVectors(camera.position, point).setZ(0).normalize()
     : new THREE.Vector3(0, 0, 1);
-  dragPlane.setFromNormalAndCoplanarPoint(normal, hit.point);
+  dragPlane.setFromNormalAndCoplanarPoint(normal, point);
   const start = planePoint();
   if (!start) return;
 
@@ -725,6 +804,7 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
     pl.pos = [...drag.startPos];
     pl.rot_z = drag.startRot;
     rotateBy(pl, deg, drag.center);
+    moveHandleTo(pl.rot_z);
     hint(`<b>${drag.id}</b> &nbsp; rot ${pl.rot_z.toFixed(1)}&deg;` +
          `${ev.shiftKey ? ' (15&deg; steps)' : ''}`);
   }
@@ -778,7 +858,7 @@ async function loadScene(name) {
   state.sceneName = name;
   state.scene = await api(`/api/scenes/${name}`);
   state.selection = null;
-  shellFor = null;
+  shellFor = placementsSig = issuesSig = null;
   await doResolve();
   frameCamera();
 }
@@ -816,6 +896,16 @@ $('btn-dxf').onclick = async () => {
   a.download = `${state.sceneName}-layers.dxf`;
   a.click();
 };
+const turnSelection = (deg) => {
+  const pl = currentPlacement();
+  if (!pl) { status('select a part first', 'err'); return; }
+  if (pl.locked || pl.parent) { status(`${pl.id} cannot be rotated on its own`, 'err'); return; }
+  rotateBy(pl, deg);
+  scheduleResolve(0);
+};
+$('btn-ccw').onclick = () => turnSelection(90);
+$('btn-cw').onclick = () => turnSelection(-90);
+
 $('chk-case').onchange = () => ($('chk-case').checked ? refreshCase() : caseGroup.clear());
 $('chk-corridors').onchange = () => buildCorridors(state.resolved);
 $('chk-panels').onchange = () => buildPanels(state.resolved);
