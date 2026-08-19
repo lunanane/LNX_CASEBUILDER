@@ -50,6 +50,10 @@ def cmd_check(args) -> int:
     print(f"scene {scene.name}: {len(scene.placements)} placements")
     print(f"  extent  {x1 - x0:.1f} x {y1 - y0:.1f} x {z1 - z0:.1f} mm")
     print(f"  bounds  x {x0:.1f}..{x1:.1f}  y {y0:.1f}..{y1:.1f}  z {z0:.1f}..{z1:.1f}")
+    for name, z in res.panels.items():
+        riders = [p.id for p in scene.placements if p.on_panel == name]
+        print(f"  panel   {name!r} at z {z:.2f}  ({len(riders)} placements: "
+              f"{', '.join(riders) or 'none'})")
     print()
     for level in ("error", "warning", "info"):
         for i in issues:

@@ -64,7 +64,8 @@ view.add(axes);
 const solidsGroup = new THREE.Group();
 const caseGroup = new THREE.Group();
 const corridorGroup = new THREE.Group();
-view.add(solidsGroup, caseGroup, corridorGroup);
+const panelGroup = new THREE.Group();
+view.add(solidsGroup, caseGroup, corridorGroup, panelGroup);
 
 const groupsByPlacement = new Map();   // id -> THREE.Group
 
@@ -165,6 +166,36 @@ function buildCorridors(resolved) {
   }
 }
 
+function buildPanels(resolved) {
+  panelGroup.clear();
+  if (!$('chk-panels').checked) return;
+  const e = resolved.extent;
+  const pad = 12;
+  for (const p of resolved.panels || []) {
+    if (p.z == null) continue;
+    const w = e.max[0] - e.min[0] + pad * 2;
+    const h = e.max[1] - e.min[1] + pad * 2;
+    const plane = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({
+        color: 0x57c7ff, transparent: true, opacity: 0.06,
+        side: THREE.DoubleSide, depthWrite: false,
+      }));
+    plane.position.set((e.min[0] + e.max[0]) / 2, (e.min[1] + e.max[1]) / 2, p.z);
+    panelGroup.add(plane);
+
+    const g = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(e.min[0] - pad, e.min[1] - pad, p.z),
+      new THREE.Vector3(e.max[0] + pad, e.min[1] - pad, p.z),
+      new THREE.Vector3(e.max[0] + pad, e.max[1] + pad, p.z),
+      new THREE.Vector3(e.min[0] - pad, e.max[1] + pad, p.z),
+      new THREE.Vector3(e.min[0] - pad, e.min[1] - pad, p.z),
+    ]);
+    panelGroup.add(new THREE.Line(g, new THREE.LineBasicMaterial({
+      color: 0x57c7ff, transparent: true, opacity: 0.5 })));
+  }
+}
+
 function buildCase(caseModel) {
   caseGroup.clear();
   if (!caseModel || !$('chk-case').checked) return;
@@ -211,6 +242,7 @@ async function doResolve() {
     state.resolved = resolved;
     buildSolids(resolved);
     buildCorridors(resolved);
+    buildPanels(resolved);
     renderIssues(resolved.issues);
     renderPlacements();
     renderSelection();
@@ -296,6 +328,15 @@ function renderSelection() {
   const part = state.partsById.get(pl.part);
   const frame = state.resolved?.frames?.[pl.id];
   const attached = !!pl.parent;
+  const panelNames = (state.resolved?.panels || []).map((p) => p.name);
+  // any volume in this part or anything mated on top of it can be the feature
+  // that sits flush -- that is how "the collar, not the shaft" gets expressed
+  const subtreeParts = [pl.id, ...descendants(pl.id)]
+    .map((id) => state.scene.placements.find((p) => p.id === id)?.part)
+    .map((pid) => state.partsById.get(pid))
+    .filter(Boolean);
+  const refOptions = ['auto', 'top',
+    ...subtreeParts.flatMap((part) => (part.volumes || []).map((v) => v.name))];
 
   box.innerHTML = `
     <div class="note">${part ? part.name : pl.part}</div>
@@ -306,11 +347,28 @@ function renderSelection() {
     <div class="field"><label>y</label><input id="f-y" type="number" step="0.5"
       value="${(attached ? frame?.pos[1] ?? 0 : pl.pos[1]).toFixed(2)}" ${attached ? 'disabled' : ''}></div>
     <div class="field"><label>z</label><input id="f-z" type="number" step="0.5"
-      value="${(attached ? frame?.pos[2] ?? 0 : pl.pos[2]).toFixed(2)}" ${attached ? 'disabled' : ''}></div>
+      value="${((attached || pl.on_panel) ? frame?.pos[2] ?? 0 : pl.pos[2]).toFixed(2)}"
+      ${(attached || pl.on_panel) ? 'disabled' : ''}></div>
     <div class="field"><label>rot</label><input id="f-r" type="number" step="90"
       value="${pl.rot_z ?? 0}"></div>
     ${attached ? `<div class="field"><label>gap</label>
       <input id="f-g" type="number" step="0.5" value="${pl.mate_gap ?? 0}"></div>` : ''}
+    ${attached ? '' : `
+      <div class="field"><label>panel</label>
+        <select id="f-panel">
+          <option value="">-- free --</option>
+          ${panelNames.map((n) => `<option value="${n}"
+            ${pl.on_panel === n ? 'selected' : ''}>${n}</option>`).join('')}
+        </select></div>
+      ${pl.on_panel ? `
+      <div class="field"><label>flush</label>
+        <select id="f-panelref">
+          ${refOptions.map((n) => `<option value="${n}"
+            ${(pl.panel_ref || 'auto') === n ? 'selected' : ''}>${n}</option>`).join('')}
+        </select></div>
+      <div class="field"><label>offset</label>
+        <input id="f-panelofs" type="number" step="0.5"
+          value="${pl.panel_offset ?? 0}"></div>` : ''}`}
     <div class="note">${pl.locked ? 'locked -- unlock in the YAML to move it' : ''}</div>
   `;
   const bind = (id, fn) => {
@@ -322,6 +380,13 @@ function renderSelection() {
   bind('f-z', (v) => (pl.pos[2] = v));
   bind('f-r', (v) => (pl.rot_z = v));
   bind('f-g', (v) => (pl.mate_gap = v));
+  const bindSel = (id, fn) => {
+    const el = $(id);
+    if (el) el.onchange = () => { fn(el.value); renderSelection(); scheduleResolve(0); };
+  };
+  bindSel('f-panel', (v) => (pl.on_panel = v || null));
+  bindSel('f-panelref', (v) => (pl.panel_ref = v));
+  bind('f-panelofs', (v) => (pl.panel_offset = v));
 }
 
 function renderIssues(issues) {
@@ -368,6 +433,7 @@ function addPlacement(partId) {
     id: uniqueId(base), part: partId, label: part?.name ?? null,
     pos, rot_z: 0, flip: false, locked: false,
     parent: null, parent_mate: null, mate: null, mate_gap: 0,
+    on_panel: null, panel_ref: 'auto', panel_offset: 0,
   });
   state.selection = state.scene.placements.at(-1).id;
   scheduleResolve(0);
@@ -432,7 +498,7 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   if (!pl || pl.locked || pl.parent) return;   // mated parts follow their parent
 
   controls.enabled = false;
-  const vertical = ev.shiftKey;
+  const vertical = ev.shiftKey && !pl.on_panel;   // z is solved for panel riders
   const normal = vertical
     ? new THREE.Vector3().subVectors(camera.position, hit.point).setZ(0).normalize()
     : new THREE.Vector3(0, 0, 1);
@@ -553,6 +619,7 @@ $('btn-dxf').onclick = async () => {
 };
 $('chk-case').onchange = () => ($('chk-case').checked ? refreshCase() : caseGroup.clear());
 $('chk-corridors').onchange = () => buildCorridors(state.resolved);
+$('chk-panels').onchange = () => buildPanels(state.resolved);
 $('chk-grid').onchange = () => { grid.visible = $('chk-grid').checked; axes.visible = grid.visible; };
 $('scene-select').onchange = (ev) => loadScene(ev.target.value);
 

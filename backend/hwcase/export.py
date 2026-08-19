@@ -121,6 +121,9 @@ def scene_to_json(res: Resolved, lib: PartLibrary, issues: Iterable = ()) -> dic
     return {
         "name": res.scene.name,
         "anchor": res.scene.anchor,
+        "panels": [{"name": p.name, "z": res.panels.get(p.name),
+                    "from_ref": p.from_ref, "note": p.note}
+                   for p in res.scene.panels],
         "frames": {k: {"pos": list(f.pos), "rot_z": f.rot_z, "flip": f.flip}
                    for k, f in res.frames.items()},
         "placements": [p.model_dump(mode="json") for p in res.scene.placements],

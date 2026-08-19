@@ -16,8 +16,8 @@ from shapely.ops import unary_union
 
 from .geom import Frame, box_polygon, corridor, outline_polygon, z_overlap
 from .library import PartLibrary
-from .schema import (Box, Confidence, Connector, Face, Part, Placement, Scene,
-                     Source, Vec2, VolumeKind)
+from .schema import (Box, Confidence, Connector, Face, Panel, Part, Placement,
+                     Scene, Source, Vec2, VolumeKind)
 
 
 @dataclass
@@ -67,6 +67,7 @@ class Resolved:
     solids: list[Solid]
     connectors: list[WorldConnector]
     parents: dict[str, Optional[str]]
+    panels: dict[str, float] = field(default_factory=dict)
     issues: list[Issue] = field(default_factory=list)
 
     def bodies(self) -> list[Solid]:
@@ -156,6 +157,121 @@ def _solve_mate(placement: Placement, part: Part, parent_part: Part,
     return frame, issues
 
 
+def _subtree(placements: list[Placement], root: str) -> list[str]:
+    """`root` plus everything mated onto it, directly or transitively."""
+    out = [root]
+    grew = True
+    while grew:
+        grew = False
+        for p in placements:
+            if p.parent in out and p.id not in out:
+                out.append(p.id)
+                grew = True
+    return out
+
+
+def _volume_top(part: Part, frame: Frame, name: str) -> Optional[float]:
+    for v in part.volumes:
+        if v.name == name:
+            return frame.z_interval((v.z_min(), v.z_max()))[1]
+    return None
+
+
+def _part_top(part: Part, frame: Frame, kinds: Optional[set] = None) -> Optional[float]:
+    tops = []
+    for v in part.volumes:
+        if kinds is None or v.kind in kinds:
+            tops.append(frame.z_interval((v.z_min(), v.z_max()))[1])
+    if kinds is None:
+        tops.append(frame.z_interval((0.0, part.pcb_thickness))[1])
+    return max(tops) if tops else None
+
+
+def _resolve_panels(scene: Scene, lib: PartLibrary, frames: dict[str, Frame],
+                    by_id: dict[str, Placement]) -> tuple[dict[str, float], list[Issue]]:
+    panels: dict[str, float] = {}
+    issues: list[Issue] = []
+    for panel in scene.panels:
+        if panel.from_ref:
+            ref, _, vol = panel.from_ref.partition(".")
+            pl = by_id.get(ref)
+            if pl is None or ref not in frames:
+                issues.append(Issue("error", "panel_ref",
+                                    f"panel {panel.name}: no placement {ref!r}", [panel.name]))
+                continue
+            if pl.on_panel:
+                issues.append(Issue("error", "panel_cycle",
+                                    f"panel {panel.name} is defined by {ref}, which is itself "
+                                    f"fitted to a panel", [panel.name, ref]))
+                continue
+            top = _volume_top(lib[pl.part], frames[ref], vol) if vol else None
+            if top is None:
+                top = _part_top(lib[pl.part], frames[ref])
+                issues.append(Issue("warning", "panel_ref",
+                                    f"panel {panel.name}: {pl.part} has no volume {vol!r}, "
+                                    f"used the top of the whole part instead", [panel.name]))
+            panels[panel.name] = top
+        elif panel.z is not None:
+            panels[panel.name] = panel.z
+        else:
+            issues.append(Issue("error", "panel_ref",
+                                f"panel {panel.name} has neither z nor from_ref", [panel.name]))
+    return panels, issues
+
+
+def _fit_to_panels(scene: Scene, lib: PartLibrary, frames: dict[str, Frame],
+                   panels: dict[str, float], by_id: dict[str, Placement],
+                   ) -> list[Issue]:
+    """Slide each `on_panel` placement (and whatever is mated to it) up or down
+    so its reference feature lands on the panel. Mates are pure z stacks, so
+    translating the whole subtree keeps every one of them valid."""
+    issues: list[Issue] = []
+    for pl in scene.placements:
+        if not pl.on_panel:
+            continue
+        if pl.parent:
+            issues.append(Issue("warning", "panel_ignored",
+                                f"{pl.id} is mated to {pl.parent}, so its height comes from "
+                                f"the mate; on_panel was ignored", [pl.id]))
+            continue
+        if pl.on_panel not in panels:
+            issues.append(Issue("error", "panel_missing",
+                                f"{pl.id}: no panel called {pl.on_panel!r}", [pl.id]))
+            continue
+
+        ids = _subtree(scene.placements, pl.id)
+        ref_top: Optional[float] = None
+        if pl.panel_ref not in ("auto", "top"):
+            for pid in ids:
+                ref_top = _volume_top(lib[by_id[pid].part], frames[pid], pl.panel_ref)
+                if ref_top is not None:
+                    break
+            if ref_top is None:
+                issues.append(Issue("warning", "panel_ref",
+                                    f"{pl.id}: no volume {pl.panel_ref!r} in it or anything "
+                                    f"mated to it; used the highest point instead", [pl.id]))
+        if ref_top is None:
+            kinds = {VolumeKind.actuator, VolumeKind.display} \
+                if pl.panel_ref == "auto" else None
+            tops = [t for pid in ids
+                    if (t := _part_top(lib[by_id[pid].part], frames[pid], kinds)) is not None]
+            if not tops and kinds is not None:
+                tops = [t for pid in ids
+                        if (t := _part_top(lib[by_id[pid].part], frames[pid], None)) is not None]
+            if not tops:
+                issues.append(Issue("error", "panel_ref",
+                                    f"{pl.id}: nothing to reference against", [pl.id]))
+                continue
+            ref_top = max(tops)
+
+        dz = panels[pl.on_panel] + pl.panel_offset - ref_top
+        for pid in ids:
+            f = frames[pid]
+            frames[pid] = Frame(pos=(f.pos[0], f.pos[1], f.pos[2] + dz),
+                                rot_z=f.rot_z, flip=f.flip)
+    return issues
+
+
 def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
     frames: dict[str, Frame] = {}
     parents: dict[str, Optional[str]] = {}
@@ -183,6 +299,12 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
         frames = {k: Frame(pos=(f.pos[0] - a[0], f.pos[1] - a[1], f.pos[2] - a[2]),
                            rot_z=f.rot_z, flip=f.flip)
                   for k, f in frames.items()}
+
+    # panels are world planes, so they are solved after the anchor shift, and
+    # the placements that ride on them are slid into place after that
+    panels, panel_issues = _resolve_panels(scene, lib, frames, by_id)
+    issues += panel_issues
+    issues += _fit_to_panels(scene, lib, frames, panels, by_id)
 
     for pl in ordered:
         part = lib[pl.part]
@@ -218,7 +340,8 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
                 frame.polygon(poly), frame.z_interval(zi)))
 
     return Resolved(scene=scene, frames=frames, solids=solids,
-                    connectors=connectors, parents=parents, issues=issues)
+                    connectors=connectors, parents=parents, panels=panels,
+                    issues=issues)
 
 
 # --------------------------------------------------------------------------
@@ -303,7 +426,26 @@ def check(res: Resolved, lib: PartLibrary) -> list[Issue]:
                     f"{s.ref} ({s.kind.value}) is covered by {o.ref}",
                     [s.ref, o.ref]))
 
-    # 5. how much of this design rests on numbers we have not verified
+    # 5. controls that ended up below the surface you press them through
+    if res.panels:
+        on_panel = {pl.id: pl.on_panel for pl in res.scene.placements if pl.on_panel}
+        subtrees = {root: set(_subtree(res.scene.placements, root)) for root in on_panel}
+        for s in res.solids:
+            if s.kind is not VolumeKind.actuator:
+                continue
+            for root, panel_name in on_panel.items():
+                if s.placement not in subtrees[root] or panel_name not in res.panels:
+                    continue
+                z = res.panels[panel_name]
+                if s.z[1] < z - 0.5:
+                    issues.append(Issue(
+                        "warning", "recessed",
+                        f"{s.ref} tops out {z - s.z[1]:.1f} mm below panel "
+                        f"'{panel_name}' -- you could not press it",
+                        [s.ref]))
+                break
+
+    # 6. how much of this design rests on numbers we have not verified
     unverified: dict[str, list[str]] = {}
     for pl in res.scene.placements:
         part = lib[pl.part]

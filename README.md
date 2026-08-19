@@ -36,6 +36,7 @@ backend/
     api.py        FastAPI: /api/parts, /api/resolve, /api/build, /api/export/*
   parts/          the part library -- data, not code
   scenes/         layouts
+  tests/          pytest suite over the engine
 docs/
   research.md     what already exists and what we build ourselves
   measurements.md what is exact, what is guessed, what to measure next
@@ -101,6 +102,37 @@ python tools/measure_cad.py --band 0.8 "vendor/cad/adafruit/5752/*.stl"
 That is how we found out the 5752 quad encoder is a 76.2 × 21.6 mm strip and
 not the 25.6 mm square every shop page claims. See [docs/measurements.md](docs/measurements.md).
 
+## Panels: the surface you touch
+
+Nothing in this machine wants a hand-computed z. A **panel** is the plane your
+eyes and fingers meet, and it is *derived*, not typed:
+
+```yaml
+panels:
+  - name: main
+    from_ref: screen.active_area     # the screen fixes the height of the face
+```
+
+Then every other part just says which of its own features has to sit flush:
+
+```yaml
+  - id: encoders
+    part: adafruit-5752-quad-encoder
+    on_panel: main
+    panel_ref: bushings      # the threaded collar clamps the panel;
+                             # the shaft is meant to stand proud for the knob
+```
+
+`panel_ref` names any volume in the part **or in anything mated on top of it**,
+so `trellis_a` can reference `buttons`, which belongs to the elastomer pad
+sitting on it. `auto` picks the highest actuator/display, `top` the highest
+point of the whole stack, and `panel_offset` sets it proud or recessed.
+
+The payoff: change `mate_gap` under the screen and the panel moves, and every
+keypad, knob and window moves with it. There is a test for exactly that. The
+checker also warns when an actuator ends up *below* its panel, because you could
+not press it.
+
 ## Coordinate conventions
 
 Part-local: X and Y in the board plane, +Z out of the component side, **z = 0 at
@@ -115,8 +147,9 @@ match the drawing you read them off.
 Square *mated* to its 40-way header (so the screen follows the Pi, not the other
 way round), 2 × NeoTrellis + elastomer pads as a 4 × 8 button grid, the quad
 encoder strip, the 1.5" OLED, the Grove I²C hub buried inside, and the AMYboard
-sitting in as its own Eurorack patchbay panel. 336 × 130 × 32 mm, 13 layers of
-3 mm ply.
+sitting in as its own Eurorack patchbay panel. 336 × 130 × 40 mm, 15 layers of
+3 mm ply — the panel plane lands at z = 25.4, derived from the screen glass, and
+the encoder shafts stand 7.8 mm proud of it for the knobs.
 
 The Pi is rotated 180° in that scene, and that is not cosmetic: with the USB
 stack facing the button block, the checker reported that four USB plugs needed
@@ -130,21 +163,20 @@ collision / connector-access / exposure / cable-clearance checks, slab
 generation with kerf compensation, SVG + DXF export, vendor CAD ingest.
 
 Also done: FastAPI over the same engine, a vendored three.js editor
-(select / drag / nudge / rotate / add / delete / save / export), and a
-one-click `start.bat`.
+(select / drag / nudge / rotate / add / delete / save / export), a one-click
+`start.bat`, derived panel planes, and a 27-case test suite (`pytest` from
+`backend/`).
 
 Next:
-1. **Snapping** — the editor moves parts freely today. Wants: snap to mates
-   (drop the pad on the Trellis and have it click on), snap to part edges and
-   to a grid, and alignment guides.
-2. **Panel plane awareness** — everything the user touches should land on one
-   surface; the editor should offer "put this on the panel" instead of making
-   you work out z by hand.
-3. **Real nesting** — layers currently tile naively and overflow one sheet;
+1. **Snapping** — the editor moves parts freely in XY. Wants: snap to mates
+   (drop the pad on a Trellis and have it click on as a child), snap to part
+   edges and to a grid, and alignment guides. The 60 mm Trellis tiling is the
+   case that needs it most.
+2. **Real nesting** — layers currently tile naively and overflow one sheet;
    needs bin packing and multi-sheet output.
-4. **Joinery** — finger joints between slabs, or the simpler standoff-and-rod
+3. **Joinery** — finger joints between slabs, or the simpler standoff-and-rod
    stack. Kerf is modelled, joints are not.
-5. **Solid export** — optional build123d backend to emit STEP for milling, from
+4. **Solid export** — optional build123d backend to emit STEP for milling, from
    the same slab stack.
-6. **Cable routing** — currently a keepout distance; wants actual routes with
+5. **Cable routing** — currently a keepout distance; wants actual routes with
    fixed STEMMA QT cable lengths (50/100/200 mm) as a constraint.

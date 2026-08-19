@@ -7,11 +7,19 @@
 # plain socket, 17.0 mm with the bundled booster header, which is what you need
 # to clear the 16 mm tall USB/Ethernet block).
 #
-# Panel plane: the screen glass ends up at z = 1.4 + 17.0 + 7.0 = 25.4 mm.
-# Every other user-facing surface is placed to land on that same plane.
+# Panel plane: the screen fixes it. Everything else says `on_panel: main` and
+# names the feature that has to sit flush, so nobody computes a z by hand -- and
+# if the header stack under the screen changes, the whole front follows.
 
 name: soundmachine-v0
 anchor: pi
+
+panels:
+  - name: main
+    from_ref: screen.active_area
+    note: >-
+      The face of the machine is wherever the screen glass ends up, which is
+      the Pi board + mate_gap + the display stack. Derived, never typed in.
 
 case:
   style: layered
@@ -46,7 +54,9 @@ placements:
   # --- 4x8 of buttons, two NeoTrellis tiles side by side on the 60 mm grid ---
   - id: trellis_a
     part: adafruit-3954-neotrellis
-    pos: [20.0, -44.5, 6.4]
+    pos: [20.0, -44.5, 0.0]
+    on_panel: main
+    panel_ref: buttons        # the pad's button tops, not the PCB's
   - id: pad_a
     part: adafruit-1611-keypad
     parent: trellis_a
@@ -54,7 +64,9 @@ placements:
     mate: pcb
   - id: trellis_b
     part: adafruit-3954-neotrellis
-    pos: [80.0, -44.5, 6.4]
+    pos: [80.0, -44.5, 0.0]
+    on_panel: main
+    panel_ref: buttons
   - id: pad_b
     part: adafruit-1611-keypad
     parent: trellis_b
@@ -65,11 +77,16 @@ placements:
   - id: encoders
     part: adafruit-5752-quad-encoder
     pos: [20.0, 22.0, 0.0]
+    on_panel: main
+    panel_ref: bushings       # the threaded collar is what a panel clamps on;
+                              # the shaft is meant to stand proud for the knob
 
   # --- the little OLED next to them ---
   - id: oled
     part: adafruit-4741-oled-1v5
-    pos: [105.0, 23.0, 20.0]
+    pos: [105.0, 23.0, 0.0]
+    on_panel: main
+    panel_ref: active_area
 
   # --- I2C hub, buried inside where nobody has to see it ---
   - id: mux
@@ -79,4 +96,6 @@ placements:
   # --- AMYboard, used as its own patchbay panel ---
   - id: amy
     part: shorepine-amyboard
-    pos: [200.0, -60.0, 23.4]
+    pos: [200.0, -60.0, 0.0]
+    on_panel: main
+    panel_ref: panel_face

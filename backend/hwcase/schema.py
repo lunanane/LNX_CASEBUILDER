@@ -253,6 +253,22 @@ class Part(Strict):
 # scene
 # --------------------------------------------------------------------------
 
+class Panel(Strict):
+    """A user-facing surface: the plane your fingers and eyes meet.
+
+    Everything a person touches wants to land on one of these. A panel is
+    either a fixed world z, or -- better -- derived from a feature of the part
+    that already fixes the height, with `from_ref: "<placement>.<volume>"`.
+    Deriving it means the whole layout follows when that part moves: change the
+    header stack under the screen and every keypad, knob and window follows.
+    """
+
+    name: str = "main"
+    z: Optional[float] = None
+    from_ref: Optional[str] = None       # "screen.active_area"
+    note: Optional[str] = None
+
+
 class Placement(Strict):
     """One instance of a part in the scene.
 
@@ -275,6 +291,15 @@ class Placement(Strict):
     parent_mate: Optional[str] = None
     mate: Optional[str] = None
     mate_gap: float = 0.0
+
+    #: sit flush with this panel -- z is solved for, `pos[2]` is then ignored
+    on_panel: Optional[str] = None
+    #: which feature lands on the panel: a volume name (searched in this part
+    #: and in anything mated on top of it), "top" for the highest point of the
+    #: whole subtree, or "auto" = the highest actuator/display, else "top".
+    panel_ref: str = "auto"
+    #: + stands proud of the panel, - sits recessed
+    panel_offset: float = 0.0
 
 
 class Material(Strict):
@@ -303,5 +328,6 @@ class CaseSpec(Strict):
 class Scene(Strict):
     name: str = "untitled"
     anchor: Optional[str] = None       # placement id that defines the origin
+    panels: list[Panel] = Field(default_factory=list)
     placements: list[Placement] = Field(default_factory=list)
     case: CaseSpec = Field(default_factory=CaseSpec)
