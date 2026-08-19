@@ -52,11 +52,27 @@ soldered on. Shaft length sets the panel gap and the knob height.
 ### 4. AMYboard, everything except the panel  `estimated`
 
 The 10 HP panel (50.5 × 128.5 mm, rail holes 123.5 mm apart) is a standard, so
-it is safe. Everything else — PCB depth behind the panel, jack pitch down the
-panel, which edge the USB-C / Grove / microSD sit on — is invented.
+it is safe. Everything else is scaled off the vendor's annotated photos
+(`vendor/img/amyboard_*_annotated.jpg`) using the USB-C shell (8.94 mm) as the
+ruler, which puts the PCB at roughly **50.5 × 105 mm** and the jack pitch at
+about **12 mm**.
 
-**Measure:** panel-to-back depth, the ten jack centres, and the side/edge of
-each of the other connectors.
+The *layout* is now right, which matters more than the millimetres:
+
+- ten 3.5 mm jacks in **two columns of five**, hard against one edge, with the
+  silkscreen labels filling the other half of the panel
+- rows top to bottom: **SPDIF, LINE, MIDI, CV1, CV2**; left column **IN**,
+  right column **OUT**
+- the jack field only reaches ~68 mm up the panel. The top **~60 mm is empty** —
+  the vendor calls it "front panel free space for display", and it is big enough
+  for our own OLED behind the same panel
+- the **I²C Grove port for accessories is on the FRONT face**, bottom-left,
+  reached through the panel — not on a side, which is where we had it
+- USB-C and microSD are both on the same side edge, above the jacks
+- Eurorack power, the Tulip host I²C port and the debug header are on the back
+
+**Measure:** panel-to-PCB-back depth, the jack grid origin and pitch, and how
+far the jack columns sit from the panel edge.
 
 ### 5. Grove TCA9548A hub  `estimated`
 
@@ -104,7 +120,7 @@ estimated at 1.5–3 mm.
 | HyperPixel 84 × 84 × 9.5, 72 × 72 active | vendor |
 | Eurorack 10 HP = 50.5 mm, 3U = 128.5 mm, rails 123.5 mm | Doepfer A-100 |
 
-## Two shop-page numbers that are wrong
+## Three vendor sources that were wrong or misleading
 
 Worth recording, because both would have cost a cut sheet:
 
@@ -114,7 +130,14 @@ Worth recording, because both would have cost a cut sheet:
 - **Adafruit 4741** has no dimensions on the product page at all. It is
   35.56 × 46.99 mm, and it is not square.
 
-Both were caught by reading `adafruit/Adafruit_CAD_Parts` instead of shop pages.
+- **AMYboard's own README** lists the ten jacks as a single "top to bottom"
+  table, which reads like one column. The annotated photo shows two columns of
+  five. We had modelled them from the table and had the in/out order swapped as
+  well.
+
+The first two were caught by reading `adafruit/Adafruit_CAD_Parts` instead of
+shop pages; the third by looking at the vendor's own photograph instead of its
+prose.
 
 ## How to record a measurement
 

@@ -5,91 +5,143 @@ parts:
     url: https://www.amyboard.com/
     category: synth
     tags: [esp32s3, eurorack, midi, cv, spdif, patchbay, i2c]
+    cad: ../img/amyboard_front_panel_annotated.jpg
     notes: >-
-      Modelled as a Eurorack 10 HP / 3U module, because that is how we are using
-      it: the panel *is* the outward face and all ten 3.5 mm jacks plus MIDI and
-      CV live on it, so it wants to sit flush in a wall of the case with its
-      panel exposed.
-      Panel numbers are standards, not measurements: width = 10*5.08 - 0.3 =
-      50.5 mm, height 128.5 mm, rail hole spacing 123.5 mm.
-      The PCB depth behind the panel, the jack pitch, and the positions of the
-      USB-C / Grove / microSD / Eurorack power connectors are estimates.
-      MEASURE ME.
+      Modelled panel-first, because that is how we use it: the panel IS the
+      outward face and every jack lives on it, so it wants to sit flush in a
+      surface of the case.
+      LOCAL FRAME: origin at the panel's bottom-left, +Z out towards the user,
+      z = 0 at the panel's BACK face -- so the acrylic is 0..2 and everything
+      else is negative. This part is the odd one out: its outline is the panel,
+      not a PCB.
+      Panel size is a standard (10 HP = 10*5.08-0.3 = 50.5 mm, 3U = 128.5 mm,
+      rail holes 123.5 mm apart). Everything else is scaled off the vendor's
+      annotated photos in vendor/img/, using the USB-C shell (8.94 mm) as the
+      ruler: PCB about 50.5 x 105 mm, jack pitch about 12 mm.
+      LAYOUT (from the photos, all of it estimated):
+      ten 3.5 mm jacks in TWO COLUMNS OF FIVE hard against the +X edge, with
+      the silkscreen labels filling the left half of the panel. Rows top to
+      bottom are SPDIF, LINE, MIDI, CV1, CV2; the left column is IN and the
+      right column is OUT. The jack field only reaches about 68 mm up the
+      panel -- the top ~60 mm is empty, which the vendor calls "front panel
+      free space for display". Worth remembering: there is room there for our
+      own OLED behind the same panel.
+      USB-C and the microSD slot are both on the +X edge, above the jacks.
+      The I2C Grove port for accessories is on the FRONT face at bottom-left
+      (reached through the panel), NOT on a side. Eurorack power, the Tulip
+      host I2C port and the debug header are all on the BACK.
     src:
       confidence: estimated
-      url: https://github.com/shorepine/tulipcc/tree/main/docs/amyboard
+      url: https://github.com/shorepine/tulipcc/blob/main/docs/amyboard/README.md
 
     outline:
       type: rect
       size: [50.5, 128.5]
       corner_radius: 1.0
       origin: min
-    pcb_thickness: 2.0
+    pcb_thickness: 2.0            # the acrylic panel, not a PCB
 
     holes:
-      - {name: rail_bl, at: [3.5, 2.5], diameter: 3.2, screw: M3, src: {confidence: datasheet, note: "Doepfer A-100"}}
-      - {name: rail_tl, at: [3.5, 126.0], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
-      - {name: rail_br, at: [47.0, 2.5], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
-      - {name: rail_tr, at: [47.0, 126.0], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
+      - {name: rail_bl, at: [3.5, 3.0], diameter: 3.2, screw: M3, src: {confidence: datasheet, note: "Doepfer A-100, 123.5 mm apart"}}
+      - {name: rail_tl, at: [3.5, 126.5], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
+      - {name: rail_br, at: [47.0, 3.0], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
+      - {name: rail_tr, at: [47.0, 126.5], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
 
     volumes:
-      - name: pcb_stack
-        kind: body
-        at: [25.25, 64.25]
-        size: [46.0, 110.0]
-        z: [-30.0, 0.0]
-        src: {confidence: estimated, note: "everything behind the panel"}
       - name: panel_face
         kind: display
         at: [25.25, 64.25]
         size: [50.5, 128.5]
         z: [0.0, 2.0]
         src: {confidence: datasheet, note: "the whole panel must stay reachable"}
+      - name: jack_bodies
+        kind: body
+        at: [39.0, 43.75]
+        size: [23.0, 71.5]
+        z: [-11.0, 0.0]
+        src: {confidence: estimated, note: "2x5 jack block behind the panel"}
+      - name: pcb
+        kind: body
+        at: [25.25, 64.25]
+        size: [50.5, 105.0]
+        z: [-12.6, -11.0]
+        src: {confidence: estimated, note: "PCB sits one jack-body behind the panel"}
+      - name: back_components
+        kind: body
+        at: [25.25, 64.25]
+        size: [50.5, 105.0]
+        z: [-24.0, -12.6]
+        src: {confidence: estimated, note: "power header and Tulip port are the tall ones"}
 
     connectors:
-      # Ten 3.5 mm jacks down the panel, pitch estimated at 12 mm.
-      - {name: spdif_out, type: jack_3v5, face: +z, at: [12.0, 118.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: spdif_in,  type: jack_3v5, face: +z, at: [38.0, 118.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: line_out,  type: jack_3v5, face: +z, at: [12.0, 100.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: line_in,   type: jack_3v5, face: +z, at: [38.0, 100.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: midi_out,  type: jack_3v5, face: +z, at: [12.0, 82.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: midi_in,   type: jack_3v5, face: +z, at: [38.0, 82.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: cv1_out,   type: jack_3v5, face: +z, at: [12.0, 64.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: cv1_in,    type: jack_3v5, face: +z, at: [38.0, 64.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: cv2_out,   type: jack_3v5, face: +z, at: [12.0, 46.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: cv2_in,    type: jack_3v5, face: +z, at: [38.0, 46.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      # Two columns of five, +X edge. Left column IN at x=33, right column OUT
+      # at x=45; rows 12 mm apart, SPDIF at the top.
+      - {name: spdif_in,  type: jack_3v5, face: +z, at: [33.0, 67.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
+      - {name: spdif_out, type: jack_3v5, face: +z, at: [45.0, 67.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
+      - {name: line_in,   type: jack_3v5, face: +z, at: [33.0, 55.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
+      - {name: line_out,  type: jack_3v5, face: +z, at: [45.0, 55.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
+      - {name: midi_in,   type: jack_3v5, face: +z, at: [33.0, 43.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
+      - {name: midi_out,  type: jack_3v5, face: +z, at: [45.0, 43.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
+      - {name: cv1_in,    type: jack_3v5, face: +z, at: [33.0, 31.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
+      - {name: cv1_out,   type: jack_3v5, face: +z, at: [45.0, 31.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
+      - {name: cv2_in,    type: jack_3v5, face: +z, at: [33.0, 19.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
+      - {name: cv2_out,   type: jack_3v5, face: +z, at: [45.0, 19.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
+
+      # front face, reached through the panel -- horizontal JST, cable leaves sideways
+      - name: i2c_accessories
+        type: grove
+        face: +z
+        at: [9.5, 21.4, 2.0]
+        plug_depth: 10.0
+        bend_radius: 14.0
+        cutout: [14.0, 8.0]
+        external: true
+        src: {confidence: estimated, note: "vendor calls this the front-panel I2C port"}
+
+      # +X edge, above the jack field
       - name: usb_c
         type: usb_c
-        face: -y
-        at: [25.25, 0.0, -8.0]
+        face: +x
+        at: [50.5, 79.9, -11.8]
         plug_depth: 18.0
         bend_radius: 20.0
         cutout: [12.0, 8.0]
         external: true
-        src: {confidence: estimated, note: "edge and offset both unverified"}
-      - name: grove_i2c
-        type: grove
+        src: {confidence: estimated}
+      - name: microsd
+        type: microsd
         face: +x
-        at: [50.5, 30.0, -6.0]
+        at: [50.5, 111.8, -11.8]
+        plug_depth: 16.0
+        bend_radius: 0.0
+        cutout: [16.0, 4.0]
+        external: true
+        src: {confidence: estimated}
+
+      # back face
+      - name: i2c_tulip_host
+        type: grove
+        face: -z
+        at: [45.9, 94.2, -24.0]
         plug_depth: 12.0
         bend_radius: 15.0
         external: false
         src: {confidence: estimated}
-      - name: microsd
-        type: microsd
-        face: -x
-        at: [0.0, 40.0, -6.0]
-        plug_depth: 14.0
-        external: true
+      - name: debug_serial
+        type: header_1x6
+        face: -z
+        at: [6.6, 93.9, -24.0]
+        plug_depth: 10.0
+        external: false
         src: {confidence: estimated}
 
     mates:
       - name: eurorack_power
         standard: eurorack_power_10
         role: socket
-        at: [25.25, 20.0, -28.0]
+        at: [6.0, 79.7, -24.0]
         face: -z
-        src: {confidence: estimated}
+        src: {confidence: estimated, note: "10-pin shrouded IDC on the back"}
 
   - id: seeed-grove-tca9548a
     name: Grove - 8 Channel I2C Multiplexer / I2C Hub (TCA9548A)
