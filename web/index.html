@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hwcase editor</title>
+<link rel="stylesheet" href="./style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js",
+    "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js"
+  }
+}
+</script>
+</head>
+<body>
+
+<header>
+  <strong>hwcase</strong>
+  <select id="scene-select" title="scene"></select>
+  <button id="btn-reload" title="reload from disk">reload</button>
+  <button id="btn-save" title="write the scene back to backend/scenes/">save</button>
+  <span class="sep"></span>
+  <button id="btn-svg">export SVG</button>
+  <button id="btn-dxf">export DXF</button>
+  <span class="sep"></span>
+  <label><input type="checkbox" id="chk-case"> case layers</label>
+  <label><input type="checkbox" id="chk-corridors"> plug corridors</label>
+  <label><input type="checkbox" id="chk-grid" checked> grid</label>
+  <span class="spacer"></span>
+  <span id="status">…</span>
+</header>
+
+<main>
+  <aside id="palette">
+    <h2>parts</h2>
+    <div id="part-list"></div>
+  </aside>
+
+  <div id="viewport"></div>
+
+  <aside id="inspector">
+    <h2>placements</h2>
+    <div id="placement-list"></div>
+    <h2>selection</h2>
+    <div id="selection"></div>
+    <h2 id="issues-heading">issues</h2>
+    <div id="issue-list"></div>
+  </aside>
+</main>
+
+<footer>
+  <span id="hint">drag a part in the viewport to move it in XY &middot; shift+drag for Z &middot; arrows nudge 1&nbsp;mm, +shift 0.1&nbsp;mm &middot; R rotates 90&deg; &middot; Del removes</span>
+  <span class="spacer"></span>
+  <span id="extent"></span>
+</footer>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

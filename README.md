@@ -33,18 +33,49 @@ backend/
     case.py       scene -> stack of slabs
     export.py     SVG / DXF for the cutter, JSON for the browser
     cli.py        hwcase parts | check | build
+    api.py        FastAPI: /api/parts, /api/resolve, /api/build, /api/export/*
   parts/          the part library -- data, not code
   scenes/         layouts
 docs/
   research.md     what already exists and what we build ourselves
   measurements.md what is exact, what is guessed, what to measure next
+web/            the editor: three.js (vendored, no build step, no CDN)
 tools/
   fetch_cad.py    mirror vendor STEP/STL into vendor/cad/
   measure_cad.py  read exact dimensions + z profiles out of those meshes
 vendor/           downloaded datasheets and CAD (not authored here)
 ```
 
-## Use it
+## Run the editor
+
+```
+start.bat
+```
+
+That is the whole thing. It builds a `.venv` beside itself on first run
+(~2 minutes while shapely/trimesh/numpy download), installs the requirements,
+checks the engine imports, finds a free port from 8765 up, starts the server and
+opens the browser. Later runs skip straight to the server in a few seconds —
+dependencies are only reinstalled when `backend/requirements.txt` actually
+changes. `start.bat 9000` picks the port; `start.bat 9000 bare` skips auto-reload
+and the browser. Ctrl+C stops it.
+
+### In the editor
+
+Left: the part library, click to drop one into the scene. Middle: the 3D view —
+drag a part to move it in XY, shift+drag for Z, arrows nudge (shift = 0.1 mm),
+`R` rotates 90°, `Del` removes. Right: placements, the selected part's numbers,
+and the live issue list — click an issue to select the part it blames. Mated
+parts (the screen on the Pi) can't be dragged; they follow their parent, and you
+change `gap` instead. Toggles for the generated case layers and the plug
+corridors are in the header.
+
+Every move re-posts the scene to the backend, so the issue list is always the
+engine's opinion, never the browser's guess. `save` writes back to
+`backend/scenes/<name>.yaml` and keeps the previous file as `.yaml.bak` — a
+round trip through the editor cannot preserve YAML comments.
+
+## Or from the command line
 
 ```bash
 cd backend
@@ -98,12 +129,17 @@ Done: part schema with provenance, YAML library, mate solver for board stacking,
 collision / connector-access / exposure / cable-clearance checks, slab
 generation with kerf compensation, SVG + DXF export, vendor CAD ingest.
 
+Also done: FastAPI over the same engine, a vendored three.js editor
+(select / drag / nudge / rotate / add / delete / save / export), and a
+one-click `start.bat`.
+
 Next:
-1. **HTTP API** (FastAPI) over the same engine — `/parts`, `/scene/check`,
-   `/scene/build`, `/export/{svg,dxf}`.
-2. **Browser editor** — three.js scene fed by `*-scene.json`, drag in XY with
-   live snapping to mates and to part edges, issues highlighted on the offending
-   solids, re-check on drop.
+1. **Snapping** — the editor moves parts freely today. Wants: snap to mates
+   (drop the pad on the Trellis and have it click on), snap to part edges and
+   to a grid, and alignment guides.
+2. **Panel plane awareness** — everything the user touches should land on one
+   surface; the editor should offer "put this on the panel" instead of making
+   you work out z by hand.
 3. **Real nesting** — layers currently tile naively and overflow one sheet;
    needs bin packing and multi-sheet output.
 4. **Joinery** — finger joints between slabs, or the simpler standoff-and-rod

@@ -126,9 +126,12 @@ def scene_to_json(res: Resolved, lib: PartLibrary, issues: Iterable = ()) -> dic
         "placements": [p.model_dump(mode="json") for p in res.scene.placements],
         "solids": out_solids,
         "connectors": [{
-            "ref": c.ref, "placement": c.placement, "type": c.conn.type,
+            "ref": c.ref, "placement": c.placement, "part": c.part,
+            "name": c.conn.name, "type": c.conn.type,
             "at": list(c.at), "normal": list(c.face_normal),
             "external": c.conn.external,
+            # how far a plug + its cable bend must stay clear, along `normal`
+            "reach": c.conn.plug_depth + (c.conn.bend_radius if c.conn.external else 0.0),
         } for c in res.connectors],
         "issues": [{"level": i.level, "code": i.code, "message": i.message,
                     "refs": i.refs} for i in issues],
