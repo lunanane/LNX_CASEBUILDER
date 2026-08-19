@@ -1,0 +1,82 @@
+# First pass at the machine: Pi + square touchscreen as the fixed centre,
+# everything else hung around it.
+#
+# The Pi is the anchor, so world (0,0,0) is the bottom-left corner of the Pi
+# PCB, bottom face. The HyperPixel is *mated* rather than positioned: it snaps
+# onto the 40-way header, and mate_gap models the header stack (8.5 mm for the
+# plain socket, 17.0 mm with the bundled booster header, which is what you need
+# to clear the 16 mm tall USB/Ethernet block).
+#
+# Panel plane: the screen glass ends up at z = 1.4 + 17.0 + 7.0 = 25.4 mm.
+# Every other user-facing surface is placed to land on that same plane.
+
+name: soundmachine-v0
+anchor: pi
+
+case:
+  style: layered
+  materials:
+    - {name: plywood-3mm, thickness: 3.0, kerf: 0.15, sheet: [600.0, 400.0], color: "#c8a165"}
+  wall: 8.0
+  floor_gap: 4.0
+  ceiling_gap: 1.0
+  part_clearance: 0.6
+  cable_clearance: 5.0
+  corner_radius: 8.0
+
+placements:
+  - id: pi
+    part: rpi-3b
+    label: Raspberry Pi 3B
+    pos: [0.0, 0.0, 0.0]
+    # Turned 180 deg so the USB/Ethernet stack faces the LEFT wall. Facing it
+    # right put 45 mm of plug run straight through the button block -- the
+    # checker caught it, and rotating the anchor is the cheap fix.
+    rot_z: 180.0
+    locked: true
+
+  - id: screen
+    part: hyperpixel4-square-touch
+    label: HyperPixel 4.0 Square
+    parent: pi
+    parent_mate: gpio40
+    mate: gpio40
+    mate_gap: 17.0
+
+  # --- 4x8 of buttons, two NeoTrellis tiles side by side on the 60 mm grid ---
+  - id: trellis_a
+    part: adafruit-3954-neotrellis
+    pos: [20.0, -44.5, 6.4]
+  - id: pad_a
+    part: adafruit-1611-keypad
+    parent: trellis_a
+    parent_mate: keypad
+    mate: pcb
+  - id: trellis_b
+    part: adafruit-3954-neotrellis
+    pos: [80.0, -44.5, 6.4]
+  - id: pad_b
+    part: adafruit-1611-keypad
+    parent: trellis_b
+    parent_mate: keypad
+    mate: pcb
+
+  # --- four push encoders above the keypads ---
+  - id: encoders
+    part: adafruit-5752-quad-encoder
+    pos: [20.0, 22.0, 0.0]
+
+  # --- the little OLED next to them ---
+  - id: oled
+    part: adafruit-4741-oled-1v5
+    pos: [105.0, 23.0, 20.0]
+
+  # --- I2C hub, buried inside where nobody has to see it ---
+  - id: mux
+    part: seeed-grove-tca9548a
+    pos: [150.0, 30.0, 0.0]
+
+  # --- AMYboard, used as its own patchbay panel ---
+  - id: amy
+    part: shorepine-amyboard
+    pos: [200.0, -60.0, 23.4]

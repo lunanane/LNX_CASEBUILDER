@@ -1,0 +1,143 @@
+parts:
+  - id: hyperpixel4-square-touch
+    name: Pimoroni HyperPixel 4.0 Square Touch
+    vendor: Pimoroni
+    sku: PIM470
+    url: https://shop.pimoroni.com/products/hyperpixel-4-square
+    category: display
+    tags: [dpi, touch, hat, gpio40]
+    notes: >-
+      MEASURE ME FIRST. The overall 84 x 84 x 9.5 mm envelope and the 72 x 72 mm
+      active area are vendor-published, but the XY position of the 40-way socket
+      on the board is our estimate (assumed centred in X, 4.0 mm in from the
+      header edge). That single number decides how far this board overhangs the
+      Pi, i.e. how much room the HDMI and power plugs get. Verify it before
+      cutting anything.
+      Depth note: 9.5 mm "includes header and display", so the bare board plus
+      glass is ~7 mm and the socket hangs below.
+      The bundled 40-pin extension header raises the board so it clears the Pi's
+      16 mm tall USB/Ethernet stack -- model that with placement.mate_gap
+      (8.5 mm plain socket, ~17.0 mm with the booster).
+    src:
+      confidence: vendor
+      url: https://shop.pimoroni.com/products/hyperpixel-4-square
+
+    outline:
+      type: rect
+      size: [84.0, 84.0]
+      corner_radius: 3.0
+      origin: min
+    pcb_thickness: 1.6
+
+    volumes:
+      - name: lcd_module
+        kind: body
+        at: [42.0, 42.0]
+        size: [84.0, 84.0]
+        z: [1.6, 7.0]
+        src: {confidence: vendor, note: "glass + backlight stack on top of the PCB"}
+      - name: active_area
+        kind: display
+        at: [42.0, 42.0]
+        size: [72.0, 72.0]
+        z: [6.0, 7.0]
+        src:
+          confidence: vendor
+          note: >-
+            72x72 active. Vendor quotes bezels 5.5 L/R, 4.5 top, 6.5 bottom,
+            which does not close on 84 mm -- treated as centred here.
+      - name: gpio_socket
+        kind: body
+        at: [42.0, 80.0]
+        size: [52.0, 6.0]
+        z: [-8.5, 1.6]
+        src: {confidence: estimated, note: "female 2x20; XY position is the key unknown"}
+      - name: touch_flex
+        kind: keepout
+        at: [42.0, 6.0]
+        size: [30.0, 10.0]
+        z: [-3.0, 1.6]
+        src: {confidence: estimated, note: "display flex loops under the board"}
+
+    mates:
+      - name: gpio40
+        standard: rpi_gpio_40
+        role: plug
+        at: [42.0, 80.0, 0.0]
+        face: -z
+        rotations: [0.0]
+        src: {confidence: estimated}
+
+  - id: adafruit-4741-oled-1v5
+    name: Adafruit Grayscale 1.5" 128x128 OLED (SSD1327)
+    vendor: Adafruit
+    sku: "4741"
+    url: https://www.adafruit.com/product/4741
+    category: display
+    tags: [oled, i2c, stemma_qt, spi]
+    cad: adafruit/4741/4741 1.5-inch OLED.stl
+    notes: >-
+      Envelope 35.56 x 46.99 x 5.63 mm, measured off the vendor mesh with
+      tools/measure_cad.py -- note that the shop pages and several distributors
+      quote nothing at all for this one, and it is NOT square: 1.4" x 1.85".
+      The z profile shows the board flat to +2.9 mm and a 34.65 x 19.86 mm
+      feature above that; the exact position of the 128x128 active window
+      inside the glass still needs calipers before you cut a bezel.
+    src:
+      confidence: datasheet
+      url: https://github.com/adafruit/Adafruit_CAD_Parts
+
+    outline:
+      type: rect
+      size: [35.56, 46.99]
+      corner_radius: 2.0
+      origin: min
+    pcb_thickness: 1.6
+
+    volumes:
+      - name: glass
+        kind: body
+        at: [17.78, 23.5]
+        size: [35.56, 46.99]
+        z: [1.6, 4.0]
+        src: {confidence: datasheet, note: "from 4741 1.5-inch OLED.stl"}
+      - name: top_features
+        kind: body
+        at: [17.78, 23.5]
+        size: [34.65, 19.86]
+        z: [4.0, 5.63]
+        src: {confidence: datasheet, note: "tallest band of the vendor mesh"}
+      - name: active_area
+        kind: display
+        at: [17.78, 23.5]
+        size: [26.9, 26.9]
+        z: [5.2, 5.63]
+        src:
+          confidence: estimated
+          note: >-
+            1.5in diagonal square -> ~26.9 mm a side, assumed centred.
+            MEASURE the offset before cutting a window.
+      - name: underside
+        kind: body
+        at: [17.78, 23.5]
+        size: [35.56, 46.99]
+        z: [-1.1, 0.0]
+        src: {confidence: datasheet, note: "vendor mesh reaches -1.1 below the board plane"}
+
+    connectors:
+      - name: qt_left
+        type: stemma_qt
+        face: -x
+        at: [0.0, 40.0, 1.6]
+        plug_depth: 6.0
+        bend_radius: 10.0
+        external: false
+        src: {confidence: estimated, note: "edge is right, position along it is not"}
+      - name: qt_right
+        type: stemma_qt
+        face: +x
+        at: [35.56, 40.0, 1.6]
+        plug_depth: 6.0
+        bend_radius: 10.0
+        external: false
+        src: {confidence: estimated, note: "edge is right, position along it is not"}

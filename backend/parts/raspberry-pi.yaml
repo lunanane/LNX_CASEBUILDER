@@ -1,0 +1,152 @@
+# Raspberry Pi boards.
+#
+# Local origin = bottom-left corner of the PCB, looking at the component side.
+# +X along the 85 mm edge, +Y along the 56 mm edge, +Z out of the component side.
+# z = 0 is the PCB bottom face, so the PCB top is at z = pcb_thickness and every
+# datasheet "Z-Height" (quoted from the top surface) is pcb_thickness + Z-Height.
+
+parts:
+  - id: rpi-3b
+    name: Raspberry Pi 3 Model B
+    vendor: Raspberry Pi
+    sku: RPI3-MODB
+    url: https://datasheets.raspberrypi.com/rpi3/raspberry-pi-3-b-plus-mechanical-drawing.pdf
+    category: sbc
+    tags: [linux, host, gpio40]
+    cad: datasheets/rpi-3bplus-mechanical.pdf
+    notes: >-
+      Outline, hole pattern and connector Z-heights are from the official
+      3B+ mechanical drawing; the 3B shares outline, hole pattern and the
+      position of every connector. Connector Y positions on the +X edge are
+      read off that drawing and are the weakest numbers here -- verify with
+      calipers before cutting a panel.
+    src:
+      confidence: datasheet
+      url: https://datasheets.raspberrypi.com/rpi3/raspberry-pi-3-b-plus-mechanical-drawing.pdf
+
+    outline:
+      type: rect
+      size: [85.0, 56.0]
+      corner_radius: 3.0
+      origin: min
+    pcb_thickness: 1.4
+
+    holes:
+      - {name: h1, at: [3.5, 3.5], diameter: 2.75, screw: M2.5, src: {confidence: datasheet}}
+      - {name: h2, at: [61.5, 3.5], diameter: 2.75, screw: M2.5, src: {confidence: datasheet}}
+      - {name: h3, at: [3.5, 52.5], diameter: 2.75, screw: M2.5, src: {confidence: datasheet}}
+      - {name: h4, at: [61.5, 52.5], diameter: 2.75, screw: M2.5, src: {confidence: datasheet}}
+
+    volumes:
+      # 40-way GPIO header: 2x20 @ 2.54, body 50.8 x 5.08, centred between the
+      # top mounting holes (x = 3.5 + 29) on their centreline (y = 52.5).
+      - name: gpio_header
+        kind: body
+        at: [32.5, 52.5]
+        size: [50.8, 5.08]
+        z: [1.4, 9.9]
+        src: {confidence: datasheet, note: "Z-Height=8.5 per drawing; XY per HAT mechanical spec"}
+      - name: soc
+        kind: body
+        at: [26.0, 28.0]
+        size: [15.0, 15.0]
+        z: [1.4, 4.0]
+        src: {confidence: community}
+      - name: wifi_antenna_keepout
+        kind: keepout
+        at: [78.0, 52.0]
+        size: [12.0, 8.0]
+        z: [1.4, 12.0]
+        src: {confidence: estimated, note: "keep metal away from the chip antenna"}
+      - name: underside_pins
+        kind: body
+        at: [42.5, 28.0]
+        size: [85.0, 56.0]
+        z: [-2.0, 0.0]
+        src: {confidence: estimated, note: "solder tails; needs standoff clearance"}
+
+    connectors:
+      # ---- -Y edge: this is the edge the HyperPixel overhangs ----
+      - name: pwr_micro_usb
+        type: usb_micro_b
+        face: -y
+        at: [10.6, 0.0, 1.4]
+        body: {name: pwr_micro_usb_body, at: [10.6, 1.4], size: [8.0, 5.6], z: [1.4, 4.15]}
+        plug_depth: 16.0
+        bend_radius: 18.0
+        cutout: [12.0, 8.0]
+        external: true
+        src: {confidence: datasheet, note: "x=10.6 and Z-Height=2.75 per drawing"}
+      - name: hdmi
+        type: hdmi_a
+        face: -y
+        at: [32.0, 0.0, 1.4]
+        body: {name: hdmi_body, at: [32.0, 5.0], size: [15.2, 11.7], z: [1.4, 7.9]}
+        plug_depth: 22.0
+        bend_radius: 30.0
+        cutout: [17.0, 10.0]
+        external: true
+        src: {confidence: datasheet, note: "x=32 and Z-Height=6.5 per drawing"}
+      - name: av_jack
+        type: jack_3v5
+        face: -y
+        at: [53.5, 0.0, 1.4]
+        body: {name: av_jack_body, at: [53.5, 6.0], size: [7.0, 14.5], z: [1.4, 7.4]}
+        plug_depth: 20.0
+        bend_radius: 20.0
+        cutout: [9.0, 9.0]
+        external: true
+        src: {confidence: datasheet, note: "x=53.5 and Z-Height=6 per drawing"}
+
+      # ---- +X edge: USB and Ethernet, the tall stuff (Z-Height 16 / 13.5) ----
+      - name: usb1
+        type: usb_a_dual
+        face: +x
+        at: [85.0, 47.0, 1.4]
+        body: {name: usb1_body, at: [76.5, 47.0], size: [17.5, 13.2], z: [1.4, 17.4]}
+        plug_depth: 20.0
+        bend_radius: 25.0
+        cutout: [16.0, 15.5]
+        external: true
+        src: {confidence: community, note: "y=47 per drawing; depth/overhang estimated"}
+      - name: usb2
+        type: usb_a_dual
+        face: +x
+        at: [85.0, 29.0, 1.4]
+        body: {name: usb2_body, at: [76.5, 29.0], size: [17.5, 13.2], z: [1.4, 17.4]}
+        plug_depth: 20.0
+        bend_radius: 25.0
+        cutout: [16.0, 15.5]
+        external: true
+        src: {confidence: community, note: "y=29 per drawing"}
+      - name: ethernet
+        type: rj45
+        face: +x
+        at: [85.0, 10.25, 1.4]
+        body: {name: eth_body, at: [74.5, 10.25], size: [21.0, 16.0], z: [1.4, 14.9]}
+        plug_depth: 25.0
+        bend_radius: 30.0
+        cutout: [17.5, 14.5]
+        external: false
+        src: {confidence: community, note: "y=10.25 per drawing; Z-Height=13.5"}
+
+      # ---- -X edge, underside: microSD ----
+      - name: microsd
+        type: microsd
+        face: -x
+        at: [0.0, 28.0, -1.0]
+        body: {name: microsd_body, at: [7.0, 28.0], size: [14.0, 15.0], z: [-2.5, 0.0]}
+        plug_depth: 14.0
+        bend_radius: 0.0
+        cutout: [16.0, 4.0]
+        external: true
+        src: {confidence: estimated, note: "underside slot; card + finger access needed"}
+
+    mates:
+      - name: gpio40
+        standard: rpi_gpio_40
+        role: socket
+        at: [32.5, 52.5, 1.4]
+        face: +z
+        rotations: [0.0]
+        src: {confidence: datasheet}

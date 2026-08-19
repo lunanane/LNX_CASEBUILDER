@@ -1,0 +1,190 @@
+parts:
+  - id: adafruit-3954-neotrellis
+    name: Adafruit NeoTrellis RGB Driver PCB for 4x4 Keypad
+    vendor: Adafruit
+    sku: "3954"
+    url: https://www.adafruit.com/product/3954
+    category: input
+    tags: [i2c, seesaw, neopixel, keypad, tileable]
+    cad: adafruit/3954/Adafruit NeoTrellis 4x4 v2.stl
+    notes: >-
+      Vendor mesh gives 60.000 x 60.000 x 7.570 mm, confirming both the shop
+      spec and the 60 mm tiling grid -- two of these are exactly 120 x 60, with
+      the button pitch continuous across the seam. The elastomer pad
+      (adafruit-1611-keypad) mates on top.
+      Mounting hole positions are still guessed; the mesh has no holes modelled.
+    src:
+      confidence: datasheet
+      url: https://github.com/adafruit/Adafruit_CAD_Parts
+
+    outline:
+      type: rect
+      size: [60.0, 60.0]
+      corner_radius: 2.0
+      origin: min
+    pcb_thickness: 1.6
+
+    holes:
+      - {name: h1, at: [3.0, 3.0], diameter: 2.5, screw: M2, src: {confidence: estimated}}
+      - {name: h2, at: [57.0, 3.0], diameter: 2.5, screw: M2, src: {confidence: estimated}}
+      - {name: h3, at: [3.0, 57.0], diameter: 2.5, screw: M2, src: {confidence: estimated}}
+      - {name: h4, at: [57.0, 57.0], diameter: 2.5, screw: M2, src: {confidence: estimated}}
+
+    volumes:
+      - name: leds_and_pads
+        kind: body
+        at: [30.0, 30.0]
+        size: [60.0, 60.0]
+        z: [1.6, 7.57]
+        src: {confidence: datasheet, note: "from Adafruit NeoTrellis 4x4 v2.stl"}
+      - name: underside
+        kind: body
+        at: [30.0, 30.0]
+        size: [60.0, 60.0]
+        z: [-2.5, 0.0]
+        src: {confidence: estimated, note: "seesaw MCU + solder tails"}
+
+    connectors:
+      - name: i2c_left
+        type: header_1x4
+        face: -x
+        at: [0.0, 30.0, 1.6]
+        plug_depth: 8.0
+        bend_radius: 12.0
+        external: false
+        src: {confidence: estimated}
+      - name: i2c_right
+        type: header_1x4
+        face: +x
+        at: [60.0, 30.0, 1.6]
+        plug_depth: 8.0
+        bend_radius: 12.0
+        external: false
+        src: {confidence: estimated}
+
+    mates:
+      - name: keypad
+        standard: trellis_4x4_pad
+        role: socket
+        at: [30.0, 30.0, 7.57]
+        face: +z
+        rotations: [0.0, 90.0, 180.0, 270.0]
+        src: {confidence: estimated}
+
+  - id: adafruit-1611-keypad
+    name: Silicone Elastomer 4x4 Button Keypad (for 3mm LEDs)
+    vendor: Adafruit
+    sku: "1611"
+    url: https://www.adafruit.com/product/1611
+    category: input
+    tags: [elastomer, keypad, tileable]
+    notes: >-
+      60 x 60 x 11.5 mm, tiles edge-to-edge. Buttons are 10 x 10 mm on a 15 mm
+      pitch, so centres sit at 7.5 / 22.5 / 37.5 / 52.5 mm from the edge and the
+      grid stays continuous across tiled pads. ~3 mm of travel: the panel cutout
+      must clear the button tops, not just sit flush with them.
+    src:
+      confidence: vendor
+      url: https://www.adafruit.com/product/1611
+
+    outline:
+      type: rect
+      size: [60.0, 60.0]
+      corner_radius: 1.0
+      origin: min
+    pcb_thickness: 0.0
+
+    volumes:
+      - name: web
+        kind: body
+        at: [30.0, 30.0]
+        size: [60.0, 60.0]
+        z: [0.0, 5.0]
+        src: {confidence: estimated, note: "silicone web between the buttons"}
+      - name: buttons
+        kind: actuator
+        at: [30.0, 30.0]
+        size: [55.0, 55.0]
+        z: [5.0, 11.5]
+        src: {confidence: vendor, note: "4x4 of 10x10 buttons on a 15 mm pitch"}
+
+    mates:
+      - name: pcb
+        standard: trellis_4x4_pad
+        role: plug
+        at: [30.0, 30.0, 0.0]
+        face: -z
+        rotations: [0.0, 90.0, 180.0, 270.0]
+        src: {confidence: estimated}
+
+  - id: adafruit-5752-quad-encoder
+    name: Adafruit I2C Quad Rotary Encoder Breakout with NeoPixel (NeoRotary 4)
+    vendor: Adafruit
+    sku: "5752"
+    url: https://www.adafruit.com/product/5752
+    category: input
+    tags: [i2c, seesaw, encoder, neopixel, stemma_qt]
+    cad: adafruit/5752/5752 Quad Rotary Breakout.stl
+    notes: >-
+      CAREFUL: shop listings (and several distributors) quote 25.6 x 25.3 x
+      4.6 mm for this board. That is the single-encoder 4991, not this one.
+      The vendor mesh says 76.20 x 21.59 mm -- exactly 3.000" x 0.850" -- with
+      the four encoders in a ROW, not a 2x2, on a 19.05 mm (0.75") pitch.
+      Stack-up above the board from the mesh: PEC11 body 6.4 mm, threaded
+      bushing 7.2 mm (6.8 mm dia), then 7.2 mm of 6 mm D-shaft, 21.4 mm total
+      above the board plane. Shaft length depends on the encoders you soldered
+      on, so check yours against 21.4 before trusting the panel gap.
+    src:
+      confidence: datasheet
+      url: https://github.com/adafruit/Adafruit_CAD_Parts
+
+    outline:
+      type: rect
+      size: [76.2, 21.59]
+      corner_radius: 2.0
+      origin: min
+    pcb_thickness: 1.6
+
+    volumes:
+      - name: encoder_bodies
+        kind: body
+        at: [38.1, 10.795]
+        size: [69.25, 12.1]
+        z: [1.6, 8.0]
+        src: {confidence: datasheet, note: "4x PEC11, 19.05 mm pitch, from the vendor mesh"}
+      - name: bushings
+        kind: actuator
+        at: [38.1, 10.795]
+        size: [63.95, 6.8]
+        z: [8.0, 15.2]
+        src: {confidence: datasheet, note: "threaded collar; this is what a panel clamps on"}
+      - name: shafts
+        kind: actuator
+        at: [38.1, 10.795]
+        size: [63.15, 6.0]
+        z: [15.2, 23.0]
+        src: {confidence: datasheet, note: "6 mm D-shaft -- knobs go here"}
+      - name: underside
+        kind: body
+        at: [38.1, 10.795]
+        size: [76.2, 21.59]
+        z: [-4.3, 0.0]
+        src: {confidence: datasheet, note: "QT sockets / passives on the back face"}
+
+    connectors:
+      - name: qt_left
+        type: stemma_qt
+        face: -x
+        at: [0.0, 10.795, -2.0]
+        plug_depth: 6.0
+        bend_radius: 10.0
+        external: false
+        src: {confidence: estimated, note: "position along the edge unverified"}
+      - name: qt_right
+        type: stemma_qt
+        face: +x
+        at: [76.2, 10.795, -2.0]
+        plug_depth: 6.0
+        bend_radius: 10.0
+        external: false
+        src: {confidence: estimated, note: "position along the edge unverified"}

@@ -1,0 +1,145 @@
+parts:
+  - id: shorepine-amyboard
+    name: AMYboard (ESP32-S3 synth, 10 HP Eurorack)
+    vendor: Shorepine / Makerfabs
+    url: https://www.amyboard.com/
+    category: synth
+    tags: [esp32s3, eurorack, midi, cv, spdif, patchbay, i2c]
+    notes: >-
+      Modelled as a Eurorack 10 HP / 3U module, because that is how we are using
+      it: the panel *is* the outward face and all ten 3.5 mm jacks plus MIDI and
+      CV live on it, so it wants to sit flush in a wall of the case with its
+      panel exposed.
+      Panel numbers are standards, not measurements: width = 10*5.08 - 0.3 =
+      50.5 mm, height 128.5 mm, rail hole spacing 123.5 mm.
+      The PCB depth behind the panel, the jack pitch, and the positions of the
+      USB-C / Grove / microSD / Eurorack power connectors are estimates.
+      MEASURE ME.
+    src:
+      confidence: estimated
+      url: https://github.com/shorepine/tulipcc/tree/main/docs/amyboard
+
+    outline:
+      type: rect
+      size: [50.5, 128.5]
+      corner_radius: 1.0
+      origin: min
+    pcb_thickness: 2.0
+
+    holes:
+      - {name: rail_bl, at: [3.5, 2.5], diameter: 3.2, screw: M3, src: {confidence: datasheet, note: "Doepfer A-100"}}
+      - {name: rail_tl, at: [3.5, 126.0], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
+      - {name: rail_br, at: [47.0, 2.5], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
+      - {name: rail_tr, at: [47.0, 126.0], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
+
+    volumes:
+      - name: pcb_stack
+        kind: body
+        at: [25.25, 64.25]
+        size: [46.0, 110.0]
+        z: [-30.0, 0.0]
+        src: {confidence: estimated, note: "everything behind the panel"}
+      - name: panel_face
+        kind: display
+        at: [25.25, 64.25]
+        size: [50.5, 128.5]
+        z: [0.0, 2.0]
+        src: {confidence: datasheet, note: "the whole panel must stay reachable"}
+
+    connectors:
+      # Ten 3.5 mm jacks down the panel, pitch estimated at 12 mm.
+      - {name: spdif_out, type: jack_3v5, face: +z, at: [12.0, 118.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: spdif_in,  type: jack_3v5, face: +z, at: [38.0, 118.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: line_out,  type: jack_3v5, face: +z, at: [12.0, 100.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: line_in,   type: jack_3v5, face: +z, at: [38.0, 100.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: midi_out,  type: jack_3v5, face: +z, at: [12.0, 82.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: midi_in,   type: jack_3v5, face: +z, at: [38.0, 82.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: cv1_out,   type: jack_3v5, face: +z, at: [12.0, 64.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: cv1_in,    type: jack_3v5, face: +z, at: [38.0, 64.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: cv2_out,   type: jack_3v5, face: +z, at: [12.0, 46.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: cv2_in,    type: jack_3v5, face: +z, at: [38.0, 46.0, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - name: usb_c
+        type: usb_c
+        face: -y
+        at: [25.25, 0.0, -8.0]
+        plug_depth: 18.0
+        bend_radius: 20.0
+        cutout: [12.0, 8.0]
+        external: true
+        src: {confidence: estimated, note: "edge and offset both unverified"}
+      - name: grove_i2c
+        type: grove
+        face: +x
+        at: [50.5, 30.0, -6.0]
+        plug_depth: 12.0
+        bend_radius: 15.0
+        external: false
+        src: {confidence: estimated}
+      - name: microsd
+        type: microsd
+        face: -x
+        at: [0.0, 40.0, -6.0]
+        plug_depth: 14.0
+        external: true
+        src: {confidence: estimated}
+
+    mates:
+      - name: eurorack_power
+        standard: eurorack_power_10
+        role: socket
+        at: [25.25, 20.0, -28.0]
+        face: -z
+        src: {confidence: estimated}
+
+  - id: seeed-grove-tca9548a
+    name: Grove - 8 Channel I2C Multiplexer / I2C Hub (TCA9548A)
+    vendor: Seeed Studio
+    sku: "103020293"
+    url: https://wiki.seeedstudio.com/Grove-8-Channel-I2C-Multiplexer-I2C-Hub-TCA9548A/
+    category: interconnect
+    tags: [i2c, grove, mux]
+    notes: >-
+      Seeed does not publish a mechanical drawing for this one. Modelled on the
+      double-width Grove footprint (40 x 40 mm) with the standard 2 x 2 mm Grove
+      mounting holes. MEASURE ME -- this board is a hub, so wherever it lands,
+      nine cables converge on it; the cable_clearance around it matters more
+      than its own footprint.
+    src:
+      confidence: estimated
+      url: https://wiki.seeedstudio.com/Grove-8-Channel-I2C-Multiplexer-I2C-Hub-TCA9548A/
+
+    outline:
+      type: rect
+      size: [40.0, 40.0]
+      corner_radius: 2.0
+      origin: min
+    pcb_thickness: 1.6
+
+    holes:
+      - {name: h1, at: [2.0, 2.0], diameter: 2.0, screw: M2, src: {confidence: estimated}}
+      - {name: h2, at: [38.0, 38.0], diameter: 2.0, screw: M2, src: {confidence: estimated}}
+
+    volumes:
+      - name: components
+        kind: body
+        at: [20.0, 20.0]
+        size: [40.0, 40.0]
+        z: [1.6, 12.0]
+        src: {confidence: estimated, note: "Grove sockets dominate the height"}
+      - name: underside
+        kind: body
+        at: [20.0, 20.0]
+        size: [40.0, 40.0]
+        z: [-2.0, 0.0]
+        src: {confidence: estimated}
+
+    connectors:
+      - {name: up, type: grove, face: -y, at: [20.0, 0.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: ch0, type: grove, face: +y, at: [7.0, 40.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: ch1, type: grove, face: +y, at: [20.0, 40.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: ch2, type: grove, face: +y, at: [33.0, 40.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: ch3, type: grove, face: +x, at: [40.0, 10.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: ch4, type: grove, face: +x, at: [40.0, 26.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: ch5, type: grove, face: -x, at: [0.0, 10.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: ch6, type: grove, face: -x, at: [0.0, 26.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: ch7, type: grove, face: -y, at: [33.0, 0.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
