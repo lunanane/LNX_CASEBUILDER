@@ -76,7 +76,12 @@ const groupsByPlacement = new Map();   // id -> { group, meshes: [{mesh, style}]
 
 function resize() {
   const w = viewport.clientWidth, h = viewport.clientHeight;
-  renderer.setSize(w, h, false);
+  if (!w || !h) return;
+  // setSize(w, h, false) leaves the canvas with NO css size, so it lays out at
+  // its buffer size -- w * devicePixelRatio. On a scaled display that is wider
+  // than the viewport, and since #viewport is positioned the overflowing canvas
+  // paints straight over the inspector. Let three.js set the css size.
+  renderer.setSize(w, h);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
@@ -245,9 +250,37 @@ function placementBounds(id) {
   return { x0, y0, z0, x1, y1, z1 };
 }
 
-function placementCenter(id) {
-  const b = placementBounds(id);
+/** Bounds of a whole mate stack, not just one board.
+ *
+ *  A silicone pad glued to a Trellis is its own placement, but you cannot move
+ *  it on its own -- and sizing the gizmo to the pad alone buried the pivot
+ *  inside the board underneath it. Everything mated together is manipulated as
+ *  one assembly, so the gizmo covers the lot and sits above the tallest part. */
+function assemblyBounds(rootId) {
+  const parts = [rootId, ...descendants(rootId)].map(placementBounds).filter(Boolean);
+  if (!parts.length) return null;
+  return {
+    x0: Math.min(...parts.map((b) => b.x0)), y0: Math.min(...parts.map((b) => b.y0)),
+    z0: Math.min(...parts.map((b) => b.z0)), x1: Math.max(...parts.map((b) => b.x1)),
+    y1: Math.max(...parts.map((b) => b.y1)), z1: Math.max(...parts.map((b) => b.z1)),
+  };
+}
+
+function assemblyCenter(rootId) {
+  const b = assemblyBounds(rootId);
   return b ? [(b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2] : null;
+}
+
+/** Walk up the mate chain to the placement that actually carries a position.
+ *  Clicking the pad should move the Trellis it is stuck to. */
+function movableRoot(id) {
+  let cur = state.scene?.placements.find((p) => p.id === id);
+  const seen = new Set();
+  while (cur && cur.parent && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    cur = state.scene.placements.find((p) => p.id === cur.parent) || null;
+  }
+  return cur || null;
 }
 
 function tagGizmo(obj, kind) {
@@ -259,9 +292,9 @@ function tagGizmo(obj, kind) {
 function buildGizmo() {
   gizmoGroup.clear();
   gizmo.ring = gizmo.handle = gizmo.center = null;
-  const pl = currentPlacement();
-  if (!pl || pl.locked || pl.parent) return;
-  const b = placementBounds(pl.id);
+  const pl = movableRoot(state.selection);
+  if (!pl || pl.locked) return;
+  const b = assemblyBounds(pl.id);
   if (!b) return;
 
   const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, z = b.z1 + 2.0;
@@ -529,7 +562,7 @@ function buildSelectionShell(pl) {
       </select></div>
       <div class="field"><label>offset</label><input id="f-panelofs" type="number" step="0.5"></div>` : ''}`}
     <div class="note">${pl.locked ? 'locked &mdash; unlock it in the YAML to move it'
-      : (attached ? 'height comes from the mate' : '')}</div>
+      : (attached ? `height comes from the mate &mdash; dragging moves <b>${movableRoot(pl.id) ? movableRoot(pl.id).id : pl.parent}</b> and everything mated to it` : '')}</div>
   `;
 
   const num = (id, set) => {
@@ -550,12 +583,15 @@ function buildSelectionShell(pl) {
   sel('f-panel', (v) => (pl.on_panel = v || null));
   sel('f-panelref', (v) => (pl.panel_ref = v));
 
-  const turn = (id, deg) => {
+  const turn = (id, dir) => {
     const el = $(id);
-    if (el) el.onclick = () => { rotateBy(pl, deg); scheduleResolve(0); };
+    if (el) el.onclick = () => {
+      const target = movableRoot(pl.id);
+      if (target && !target.locked) { quarterTurn(target, dir); scheduleResolve(0); }
+    };
   };
-  turn('b-ccw', 90);
-  turn('b-cw', -90);
+  turn('b-ccw', 1);
+  turn('b-cw', -1);
 }
 
 function updateSelectionValues(pl) {
@@ -644,7 +680,7 @@ function descendants(id) {
  *      pos' = C + Rz(d) * (pos - C)
  */
 function rotateBy(pl, deltaDeg, centerXY) {
-  const c = centerXY || placementCenter(pl.id) || [pl.pos[0], pl.pos[1]];
+  const c = centerXY || assemblyCenter(pl.id) || [pl.pos[0], pl.pos[1]];
   const a = THREE.MathUtils.degToRad(deltaDeg);
   const ca = Math.cos(a), sa = Math.sin(a);
   const dx = pl.pos[0] - c[0], dy = pl.pos[1] - c[1];
@@ -658,6 +694,18 @@ function rotateBy(pl, deltaDeg, centerXY) {
 
 function rotateTo(pl, deg) {
   rotateBy(pl, deg - (pl.rot_z || 0));
+}
+
+/** Snap to the next absolute multiple of 90, rather than adding 90 to whatever
+ *  free angle the ring left behind. Free-rotate to 37 deg, press the button and
+ *  you land on 90 or 0 -- never 127. */
+function quarterTurn(pl, dir) {
+  const cur = (((pl.rot_z || 0) % 360) + 360) % 360;
+  const eps = 1e-6;
+  const target = dir > 0
+    ? Math.ceil((cur + eps) / 90) * 90
+    : Math.floor((cur - eps) / 90) * 90;
+  rotateBy(pl, target - cur);
 }
 
 // ---------------------------------------------------------------------------
@@ -720,17 +768,17 @@ renderer.domElement.addEventListener('pointerdown', (ev) => {
   const id = hit.object.userData.placement;
   if (id !== state.selection) select(id);
 
-  const pl = currentPlacement();
-  if (!pl || pl.locked || pl.parent) {
-    hint(pl?.locked ? `${id} is locked` : `${id} follows ${pl?.parent} -- move the parent`);
+  const root = movableRoot(id);
+  if (!root || root.locked) {
+    hint(`${root ? root.id : id} is locked &mdash; unlock it in the YAML to move it`);
     return;
   }
   startMove(ev, hit.point);
 }, { capture: true });
 
 function startMove(ev, point) {
-  const pl = currentPlacement();
-  if (!pl || pl.locked || pl.parent) return;
+  const pl = movableRoot(state.selection);
+  if (!pl || pl.locked) return;
   const vertical = ev.shiftKey && !pl.on_panel;   // z is solved for panel riders
   const normal = vertical
     ? new THREE.Vector3().subVectors(camera.position, point).setZ(0).normalize()
@@ -746,8 +794,8 @@ function startMove(ev, point) {
 }
 
 function startRotate(ev) {
-  const pl = currentPlacement();
-  if (!pl || pl.locked || pl.parent) return;
+  const pl = movableRoot(state.selection);
+  if (!pl || pl.locked) return;
   dragPlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 0, 1), gizmo.center);
   const start = planePoint();
   if (!start) return;
@@ -830,18 +878,18 @@ renderer.domElement.addEventListener('pointercancel', endDrag, { capture: true }
 
 window.addEventListener('keydown', (ev) => {
   if (['INPUT', 'SELECT', 'TEXTAREA'].includes(ev.target.tagName)) return;
-  const pl = currentPlacement();
+  const pl = movableRoot(state.selection);
   const step = ev.shiftKey ? 0.1 : 1;
   const nudge = { ArrowLeft: [-step, 0], ArrowRight: [step, 0],
                   ArrowUp: [0, step], ArrowDown: [0, -step] }[ev.key];
 
-  if (nudge && pl && !pl.locked && !pl.parent) {
+  if (nudge && pl && !pl.locked) {
     pl.pos[0] = +(pl.pos[0] + nudge[0]).toFixed(2);
     pl.pos[1] = +(pl.pos[1] + nudge[1]).toFixed(2);
     ev.preventDefault();
     scheduleResolve(60);
-  } else if ((ev.key === 'r' || ev.key === 'R') && pl && !pl.locked && !pl.parent) {
-    rotateBy(pl, ev.shiftKey ? -90 : 90);
+  } else if ((ev.key === 'r' || ev.key === 'R') && pl && !pl.locked) {
+    quarterTurn(pl, ev.shiftKey ? -1 : 1);
     scheduleResolve(0);
   } else if (ev.key === 'Delete' || ev.key === 'Backspace') {
     removeSelected();
@@ -896,15 +944,15 @@ $('btn-dxf').onclick = async () => {
   a.download = `${state.sceneName}-layers.dxf`;
   a.click();
 };
-const turnSelection = (deg) => {
-  const pl = currentPlacement();
+const turnSelection = (dir) => {
+  const pl = movableRoot(state.selection);
   if (!pl) { status('select a part first', 'err'); return; }
-  if (pl.locked || pl.parent) { status(`${pl.id} cannot be rotated on its own`, 'err'); return; }
-  rotateBy(pl, deg);
+  if (pl.locked) { status(`${pl.id} is locked`, 'err'); return; }
+  quarterTurn(pl, dir);
   scheduleResolve(0);
 };
-$('btn-ccw').onclick = () => turnSelection(90);
-$('btn-cw').onclick = () => turnSelection(-90);
+$('btn-ccw').onclick = () => turnSelection(1);
+$('btn-cw').onclick = () => turnSelection(-1);
 
 $('chk-case').onchange = () => ($('chk-case').checked ? refreshCase() : caseGroup.clear());
 $('chk-corridors').onchange = () => buildCorridors(state.resolved);

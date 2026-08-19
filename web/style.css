@@ -60,8 +60,10 @@ h2 {
 }
 h2:first-child { margin-top: 0; }
 
-#viewport { flex: 1; min-width: 0; position: relative; }
-#viewport canvas { display: block; }
+/* overflow:hidden and an absolutely placed canvas so the 3D view can never
+   paint outside its own box, whatever the device pixel ratio does */
+#viewport { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
+#viewport canvas { display: block; position: absolute; top: 0; left: 0; }
 
 .row {
   padding: 5px 7px; border-radius: 4px; cursor: pointer;

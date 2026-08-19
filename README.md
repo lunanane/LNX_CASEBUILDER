@@ -87,10 +87,20 @@ Mated parts (the screen on the Pi) can't be dragged; they follow their parent,
 and you change `gap` instead. Toggles for the case layers, the plug corridors and
 the panel plane are in the header.
 
+Clicking any board in a mate stack manipulates the whole stack — a silicone pad
+glued to a Trellis has no position of its own, so grabbing the pad moves the
+Trellis and everything on it, and the gizmo is sized to the assembly rather than
+buried inside it.
+
+The `90°` buttons snap to an **absolute** multiple of 90 rather than adding a
+quarter turn to whatever the free-rotate ring left behind: free-rotate to 37°,
+press it and you land on 90° or 0°, never 127°.
+
 Every move re-posts the scene to the backend, so the issue list is always the
 engine's opinion, never the browser's guess. `save` writes back to
-`backend/scenes/<name>.yaml` and keeps the previous file as `.yaml.bak` — a
-round trip through the editor cannot preserve YAML comments.
+`backend/scenes/<name>.yaml` and **keeps the file's comments** — it merges the
+new values into the existing YAML document rather than dumping over it, so the
+reasoning recorded in those files survives an edit. Saving is idempotent.
 
 ## Or from the command line
 

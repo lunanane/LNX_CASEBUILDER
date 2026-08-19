@@ -12,7 +12,7 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-import yaml
+from . import scenefile
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
@@ -99,30 +99,19 @@ def get_scene(name: str):
 
 @app.put("/api/scenes/{name}")
 def put_scene(name: str, scene: Scene = Body(...)):
-    """Write a scene back to disk.
+    """Write a scene back to disk, keeping its comments.
 
-    A round trip through the editor cannot preserve YAML comments, and the
-    hand-written scenes carry a lot of reasoning in theirs -- so the previous
-    file is kept as `<name>.yaml.bak` rather than being quietly overwritten.
+    The scene files carry real reasoning in their comments, so the new values
+    are merged into the existing document rather than dumped over it. See
+    hwcase.scenefile. A `.bak` is still written, but only when the merge could
+    not reuse the previous file.
     """
     SCENES_DIR.mkdir(parents=True, exist_ok=True)
     path = SCENES_DIR / f"{name}.yaml"
-    backed_up = False
-    if path.exists():
-        (SCENES_DIR / f"{name}.yaml.bak").write_text(
-            path.read_text(encoding="utf-8"), encoding="utf-8")
-        backed_up = True
-    header = "# Written by the hwcase editor.\n"
-    if backed_up:
-        header += ("# Comments from the previous version were not preserved -- "
-                   f"see {name}.yaml.bak.\n")
     scene.name = name
-    data = scene.model_dump(mode="json")
-    path.write_text(header + yaml.safe_dump(data, sort_keys=False,
-                                            allow_unicode=True, default_flow_style=False),
-                    encoding="utf-8")
+    merged = scenefile.save(scene, path)
     return {"saved": str(path), "placements": len(scene.placements),
-            "backup": f"{name}.yaml.bak" if backed_up else None}
+            "comments_preserved": merged}
 
 
 # --------------------------------------------------------------------------
