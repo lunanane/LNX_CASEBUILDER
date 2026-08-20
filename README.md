@@ -198,8 +198,9 @@ board**, not a global rule:
 |---|---|
 | `none` | leave the wall solid — nothing gets out on this side |
 | `per_connector` | one opening per port, plug and cable-bend sized (the default) |
-| `open_to_edge` | the same openings run out to the edge as slots, so an already-fitted plug can be threaded in from outside |
-| `open_side` | remove everything beyond that edge from the floor up to just above the cable — a **seamless faceplate over an open, variable underside** |
+| `open_to_edge` | the same openings run out to the edge as slots |
+| `channel` | a groove of `channel_width` from **each** port out through the wall, open all the way **down to the underside** |
+| `open_side` | one opening spanning **all** the selected ports of that side, likewise open to the underside |
 
 **`margin`** decides how close the outside of the case comes to that side's
 ports. Left unset, the wall is offset from the bounding box of the *whole*

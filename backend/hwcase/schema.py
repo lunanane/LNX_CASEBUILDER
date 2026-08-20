@@ -306,14 +306,15 @@ class CutoutPolicy(str, Enum):
     #: the same openings, but run out to the edge as slots, so a plug already
     #: fitted to a cable can be threaded in from outside
     open_to_edge = "open_to_edge"
-    #: a groove of a chosen width running from each port straight out to the
-    #: edge. The case keeps its full shape everywhere else, so it stays
-    #: balanced, and you can still get a finger and a plug down the channel.
+    #: a groove of a chosen width from each port out through the wall, open all
+    #: the way DOWN to the underside so a plug can be dropped in from below and
+    #: slid home. Threading a cable through a slot from the side alone is
+    #: unworkable in practice. The case keeps its shape everywhere else.
     channel = "channel"
-    #: open the whole of this side, but only across the BAND the ports occupy.
-    #: The layers below stay solid and act as the base, the layers above stay
-    #: solid too -- so a screen still gets a continuous sheet underneath it and
-    #: the ports are reachable along the entire side.
+    #: the same idea, but one opening spanning all the selected ports of that
+    #: side at once, so a whole bank of connectors can be reached with the
+    #: bottom plate out of the way. Only as wide and as tall as those ports --
+    #: everything above them, and the rest of the case, stays closed.
     open_side = "open_side"
 
 
@@ -333,9 +334,10 @@ class SidePolicy(Strict):
     channel_width: float = 10.0
     #: clearance kept above and below the ports, for `open_side` and `channel`
     headroom: float = 2.0
-    #: `full` opens the whole case beyond that edge; `board` only the width of
-    #: the board itself, so neighbouring hardware keeps its floor
-    span: Literal["full", "board"] = "full"
+    #: how wide the opening is. `ports` -- the default -- spans only the
+    #: selected connectors, which is what you actually need to reach. `board`
+    #: widens it to the board, `full` to the whole case beyond that edge.
+    span: Literal["ports", "board", "full"] = "ports"
 
 
 class Support(str, Enum):

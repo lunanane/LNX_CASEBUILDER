@@ -63,9 +63,11 @@ class WorldConnector:
 
     @property
     def cuts_the_wall(self) -> bool:
+        # `channel` and `open_side` are cut as regions instead, so the corridor
+        # here stays what it should be: the room a plug and its cable need,
+        # which the access check still measures.
         return self.included and self.policy in (
-            CutoutPolicy.per_connector, CutoutPolicy.open_to_edge,
-            CutoutPolicy.channel)
+            CutoutPolicy.per_connector, CutoutPolicy.open_to_edge)
 
 
 @dataclass
@@ -442,29 +444,47 @@ def _fit_to_panels(scene: Scene, lib: PartLibrary, frames: dict[str, Frame],
     return issues
 
 
-def _side_region(part: Part, frame: Frame, side: Face, span: str) -> Polygon:
-    """Everything beyond one edge of a board, in world XY.
+def _side_region(part: Part, frame: Frame, side: Face,
+                 lo: float, hi: float) -> Polygon:
+    """The slot beyond one edge of a board, between `lo` and `hi` along it.
 
-    `span: board` keeps the opening as wide as the board, so the hardware next
-    door keeps its floor; `full` opens the case right across, which is what you
-    want when the whole end of the machine should be open underneath.
+    `lo`/`hi` are part-local coordinates on the axis that runs ALONG the edge:
+    y for the left and right sides, x for front and back. Limiting it to the
+    ports means the rest of the case keeps its bottom.
     """
     x0, y0, x1, y1 = outline_polygon(part.outline).bounds
-    wide = REACH if span == "full" else 0.0
     if side is Face.px:
-        local = box(x1, y0 - wide, x1 + REACH, y1 + wide)
+        local = box(x1, lo, x1 + REACH, hi)
     elif side is Face.nx:
-        local = box(x0 - REACH, y0 - wide, x0, y1 + wide)
+        local = box(x0 - REACH, lo, x0, hi)
     elif side is Face.py:
-        local = box(x0 - wide, y1, x1 + wide, y1 + REACH)
+        local = box(lo, y1, hi, y1 + REACH)
     elif side is Face.ny:
-        local = box(x0 - wide, y0 - REACH, x1 + wide, y0)
+        local = box(lo, y0 - REACH, hi, y0)
     else:
         return Polygon()          # +z / -z are the panel and the floor
     return frame.polygon(local)
 
 
+def _along_axis(side: Face) -> int:
+    """Which local axis runs along an edge: 0 = x, 1 = y."""
+    return 1 if side in (Face.px, Face.nx) else 0
+
+
+def _span_bounds(part: Part, side: Face, span: str, centres: list[float],
+                 widths: list[float], clearance: float) -> tuple[float, float]:
+    x0, y0, x1, y1 = outline_polygon(part.outline).bounds
+    if span == "full":
+        return -REACH, REACH
+    if span == "board":
+        return (y0, y1) if _along_axis(side) == 1 else (x0, x1)
+    lo = min(c - w / 2.0 for c, w in zip(centres, widths)) - clearance
+    hi = max(c + w / 2.0 for c, w in zip(centres, widths)) + clearance
+    return lo, hi
+
+
 def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
+    res_clearance = scene.case.part_clearance
     frames: dict[str, Frame] = {}
     parents: dict[str, Optional[str]] = {}
     issues: list[Issue] = []
@@ -568,7 +588,7 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
             # turn away from the wall. An internal one only needs the plug body:
             # the cable can curve off in any direction inside the box.
             reach = c.plug_depth + (c.bend_radius if c.external else 0.0)
-            if policy in (CutoutPolicy.open_to_edge, CutoutPolicy.channel):
+            if policy is CutoutPolicy.open_to_edge:
                 reach = REACH          # run the slot out through the wall
             # An explicit cutout is a measurement and must be honoured: a
             # 3.5 mm jack wants a 6.5 mm hole, and clamping it to 8 mm makes a
@@ -578,8 +598,8 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
             else:
                 width = height = 10.0
             if policy is CutoutPolicy.channel and policy_for is not None:
-                # A groove sized for access, not for the plug -- but never
-                # narrower than the port itself, or the plug would not pass.
+                # The groove is cut as a region; here we only warn when the
+                # width asked for would be narrower than the port itself.
                 if included and policy_for.channel_width < width - 1e-6:
                     issues.append(Issue(
                         "info", "channel_widened",
@@ -587,7 +607,6 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
                         f"channel was opened to {width:.1f} mm, which is what the "
                         f"port itself needs",
                         [f"{pl.id}.{c.name}"]))
-                width = max(width, policy_for.channel_width)
             body_z = (c.body.z_min(), c.body.z_max()) if c.body is not None else None
             poly, zi = corridor(c.at, c.face, reach, width, height, body_z,
                                 round_mouth=c.cutout_shape == "circle")
@@ -624,37 +643,56 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
                 pl.id, sp.side, axis, sign, outermost + sign * sp.margin,
                 f"{sp.margin:.1f} mm from {pl.id}'s {sp.side.value} ports"))
 
-        # a side asked to be left open: work out how high the hole has to go
+        # Sides that want real access: a groove per port, or one opening
+        # across a whole bank of them. Both go all the way DOWN through the
+        # underside, because sliding a plug in through a slot from the side
+        # alone does not work in practice -- you drop it in from below and
+        # push it home. Everything above the ports stays closed.
         for sp in pl.sides:
-            if sp.cutout is not CutoutPolicy.open_side:
+            if sp.cutout not in (CutoutPolicy.open_side, CutoutPolicy.channel):
                 continue
-            band = [c.corridor_z for c in connectors
+            mine = [c for c in connectors
                     if c.placement == pl.id and c.conn.face is sp.side and c.included]
-            tops = [max(z) for z in band]
-            if not tops:
+            if not mine:
                 issues.append(Issue(
                     "warning", "open_side_empty",
-                    f"{pl.id}: side {sp.side.value} is set to open_side but has no "
-                    f"connectors to clear -- nothing was cut",
+                    f"{pl.id}: side {sp.side.value} is set to {sp.cutout.value} but "
+                    f"has no selected ports -- nothing was cut",
                     [pl.id]))
                 continue
-            region = _side_region(part, frame, sp.side, sp.span)
-            if region.is_empty:
-                issues.append(Issue(
-                    "warning", "open_side_face",
-                    f"{pl.id}: open_side only applies to the four upright sides, "
-                    f"not {sp.side.value}",
-                    [pl.id]))
-                continue
-            # Only the band the ports actually occupy. Taking everything from
-            # the floor up removed the base of the case along with the wall --
-            # the whole side fell away, when what is wanted is an opening you
-            # can reach a plug through, with a continuous sheet underneath.
-            ceiling = max(tops) + sp.headroom
-            floor_of_band = min(min(z) for z in band) - sp.headroom
-            side_openings.append(SideOpening(
-                pl.id, sp.side, region, (floor_of_band, ceiling),
-                f"open side for {', '.join(sorted(c.conn.name for c in connectors if c.placement == pl.id and c.conn.face is sp.side and c.included))}"))
+
+            axis = _along_axis(sp.side)
+            groups: list[tuple[list, float]]
+            if sp.cutout is CutoutPolicy.channel:
+                # one groove per port, each its own width
+                groups = [([c], sp.channel_width) for c in mine]
+            else:
+                groups = [(mine, 0.0)]
+
+            for group, forced in groups:
+                centres = [c.conn.at[axis] for c in group]
+                widths = []
+                for c in group:
+                    w = c.conn.cutout[0] if c.conn.cutout else 10.0
+                    widths.append(max(w, forced) if forced else w)
+                lo, hi = _span_bounds(part, sp.side, sp.span, centres, widths,
+                                      res_clearance)
+                region = _side_region(part, frame, sp.side, lo, hi)
+                if region.is_empty:
+                    issues.append(Issue(
+                        "warning", "open_side_face",
+                        f"{pl.id}: {sp.cutout.value} only applies to the four "
+                        f"upright sides, not {sp.side.value}",
+                        [pl.id]))
+                    break
+
+                # down to the underside, up to just above the highest port
+                ceiling = max(max(c.corridor_z) for c in group) + sp.headroom
+                names = ", ".join(sorted(c.conn.name for c in group))
+                kind = "channel" if sp.cutout is CutoutPolicy.channel else "open side"
+                side_openings.append(SideOpening(
+                    pl.id, sp.side, region, (-1e6, ceiling),
+                    f"{kind} for {names}"))
 
     return Resolved(scene=scene, frames=frames, solids=solids,
                     connectors=connectors, side_openings=side_openings,
