@@ -35,18 +35,28 @@ case:
   cable_clearance: 5.0
   corner_radius: 8.0
 
-  interior: grown
+  interior: hollow
+  outline:
+    size: [233.475, 134.797]
+    corner_radius: 8.0
+    origin: custom
+    origin_offset: [100.775, 68.3]
 placements:
 - id: pi
   part: rpi-3b
   label: Raspberry Pi 3B
-  pos: [0.0, 0.0, 0.0]
+  pos: [-13.2, -3.1999999999999957, 0.0]
     # Turned 180 deg so the USB/Ethernet stack faces the LEFT wall. Facing it
     # right put 45 mm of plug run straight through the button block -- the
     # checker caught it, and rotating the anchor is the cheap fix.
   rot_z: 180.0
   mount: manual
 
+  sides:
+  - side: -y
+    include: []
+  - side: +x
+    include: [usb1, usb2, ethernet]
 - id: screen
   part: hyperpixel4-square-touch
   label: HyperPixel 4.0 Square
@@ -58,9 +68,10 @@ placements:
   # --- 4x8 of buttons, two NeoTrellis tiles side by side on the 60 mm grid ---
 - id: trellis_a
   part: adafruit-3954-neotrellis
-  pos: [-77.8, -117.7, 0.0]
+  pos: [4.099999999999994, -59.69999999999999, 0.0]
   on_panel: main
   panel_ref: buttons          # the pad's button tops, not the PCB's
+  panel_offset: 2.5
 - id: pad_a
   part: adafruit-1611-keypad
   parent: trellis_a
@@ -68,9 +79,10 @@ placements:
   mate: pcb
 - id: trellis_b
   part: adafruit-3954-neotrellis
-  pos: [-17.3, -117.9, 0.0]
+  pos: [64.1, -59.69999999999999, 0.0]
   on_panel: main
   panel_ref: buttons
+  panel_offset: 2.5
 - id: pad_b
   part: adafruit-1611-keypad
   parent: trellis_b
@@ -80,27 +92,29 @@ placements:
   # --- four push encoders above the keypads ---
 - id: encoders
   part: adafruit-5752-quad-encoder
-  pos: [42.8, -46.9, 0.0]
+  pos: [-3.6999999999999957, 55.19499999999999, 0.0]
   on_panel: main
   panel_ref: bushings         # the threaded collar is what a panel clamps on;
                               # the shaft is meant to stand proud for the knob
 
   # --- the little OLED next to them ---
-  rot_z: 90.6731402402412
+  rot_z: 180.0
+  panel_offset: 3.0
 - id: oled
   part: adafruit-4741-oled-1v5
-  pos: [-8.280000000000001, 56.022099087389535, 0.0]
+  pos: [39.66, 57.89750000000001, 0.0]
   on_panel: main
   panel_ref: active_area
 
   # --- I2C hub, buried inside where nobody has to see it ---
+  rot_z: 180.0
 - id: mux
   part: seeed-grove-tca9548a
-  pos: [62.8, -53.929451680867544, 0.0]
-  rot_z: 90.0
+  pos: [0.20000000000000284, 54.4, 0.0]
+  rot_z: 180.0
 - id: amy
   part: shorepine-amyboard
-  pos: [-77.79999999999998, 104.69995559548877, 0.0]
+  pos: [109.1, 3.8999999999999972, 0.0]
   on_panel: main
   panel_ref: jack_threads
-  rot_z: 270.0759810900971
+  rot_z: 90.0

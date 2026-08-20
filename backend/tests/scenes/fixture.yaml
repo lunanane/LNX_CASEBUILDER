@@ -1,0 +1,92 @@
+# A frozen scene that the tests own.
+#
+# Tests used to assert geometry against scenes/soundmachine-v0.yaml, which is a
+# live working document -- it gets dragged around in the editor and saved. Every
+# time a board moved, a panel offset was set or a side policy was chosen, tests
+# broke for reasons that had nothing to do with the code. Three separate rounds
+# of that were enough.
+#
+# So: this file is the tests' own scene. Nothing edits it but a deliberate
+# commit. It deliberately exercises the awkward parts -- a derived panel, a
+# mated stack, a flush reference that belongs to a mated child, a floor-mounted
+# internal board, and a part with nothing facing up.
+#
+# The live scene still gets a smoke test (it must load, resolve and build), but
+# nothing asserts where its boards are.
+
+name: fixture
+panels:
+  - name: main
+    from_ref: screen.active_area
+
+placements:
+  # The Pi/screen stack defines the panel height, so its own height is manual.
+  - id: pi
+    part: rpi-3b
+    pos: [0.0, 0.0, 0.0]
+    rot_z: 180.0
+    mount: manual
+  - id: screen
+    part: hyperpixel4-square-touch
+    parent: pi
+    parent_mate: gpio40
+    mate: gpio40
+    mate_gap: 17.0
+
+  # Two tiled keypads: the flush reference lives on the mated pad, not the board
+  - id: trellis_a
+    part: adafruit-3954-neotrellis
+    pos: [20.0, -44.5, 0.0]
+    on_panel: main
+    panel_ref: buttons
+  - id: pad_a
+    part: adafruit-1611-keypad
+    parent: trellis_a
+    parent_mate: keypad
+    mate: pcb
+  - id: trellis_b
+    part: adafruit-3954-neotrellis
+    pos: [80.0, -44.5, 0.0]
+    on_panel: main
+    panel_ref: buttons
+  - id: pad_b
+    part: adafruit-1611-keypad
+    parent: trellis_b
+    parent_mate: keypad
+    mate: pcb
+
+  # round holes, on the collar rather than the shaft
+  - id: encoders
+    part: adafruit-5752-quad-encoder
+    pos: [20.0, 22.0, 0.0]
+    on_panel: main
+    panel_ref: bushings
+
+  - id: oled
+    part: adafruit-4741-oled-1v5
+    pos: [105.0, 23.0, 0.0]
+    on_panel: main
+    panel_ref: active_area
+
+  # nothing faces up: auto should drop this one to the floor
+  - id: mux
+    part: seeed-grove-tca9548a
+    pos: [150.0, 62.0, 0.0]
+
+  - id: amy
+    part: shorepine-amyboard
+    pos: [200.0, -60.0, 0.0]
+    on_panel: main
+    panel_ref: jack_threads
+
+case:
+  style: layered
+  interior: pocketed
+  materials:
+    - {name: plywood-3mm, thickness: 3.0, kerf: 0.15, sheet: [600.0, 400.0], color: "#c8a165"}
+  wall: 8.0
+  floor_gap: 4.0
+  ceiling_gap: 1.0
+  part_clearance: 0.6
+  cable_clearance: 5.0
+  corner_radius: 8.0

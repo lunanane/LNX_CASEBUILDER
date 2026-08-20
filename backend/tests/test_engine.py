@@ -11,7 +11,14 @@ from hwcase.schema import (Box, CaseSpec, Material, Panel, Part, Placement,
                            RectOutline, Scene, VolumeKind)
 
 BACKEND = Path(__file__).resolve().parent.parent
-SCENE = BACKEND / "scenes" / "soundmachine-v0.yaml"
+
+#: The tests' own scene. NOT backend/scenes/soundmachine-v0.yaml -- that one is
+#: a live document the editor writes to, and asserting geometry against it broke
+#: these tests every time a board was dragged or an option chosen.
+SCENE = Path(__file__).resolve().parent / "scenes" / "fixture.yaml"
+
+#: the real working scene, smoke-tested only
+LIVE_SCENE = BACKEND / "scenes" / "soundmachine-v0.yaml"
 
 
 @pytest.fixture(scope="module")
@@ -138,7 +145,14 @@ def _base(name):
 
 
 def test_everything_on_the_panel_lands_flush(demo):
+    """Flush means panel + whatever offset the placement asked for -- a button
+    that has to be pressed is deliberately set proud."""
     z = demo.panels["main"]
+    offsets = {p.id: p.panel_offset for p in demo.scene.placements}
+    # the pad's buttons are fitted by their parent, so they take its offset
+    offsets["pad_a"] = offsets["trellis_a"]
+    offsets["pad_b"] = offsets["trellis_b"]
+
     flush = {"screen.active_area", "pad_a.buttons", "pad_b.buttons",
              "encoders.bushings", "oled.active_area", "amy.jack_threads"}
     seen = set()
@@ -146,7 +160,8 @@ def test_everything_on_the_panel_lands_flush(demo):
         ref = f"{s.placement}.{_base(s.name)}"
         if ref in flush:
             seen.add(ref)
-            assert s.z[1] == pytest.approx(z, abs=1e-6), f"{s.ref} is not flush"
+            want = z + offsets.get(s.placement, 0.0)
+            assert s.z[1] == pytest.approx(want, abs=1e-6), f"{s.ref} is not flush"
     assert seen == flush
 
 
@@ -189,16 +204,29 @@ def test_recessed_actuator_is_reported(lib):
 # checks
 # --------------------------------------------------------------------------
 
-def test_the_demo_scene_is_clean(demo, lib):
+def test_the_fixture_scene_is_clean(demo, lib):
     errors = [i for i in check(demo, lib) if i.level == "error"]
-    assert errors == [], f"demo scene regressed: {[i.message for i in errors]}"
+    assert errors == [], f"fixture scene regressed: {[i.message for i in errors]}"
+
+
+def test_the_live_scene_still_works(lib):
+    """A smoke test on the real working scene: it must load, resolve and build.
+
+    Deliberately says nothing about *where* anything is -- that file belongs to
+    whoever is using the editor, and a layout with errors in it is a design in
+    progress, not a broken build.
+    """
+    scene = load_scene(LIVE_SCENE)
+    res = resolve(scene, lib)
+    check(res, lib)
+    model = build(res)
+    assert model.layers, "the live scene should still produce a case"
 
 
 def test_overlapping_parts_collide(lib):
-    scene = load_scene(SCENE)
-    # drop the hub straight on top of a keypad
-    trellis = next(p for p in scene.placements if p.id == "trellis_a")
-    next(p for p in scene.placements if p.id == "mux").pos = trellis.pos
+    scene = lab()
+    hub = next(p for p in scene.placements if p.id == "hub")
+    hub.pos = (0.0, 0.0, 0.0)          # straight on top of the Pi
     issues = check(resolve(scene, lib), lib)
     assert any(i.code == "collision" for i in issues)
 
@@ -1124,3 +1152,90 @@ def test_a_frozen_outline_survives_a_save(tmp_path, lib):
     back = load_scene(path)
     assert back.case.outline.size == (300.0, 200.0)
     assert back.case.outline.origin_offset == (-10.0, -20.0)
+
+
+# --------------------------------------------------------------------------
+# standing a board on edge
+# --------------------------------------------------------------------------
+
+def test_tilt_swaps_footprint_depth_for_height(lib):
+    """A 90 x 20 mm hub on edge becomes 90 mm wide and ~20 mm tall."""
+    scene = lab()
+    hub = next(p for p in scene.placements if p.id == "hub")
+    flat = next(s for s in resolve(scene, lib).solids if s.ref == "hub.pcb")
+    fx0, fy0, fx1, fy1 = flat.poly.bounds
+
+    hub.tilt = 90
+    up = next(s for s in resolve(scene, lib).solids if s.ref == "hub.pcb")
+    ux0, uy0, ux1, uy1 = up.poly.bounds
+
+    assert (ux1 - ux0) == pytest.approx(fx1 - fx0), "the long edge is untouched"
+    assert (uy1 - uy0) == pytest.approx(flat.z[1] - flat.z[0]), \
+        "its depth becomes the board thickness"
+    assert (up.z[1] - up.z[0]) == pytest.approx(fy1 - fy0), \
+        "and its height becomes what used to be its depth"
+
+
+def test_a_board_on_edge_takes_far_less_floor(lib):
+    scene = lab()
+    hub = next(p for p in scene.placements if p.id == "hub")
+    flat = sum(s.poly.area for s in resolve(scene, lib).solids if s.placement == "hub")
+    hub.tilt = 90
+    up = sum(s.poly.area for s in resolve(scene, lib).solids if s.placement == "hub")
+    assert up < flat * 0.3, "standing it up is the whole point"
+
+
+def test_every_quarter_turn_is_a_box(lib):
+    """Only multiples of 90 keep the 2.5D model honest, so all four must work
+    and none may lose volume."""
+    scene = lab()
+    hub = next(p for p in scene.placements if p.id == "hub")
+
+    def volume():
+        out = 0.0
+        for s in resolve(scene, lib).solids:
+            if s.placement == "hub":
+                out += s.poly.area * (s.z[1] - s.z[0])
+        return out
+
+    hub.tilt = 0
+    base = volume()
+    for t in (90, 180, 270):
+        hub.tilt = t
+        assert volume() == pytest.approx(base, rel=0.02), f"tilt {t} changed the volume"
+
+
+def test_tilt_turns_the_connectors_with_the_board(lib):
+    scene = lab()
+    hub = next(p for p in scene.placements if p.id == "hub")
+    flat = {c.ref: c.face_normal for c in resolve(scene, lib).connectors
+            if c.placement == "hub"}
+    hub.tilt = 90
+    up = {c.ref: c.face_normal for c in resolve(scene, lib).connectors
+          if c.placement == "hub"}
+    # the +y ports pointed sideways when flat; on edge they point up
+    ref = "hub.i2c0"
+    assert flat[ref][2] == pytest.approx(0.0)
+    assert up[ref][2] == pytest.approx(1.0, abs=1e-9)
+
+
+def test_flip_still_means_a_half_turn(lib):
+    """Old scenes say `flip: true`; it has to keep working."""
+    scene = lab()
+    hub = next(p for p in scene.placements if p.id == "hub")
+    hub.flip = True
+    a = next(s for s in resolve(scene, lib).solids if s.ref == "hub.pcb")
+    hub.flip = False
+    hub.tilt = 180
+    b = next(s for s in resolve(scene, lib).solids if s.ref == "hub.pcb")
+    assert a.z == pytest.approx(b.z)
+    assert a.poly.bounds == pytest.approx(b.poly.bounds)
+
+
+def test_only_quarter_turns_are_accepted():
+    from pydantic import ValidationError
+    from hwcase.schema import Placement
+
+    Placement(id="a", part="x", tilt=90)
+    with pytest.raises(ValidationError):
+        Placement(id="a", part="x", tilt=45)

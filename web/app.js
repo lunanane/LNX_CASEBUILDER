@@ -771,6 +771,7 @@ function renderSelection(force = false) {
     return;
   }
   const key = [pl.id, pl.parent ? 1 : 0, pl.on_panel || '', pl.mount || 'auto',
+    pl.tilt || 0,
     pl.under_panel ? 1 : 0,
     JSON.stringify(pl.sides || [])].join('|');
   if (force || shellFor !== key) { buildSelectionShell(pl); shellFor = key; }
@@ -912,6 +913,12 @@ function buildSelectionShell(pl) {
       ${attached ? 'disabled' : ''}></div>
     <div class="field"><label>z</label><input id="f-z" type="number" step="0.5"
       ${solvedZ ? 'disabled' : ''}></div>
+    <div class="field"><label>stand</label><select id="f-tilt">
+      <option value="0">flat</option>
+      <option value="90">on edge (front)</option>
+      <option value="180">upside down</option>
+      <option value="270">on edge (back)</option>
+    </select></div>
     <div class="field"><label>rot</label><input id="f-r" type="number" step="15">
       <button id="b-ccw" title="rotate 90&deg; counter-clockwise">&#8634;90</button>
       <button id="b-cw" title="rotate 90&deg; clockwise">90&#8635;</button></div>
@@ -961,6 +968,7 @@ function buildSelectionShell(pl) {
       scheduleResolve(0);
     };
   };
+  sel('f-tilt', (v) => { pl.tilt = parseInt(v, 10); pl.flip = false; });
   sel('f-mount', (v) => (pl.mount = v));
   sel('f-panel', (v) => (pl.on_panel = v || null));
   sel('f-panelref', (v) => (pl.panel_ref = v));
@@ -995,6 +1003,8 @@ function updateSelectionValues(pl) {
   set('f-r', pl.rot_z || 0);
   set('f-g', pl.mate_gap || 0);
   set('f-panelofs', pl.panel_offset || 0);
+  const ti = $('f-tilt');
+  if (ti) ti.value = String(pl.tilt || (pl.flip ? 180 : 0));
   const mo = $('f-mount'); if (mo) mo.value = pl.mount || 'auto';
   const p = $('f-panel'); if (p) p.value = pl.on_panel || '';
   const r = $('f-panelref'); if (r) r.value = pl.panel_ref || 'auto';
@@ -1028,7 +1038,7 @@ function addPlacement(partId) {
     pos: e ? [e.max[0] + 20, e.min[1], 0] : [0, 0, 0],
     rot_z: 0, flip: false, locked: false,
     parent: null, parent_mate: null, mate: null, mate_gap: 0,
-    mount: 'auto', on_panel: null, panel_ref: 'auto', panel_offset: 0,
+    tilt: 0, mount: 'auto', on_panel: null, panel_ref: 'auto', panel_offset: 0,
   });
   select(state.scene.placements.at(-1).id);
   scheduleResolve(0);

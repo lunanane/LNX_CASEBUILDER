@@ -365,9 +365,17 @@ class Placement(Strict):
 
     pos: Vec3 = (0.0, 0.0, 0.0)
     rot_z: float = 0.0
-    #: flipped upside down (180 deg about local X): component side faces -Z
+    #: quarter turns about the part's own X axis: 0 flat, 90 on edge, 180 upside
+    #: down, 270 on the other edge. Only multiples of 90 -- the engine is 2.5D
+    #: and a board at 30 degrees has no single z interval.
+    tilt: Literal[0, 90, 180, 270] = 0
+    #: old name for `tilt: 180`; kept so existing scenes still load
     flip: bool = False
     locked: bool = False
+
+    @property
+    def effective_tilt(self) -> int:
+        return 180 if (self.flip and self.tilt == 0) else self.tilt
 
     parent: Optional[str] = None
     parent_mate: Optional[str] = None

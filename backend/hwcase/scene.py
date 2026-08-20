@@ -182,10 +182,10 @@ def _solve_mate(placement: Placement, part: Part, parent_part: Part,
               target[1] + n_parent[1] * placement.mate_gap,
               target[2] + n_parent[2] * placement.mate_gap)
 
-    probe = Frame(pos=(0.0, 0.0, 0.0), rot_z=rot_z, flip=flip)
+    probe = Frame(pos=(0.0, 0.0, 0.0), rot_z=rot_z, tilt=180 if flip else 0)
     off = probe.point(cm.at)
     frame = Frame(pos=(target[0] - off[0], target[1] - off[1], target[2] - off[2]),
-                  rot_z=rot_z, flip=flip)
+                  rot_z=rot_z, tilt=180 if flip else 0)
     return frame, issues
 
 
@@ -205,7 +205,7 @@ def _subtree(placements: list[Placement], root: str) -> list[str]:
 def _volume_top(part: Part, frame: Frame, name: str) -> Optional[float]:
     for v in part.volumes:
         if v.name == name:
-            return frame.z_interval((v.z_min(), v.z_max()))[1]
+            return frame.place(box_polygon(v), (v.z_min(), v.z_max()))[1][1]
     return None
 
 
@@ -213,9 +213,10 @@ def _part_top(part: Part, frame: Frame, kinds: Optional[set] = None) -> Optional
     tops = []
     for v in part.volumes:
         if kinds is None or v.kind in kinds:
-            tops.append(frame.z_interval((v.z_min(), v.z_max()))[1])
+            tops.append(frame.place(box_polygon(v), (v.z_min(), v.z_max()))[1][1])
     if kinds is None:
-        tops.append(frame.z_interval((0.0, part.pcb_thickness))[1])
+        tops.append(frame.place(outline_polygon(part.outline),
+                                (0.0, part.pcb_thickness))[1][1])
     return max(tops) if tops else None
 
 
@@ -261,12 +262,13 @@ def mount_of(scene: Scene, lib: PartLibrary, pl: Placement) -> Mount:
 
 
 def _part_bottom(part: Part, frame: Frame) -> float:
-    zs = [frame.z_interval((0.0, part.pcb_thickness))[0]]
+    zs = [frame.place(outline_polygon(part.outline), (0.0, part.pcb_thickness))[1][0]]
     for v in part.volumes:
-        zs.append(frame.z_interval((v.z_min(), v.z_max()))[0])
+        zs.append(frame.place(box_polygon(v), (v.z_min(), v.z_max()))[1][0])
     for c in part.connectors:
         if c.body is not None:
-            zs.append(frame.z_interval((c.body.z_min(), c.body.z_max()))[0])
+            zs.append(frame.place(box_polygon(c.body),
+                                  (c.body.z_min(), c.body.z_max()))[1][0])
     return min(zs)
 
 
@@ -298,7 +300,7 @@ def _fit_to_floor(scene: Scene, lib: PartLibrary, frames: dict[str, Frame],
         for pid in ids:
             f = frames[pid]
             frames[pid] = Frame(pos=(f.pos[0], f.pos[1], f.pos[2] + dz),
-                                rot_z=f.rot_z, flip=f.flip)
+                                rot_z=f.rot_z, tilt=f.tilt)
     return datum, issues
 
 
@@ -391,7 +393,7 @@ def _fit_to_panels(scene: Scene, lib: PartLibrary, frames: dict[str, Frame],
         for pid in ids:
             f = frames[pid]
             frames[pid] = Frame(pos=(f.pos[0], f.pos[1], f.pos[2] + dz),
-                                rot_z=f.rot_z, flip=f.flip)
+                                rot_z=f.rot_z, tilt=f.tilt)
     return issues
 
 
@@ -436,14 +438,14 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
             frame, mate_issues = _solve_mate(pl, part, lib[parent_pl.part], frames[pl.parent])
             issues += mate_issues
         else:
-            frame = Frame(pos=pl.pos, rot_z=pl.rot_z, flip=pl.flip)
+            frame = Frame(pos=pl.pos, rot_z=pl.rot_z, tilt=pl.effective_tilt)
         frames[pl.id] = frame
 
     # anchor: shift everything so the anchor placement sits at the origin
     if scene.anchor and scene.anchor in frames:
         a = frames[scene.anchor].pos
         frames = {k: Frame(pos=(f.pos[0] - a[0], f.pos[1] - a[1], f.pos[2] - a[2]),
-                           rot_z=f.rot_z, flip=f.flip)
+                           rot_z=f.rot_z, tilt=f.tilt)
                   for k, f in frames.items()}
 
     # panels are world planes, so they are solved after the anchor shift, and
@@ -461,16 +463,15 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
         # the PCB itself is a body too
         pcb = outline_polygon(part.outline)
         if part.pcb_thickness > 0:
+            poly, zi = frame.place(pcb, (0.0, part.pcb_thickness))
             solids.append(Solid(pl.id, part.id, "pcb", VolumeKind.body,
-                                frame.polygon(pcb),
-                                frame.z_interval((0.0, part.pcb_thickness)), part.src))
+                                poly, zi, part.src))
 
         for v in part.volumes:
             # a repeat grid expands here: sixteen buttons, four shafts
             for inst_name, inst_at in v.instances():
-                solids.append(Solid(pl.id, part.id, inst_name, v.kind,
-                                    frame.polygon(box_polygon(v, inst_at)),
-                                    frame.z_interval((v.z_min(), v.z_max())), v.src))
+                poly, zi = frame.place(box_polygon(v, inst_at), (v.z_min(), v.z_max()))
+                solids.append(Solid(pl.id, part.id, inst_name, v.kind, poly, zi, v.src))
 
         by_side: dict[Face, SidePolicy] = {sp.side: sp for sp in pl.sides}
 
@@ -487,10 +488,10 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
                 included = c.name in policy_for.include
 
             if c.body is not None:
+                poly, zi = frame.place(box_polygon(c.body),
+                                       (c.body.z_min(), c.body.z_max()))
                 solids.append(Solid(pl.id, part.id, c.body.name, VolumeKind.body,
-                                    frame.polygon(box_polygon(c.body)),
-                                    frame.z_interval((c.body.z_min(), c.body.z_max())),
-                                    c.src))
+                                    poly, zi, c.src))
             # An external connector needs the plug *and* room for the cable to
             # turn away from the wall. An internal one only needs the plug body:
             # the cable can curve off in any direction inside the box.
@@ -501,9 +502,10 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
             height = max(c.cutout[1] if c.cutout else 10.0, 8.0)
             body_z = (c.body.z_min(), c.body.z_max()) if c.body is not None else None
             poly, zi = corridor(c.at, c.face, reach, width, height, body_z)
+            wpoly, wzi = frame.place(poly, zi)
             connectors.append(WorldConnector(
                 pl.id, part.id, c, frame.point(c.at), frame.direction(c.face.normal),
-                frame.polygon(poly), frame.z_interval(zi), policy, included))
+                wpoly, wzi, policy, included))
 
         # a side asked to be left open: work out how high the hole has to go
         for sp in pl.sides:

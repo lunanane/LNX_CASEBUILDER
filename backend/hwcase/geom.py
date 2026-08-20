@@ -23,18 +23,45 @@ from .schema import Box, Face, Outline, PolyOutline, RectOutline, Vec2, Vec3
 class Frame:
     """Rigid placement of a part in world space.
 
-    `flip` means the part was turned over: a 180 deg rotation about its local X
-    axis, so local +Z points down. Applied before `rot_z`.
+    `tilt` turns the part about its own X axis, in quarter turns only:
+
+        0    flat, component side up
+        90   stood on its bottom edge, component side facing -Y
+        180   turned over (what `flip` used to mean)
+        270   stood on its top edge, component side facing +Y
+
+    Quarter turns are the whole story on purpose. The engine is 2.5D -- a part
+    is boxes with a footprint and a z interval -- and only multiples of 90
+    map a box to another box. A board tilted 30 degrees has no single z
+    interval, so allowing it would quietly wreck every collision test and every
+    layer. Standing a board on edge to squeeze it between two others needs
+    exactly this and nothing more.
+
+    `rot_z` is applied after the tilt, about world Z.
     """
 
     pos: Vec3 = (0.0, 0.0, 0.0)
     rot_z: float = 0.0
-    flip: bool = False
+    tilt: int = 0
+
+    @property
+    def flip(self) -> bool:
+        """Backwards compatibility: `flip` was a 180 degree tilt."""
+        return self.tilt == 180
+
+    def _tilt_point(self, p: Vec3) -> Vec3:
+        x, y, z = p
+        t = self.tilt % 360
+        if t == 90:
+            return (x, -z, y)
+        if t == 180:
+            return (x, -y, -z)
+        if t == 270:
+            return (x, z, -y)
+        return (x, y, z)
 
     def point(self, p: Vec3) -> Vec3:
-        x, y, z = p
-        if self.flip:
-            y, z = -y, -z
+        x, y, z = self._tilt_point(p)
         a = math.radians(self.rot_z)
         ca, sa = math.cos(a), math.sin(a)
         return (
@@ -45,25 +72,53 @@ class Frame:
 
     def direction(self, d: Vec3) -> Vec3:
         """Rotate a direction vector; no translation."""
-        x, y, z = d
-        if self.flip:
-            y, z = -y, -z
+        x, y, z = self._tilt_point(d)
         a = math.radians(self.rot_z)
         ca, sa = math.cos(a), math.sin(a)
         return (x * ca - y * sa, x * sa + y * ca, z)
 
     def polygon(self, poly: Polygon) -> Polygon:
-        """Map a part-local footprint into world XY."""
-        if self.flip:
+        """Map a part-local footprint into world XY.
+
+        Only meaningful for an untilted part: once a board is on edge its
+        footprint and its height are entangled, so use `place` instead.
+        """
+        if self.tilt == 180:
             poly = Polygon([(x, -y) for x, y in poly.exterior.coords])
         poly = rotate(poly, self.rot_z, origin=(0, 0), use_radians=False)
         return translate(poly, self.pos[0], self.pos[1])
 
     def z_interval(self, z: Vec2) -> Vec2:
         lo, hi = min(z), max(z)
-        if self.flip:
+        if self.tilt == 180:
             lo, hi = -hi, -lo
         return (lo + self.pos[2], hi + self.pos[2])
+
+    def place(self, poly: Polygon, z: Vec2) -> tuple[Polygon, Vec2]:
+        """Put one local feature into the world as (footprint, z interval).
+
+        Flat and upside-down keep the exact outline -- a round hole stays round.
+        On edge, the outline and the height swap roles, so the feature is taken
+        as its bounding box: a cylinder lying down is treated as the box around
+        it. That is conservative for collision and slightly generous for a
+        panel cutout, which is the safe direction to be wrong in.
+        """
+        t = self.tilt % 360
+        if t in (0, 180):
+            return self.polygon(poly), self.z_interval(z)
+
+        x0, y0, x1, y1 = poly.bounds
+        z0, z1 = min(z), max(z)
+        if t == 90:
+            ny0, ny1 = -z1, -z0
+            nz0, nz1 = y0, y1
+        else:                                  # 270
+            ny0, ny1 = z0, z1
+            nz0, nz1 = -y1, -y0
+        flat = Polygon([(x0, ny0), (x1, ny0), (x1, ny1), (x0, ny1)])
+        flat = rotate(flat, self.rot_z, origin=(0, 0), use_radians=False)
+        flat = translate(flat, self.pos[0], self.pos[1])
+        return flat, (nz0 + self.pos[2], nz1 + self.pos[2])
 
 
 def rounded_rect(size: Vec2, corner_radius: float = 0.0, origin: str = "center",
