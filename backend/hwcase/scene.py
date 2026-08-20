@@ -64,7 +64,8 @@ class WorldConnector:
     @property
     def cuts_the_wall(self) -> bool:
         return self.included and self.policy in (
-            CutoutPolicy.per_connector, CutoutPolicy.open_to_edge)
+            CutoutPolicy.per_connector, CutoutPolicy.open_to_edge,
+            CutoutPolicy.channel)
 
 
 @dataclass
@@ -567,7 +568,7 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
             # turn away from the wall. An internal one only needs the plug body:
             # the cable can curve off in any direction inside the box.
             reach = c.plug_depth + (c.bend_radius if c.external else 0.0)
-            if policy is CutoutPolicy.open_to_edge:
+            if policy in (CutoutPolicy.open_to_edge, CutoutPolicy.channel):
                 reach = REACH          # run the slot out through the wall
             # An explicit cutout is a measurement and must be honoured: a
             # 3.5 mm jack wants a 6.5 mm hole, and clamping it to 8 mm makes a
@@ -576,6 +577,17 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
                 width, height = c.cutout
             else:
                 width = height = 10.0
+            if policy is CutoutPolicy.channel and policy_for is not None:
+                # A groove sized for access, not for the plug -- but never
+                # narrower than the port itself, or the plug would not pass.
+                if included and policy_for.channel_width < width - 1e-6:
+                    issues.append(Issue(
+                        "info", "channel_widened",
+                        f"{pl.id}.{c.name}: the {policy_for.channel_width:.1f} mm "
+                        f"channel was opened to {width:.1f} mm, which is what the "
+                        f"port itself needs",
+                        [f"{pl.id}.{c.name}"]))
+                width = max(width, policy_for.channel_width)
             body_z = (c.body.z_min(), c.body.z_max()) if c.body is not None else None
             poly, zi = corridor(c.at, c.face, reach, width, height, body_z,
                                 round_mouth=c.cutout_shape == "circle")
@@ -616,8 +628,9 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
         for sp in pl.sides:
             if sp.cutout is not CutoutPolicy.open_side:
                 continue
-            tops = [max(c.corridor_z) for c in connectors
+            band = [c.corridor_z for c in connectors
                     if c.placement == pl.id and c.conn.face is sp.side and c.included]
+            tops = [max(z) for z in band]
             if not tops:
                 issues.append(Issue(
                     "warning", "open_side_empty",
@@ -633,9 +646,14 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
                     f"not {sp.side.value}",
                     [pl.id]))
                 continue
+            # Only the band the ports actually occupy. Taking everything from
+            # the floor up removed the base of the case along with the wall --
+            # the whole side fell away, when what is wanted is an opening you
+            # can reach a plug through, with a continuous sheet underneath.
             ceiling = max(tops) + sp.headroom
+            floor_of_band = min(min(z) for z in band) - sp.headroom
             side_openings.append(SideOpening(
-                pl.id, sp.side, region, (-1e6, ceiling),
+                pl.id, sp.side, region, (floor_of_band, ceiling),
                 f"open side for {', '.join(sorted(c.conn.name for c in connectors if c.placement == pl.id and c.conn.face is sp.side and c.included))}"))
 
     return Resolved(scene=scene, frames=frames, solids=solids,

@@ -524,18 +524,30 @@ def test_open_to_edge_runs_the_slot_out_through_the_wall(lib):
     assert after.corridor_poly.area > before.corridor_poly.area * 5
 
 
-def test_open_side_removes_the_floor_beyond_that_edge(lib):
+def _band_layer(model, opening):
+    """The layer sitting in the middle of an opened band."""
+    mid = (opening.z[0] + opening.z[1]) / 2
+    return min(model.layers, key=lambda l: abs((l.z0 + l.z1) / 2 - mid))
+
+
+def test_open_side_removes_the_wall_across_the_band(lib):
+    """Across the band the ports occupy -- not the floor. It used to take
+    everything from the bottom up, which took the base of the case with it."""
     from hwcase.schema import Face
 
     scene = load_scene(SCENE)
-    solid_floor = build(resolve(scene, lib)).layers[0].geom.area
+    plain = build(resolve(scene, lib))
 
     _pi_side(scene, Face.ny, cutout="open_side")
     res = resolve(scene, lib)
     assert len(res.side_openings) == 1
     opened = build(res)
-    assert opened.layers[0].geom.area < solid_floor * 0.95, \
-        "opening a side should take a visible bite out of the floor"
+
+    band = _band_layer(opened, res.side_openings[0])
+    assert band.geom.area < plain.layers[band.index].geom.area * 0.95, \
+        "the band should have a visible bite taken out of it"
+    assert opened.layers[0].geom.area == pytest.approx(plain.layers[0].geom.area), \
+        "but the bottom plate stays whole"
 
 
 def test_open_side_stops_above_the_cable(lib):
@@ -563,7 +575,9 @@ def test_open_side_span_board_is_narrower_than_full(lib):
     def area(span):
         scene = load_scene(SCENE)
         _pi_side(scene, Face.ny, cutout="open_side", span=span)
-        return build(resolve(scene, lib)).layers[0].geom.area
+        res = resolve(scene, lib)
+        model = build(res)
+        return _band_layer(model, res.side_openings[0]).geom.area
 
     assert area("board") > area("full"), "span=board should remove less material"
 
@@ -1622,3 +1636,114 @@ def test_corner_bolts_sit_inside_the_wall(demo):
     for cx, cy in ((x0 + i, y0 + i), (x1 - i, y0 + i),
                    (x0 + i, y1 - i), (x1 - i, y1 - i)):
         assert model.outer.contains(Point(cx, cy))
+
+
+# --------------------------------------------------------------------------
+# getting at a side port without losing the side
+# --------------------------------------------------------------------------
+
+def _pi_side_scene(side, policy, **kw):
+    from hwcase.schema import Face, SidePolicy
+    scene = load_scene(SCENE)
+    next(p for p in scene.placements if p.id == "pi").sides = [
+        SidePolicy(side=Face(side), cutout=policy, **kw)]
+    return scene
+
+
+def test_open_side_keeps_the_floor(lib):
+    """It used to take everything from the bottom up, so the base of the case
+    went with the wall. What is wanted is an opening you can reach a plug
+    through, with a continuous sheet underneath."""
+    scene = _pi_side_scene("-y", "open_side")
+    plain = build(resolve(load_scene(SCENE), lib))
+    opened = build(resolve(scene, lib))
+    assert opened.layers[0].geom.area == pytest.approx(plain.layers[0].geom.area), \
+        "the bottom plate must be untouched"
+
+
+def test_open_side_is_a_band_around_the_ports(lib):
+    scene = _pi_side_scene("-y", "open_side", headroom=2.0)
+    res = resolve(scene, lib)
+    opening = res.side_openings[0]
+
+    ports = [c for c in res.connectors
+             if c.placement == "pi" and c.conn.face.value == "-y" and c.included]
+    lo = min(min(c.corridor_z) for c in ports)
+    hi = max(max(c.corridor_z) for c in ports)
+    assert opening.z[0] == pytest.approx(lo - 2.0)
+    assert opening.z[1] == pytest.approx(hi + 2.0)
+    assert opening.z[0] > -1000.0, "no longer unbounded below"
+
+
+def test_open_side_leaves_the_layers_above_alone(lib):
+    """So a screen still gets a continuous sheet under it."""
+    scene = _pi_side_scene("-y", "open_side")
+    res = resolve(scene, lib)
+    plain = build(resolve(load_scene(SCENE), lib))
+    opened = build(res)
+    top = res.side_openings[0].z[1]
+    for a, b in zip(plain.layers, opened.layers):
+        if a.z0 > top:
+            assert b.geom.area == pytest.approx(a.geom.area), \
+                f"layer {a.index} is above the band and should be untouched"
+
+
+def test_a_channel_keeps_the_case_shape(lib):
+    """The whole point of it: the case stays balanced, with a groove cut in."""
+    from hwcase.case import outer_shape
+
+    plain = load_scene(SCENE)
+    channel = _pi_side_scene("-y", "channel", channel_width=10.0)
+    a = outer_shape(resolve(plain, lib), plain.case).bounds
+    b = outer_shape(resolve(channel, lib), channel.case).bounds
+    assert a == pytest.approx(b)
+    assert resolve(channel, lib).side_openings == [], \
+        "a channel is a groove, not an open side"
+
+
+def test_a_wider_channel_removes_more(lib):
+    def area(w):
+        scene = _pi_side_scene("-y", "channel", channel_width=w)
+        return sum(l.geom.area for l in build(resolve(scene, lib)).layers)
+
+    assert area(24.0) < area(12.0)
+
+
+def test_a_channel_runs_out_through_the_wall(lib):
+    scene = _pi_side_scene("-y", "channel", channel_width=10.0)
+    res = resolve(scene, lib)
+    hdmi = next(c for c in res.connectors if c.ref == "pi.hdmi")
+    x0, y0, x1, y1 = hdmi.corridor_poly.bounds
+    assert max(x1 - x0, y1 - y0) > 500.0, "it should reach past any outline"
+    assert hdmi.cuts_the_wall
+
+
+def test_a_channel_is_never_narrower_than_its_port(lib):
+    """Asking for 6 mm at a 17 mm HDMI would make the port unusable, so the
+    port wins -- and says so rather than silently ignoring the number."""
+    scene = _pi_side_scene("-y", "channel", channel_width=6.0)
+    res = resolve(scene, lib)
+    hdmi = next(c for c in res.connectors if c.ref == "pi.hdmi")
+    x0, y0, x1, y1 = hdmi.corridor_poly.bounds
+    assert min(x1 - x0, y1 - y0) == pytest.approx(17.0, abs=0.01)
+    assert any(i.code == "channel_widened" for i in res.issues)
+
+
+def test_a_channel_widens_a_narrow_port(lib):
+    scene = _pi_side_scene("-y", "channel", channel_width=14.0)
+    res = resolve(scene, lib)
+    jack = next(c for c in res.connectors if c.ref == "pi.av_jack")
+    x0, y0, x1, y1 = jack.corridor_poly.bounds
+    assert min(x1 - x0, y1 - y0) == pytest.approx(14.0, abs=0.01), \
+        "a 9 mm jack should get the full 14 mm of access"
+
+
+@pytest.mark.parametrize("policy", ["open_side", "channel", "open_to_edge"])
+def test_side_policies_leave_nothing_loose(lib, policy):
+    scene = _pi_side_scene("-y", policy)
+    model = build(resolve(scene, lib))
+    edge = model.outer.boundary.buffer(0.05)
+    for layer in model.layers:
+        for piece in _all_pieces(layer.geom):
+            assert piece.intersects(edge), \
+                f"{policy} left an island in layer {layer.index}"

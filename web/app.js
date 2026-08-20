@@ -804,7 +804,7 @@ function renderSelection(force = false) {
 const SIDES = ['+x', '-x', '+y', '-y'];
 const SIDE_LABEL = { '+x': 'right (+x)', '-x': 'left (-x)',
                      '+y': 'back (+y)', '-y': 'front (-y)' };
-const POLICIES = ['per_connector', 'open_to_edge', 'open_side', 'none'];
+const POLICIES = ['per_connector', 'open_to_edge', 'channel', 'open_side', 'none'];
 
 function connectorsOn(placementId, side) {
   return (state.resolved?.connectors || [])
@@ -819,7 +819,7 @@ function sideEntry(pl, side, create = false) {
   let e = pl.sides.find((s) => s.side === side);
   if (!e && create) {
     e = { side, cutout: 'per_connector', include: null, margin: null,
-          headroom: 2.0, span: 'full' };
+          channel_width: 10.0, headroom: 2.0, span: 'full' };
     pl.sides.push(e);
   }
   return e || null;
@@ -859,6 +859,11 @@ function sidesSection(pl) {
         <input type="number" step="0.5" min="0" placeholder="auto"
                data-margin="${side}" value="${e && e.margin != null ? e.margin : ''}">
         <span class="preset">mm to outside</span></div>`;
+    const chan = policy === 'channel' ? `
+      <div class="field"><label>width</label>
+        <input type="number" step="1" min="1" data-chanw="${side}"
+               value="${e ? e.channel_width : 10}">
+        <span class="preset">mm groove</span></div>` : '';
     const extra = policy === 'open_side' ? `
       <div class="field"><label>head</label>
         <input type="number" step="0.5" data-headroom="${side}"
@@ -870,7 +875,7 @@ function sidesSection(pl) {
     return `<div class="side">
       <div class="side-head"><span>${SIDE_LABEL[side]}</span>
         <select data-policy="${side}">${opts}</select></div>
-      ${wall}${extra}<div class="ports">${ports}</div>
+      ${wall}${chan}${extra}<div class="ports">${ports}</div>
     </div>`;
   }).join('');
   if (!rows) return '';
@@ -904,6 +909,14 @@ function wireSides(pl) {
       edit();
       const v = el.value.trim();
       sideEntry(pl, el.dataset.margin, true).margin = v === '' ? null : (parseFloat(v) || 0);
+      scheduleResolve(0);
+    };
+  });
+  box.querySelectorAll('[data-chanw]').forEach((el) => {
+    el.onchange = () => {
+      edit();
+      sideEntry(pl, el.dataset.chanw, true).channel_width =
+        parseFloat(el.value) || 10.0;
       scheduleResolve(0);
     };
   });

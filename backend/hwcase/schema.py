@@ -306,8 +306,14 @@ class CutoutPolicy(str, Enum):
     #: the same openings, but run out to the edge as slots, so a plug already
     #: fitted to a cable can be threaded in from outside
     open_to_edge = "open_to_edge"
-    #: remove everything beyond this edge, from the bottom up to just above the
-    #: cable. Gives a seamless faceplate over an open, variable underside.
+    #: a groove of a chosen width running from each port straight out to the
+    #: edge. The case keeps its full shape everywhere else, so it stays
+    #: balanced, and you can still get a finger and a plug down the channel.
+    channel = "channel"
+    #: open the whole of this side, but only across the BAND the ports occupy.
+    #: The layers below stay solid and act as the base, the layers above stay
+    #: solid too -- so a screen still gets a continuous sheet underneath it and
+    #: the ports are reachable along the entire side.
     open_side = "open_side"
 
 
@@ -323,7 +329,9 @@ class SidePolicy(Strict):
     #: inside its board ends up buried that far in. Set it, and the case wall on
     #: that side is brought to exactly this distance from the socket mouth.
     margin: Optional[float] = None
-    #: clearance kept above the highest included connector, for `open_side`
+    #: how wide a `channel` is cut. A centimetre gets a finger and a plug in.
+    channel_width: float = 10.0
+    #: clearance kept above and below the ports, for `open_side` and `channel`
     headroom: float = 2.0
     #: `full` opens the whole case beyond that edge; `board` only the width of
     #: the board itself, so neighbouring hardware keeps its floor
