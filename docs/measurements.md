@@ -89,12 +89,24 @@ its outline.
 
 **Measure:** outline, height with Grove sockets, and hole positions.
 
-### 6. NeoTrellis mounting holes  `estimated`
+### 6. ~~NeoTrellis mounting holes~~ — solved, from the STEP
 
-Outline is exact (60.000 × 60.000 × 7.570 mm, from the vendor mesh) but the mesh
-has no holes modelled. We guessed 3 mm in from each corner.
+The STL is a slab with the holes gone, but **STEP keeps them**: a hole is a
+cylindrical face bounded by circles, stored as text. `tools/extract_holes.py`
+reads them straight out. Our guess of one M2 per corner was wrong on all three
+Adafruit boards:
 
-**Measure:** hole positions and diameter.
+| part | real pattern |
+|---|---|
+| 3954 NeoTrellis | **8 × M2.5** (2.8 mm), two rows at y = 15 and 45, x = 2 / 28 / 32 / 58 |
+| 4741 OLED | 4 × M2 (2.5 mm) on 30.48 × 41.91 mm — 1.2" × 1.65" |
+| 5752 quad encoder | 4 × M2 (2.5 mm) on 38.1 × 16.52 mm — 1.5" × 0.65" |
+
+Run it on any vendor STEP:
+
+```bash
+python tools/extract_holes.py "vendor/cad/adafruit/3954/*.step"
+```
 
 ### 7. OLED 4741 active-window offset  `estimated`
 

@@ -24,11 +24,17 @@ parts:
       origin: min
     pcb_thickness: 1.6
 
+    # Eight M2.5 clearance holes in two rows, read out of the vendor STEP
+    # with tools/extract_holes.py. Our guess of one per corner was wrong.
     holes:
-      - {name: h1, at: [3.0, 3.0], diameter: 2.5, screw: M2, src: {confidence: estimated}}
-      - {name: h2, at: [57.0, 3.0], diameter: 2.5, screw: M2, src: {confidence: estimated}}
-      - {name: h3, at: [3.0, 57.0], diameter: 2.5, screw: M2, src: {confidence: estimated}}
-      - {name: h4, at: [57.0, 57.0], diameter: 2.5, screw: M2, src: {confidence: estimated}}
+      - {name: h1, at: [2.0, 15.0], diameter: 2.8, screw: M2.5, src: {confidence: datasheet, note: "from the vendor STEP"}}
+      - {name: h2, at: [2.0, 45.0], diameter: 2.8, screw: M2.5, src: {confidence: datasheet, note: "from the vendor STEP"}}
+      - {name: h3, at: [28.0, 15.0], diameter: 2.8, screw: M2.5, src: {confidence: datasheet, note: "from the vendor STEP"}}
+      - {name: h4, at: [28.0, 45.0], diameter: 2.8, screw: M2.5, src: {confidence: datasheet, note: "from the vendor STEP"}}
+      - {name: h5, at: [32.0, 15.0], diameter: 2.8, screw: M2.5, src: {confidence: datasheet, note: "from the vendor STEP"}}
+      - {name: h6, at: [32.0, 45.0], diameter: 2.8, screw: M2.5, src: {confidence: datasheet, note: "from the vendor STEP"}}
+      - {name: h7, at: [58.0, 15.0], diameter: 2.8, screw: M2.5, src: {confidence: datasheet, note: "from the vendor STEP"}}
+      - {name: h8, at: [58.0, 45.0], diameter: 2.8, screw: M2.5, src: {confidence: datasheet, note: "from the vendor STEP"}}
 
     volumes:
       - name: leds_and_pads
@@ -183,6 +189,14 @@ parts:
         size: [76.2, 21.59]
         z: [-4.3, 0.0]
         src: {confidence: datasheet, note: "QT sockets / passives on the back face"}
+
+    # Four M2 clearance holes on a 38.1 x 16.52 mm pattern (1.5" x 0.65"),
+    # from the vendor STEP.
+    holes:
+      - {name: h1, at: [19.05, 2.54], diameter: 2.5, screw: M2, src: {confidence: datasheet, note: "from the vendor STEP"}}
+      - {name: h2, at: [19.05, 19.05], diameter: 2.5, screw: M2, src: {confidence: datasheet, note: "from the vendor STEP"}}
+      - {name: h3, at: [57.15, 2.54], diameter: 2.5, screw: M2, src: {confidence: datasheet, note: "from the vendor STEP"}}
+      - {name: h4, at: [57.15, 19.05], diameter: 2.5, screw: M2, src: {confidence: datasheet, note: "from the vendor STEP"}}
 
     connectors:
       - name: qt_left

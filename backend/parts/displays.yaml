@@ -101,6 +101,14 @@ parts:
       origin: min
     pcb_thickness: 1.6
 
+    # Four M2 clearance holes on a 30.48 x 41.91 mm pattern (1.2" x 1.65"),
+    # from the vendor STEP.
+    holes:
+      - {name: h1, at: [2.54, 2.54], diameter: 2.5, screw: M2, src: {confidence: datasheet, note: "from the vendor STEP"}}
+      - {name: h2, at: [2.54, 44.45], diameter: 2.5, screw: M2, src: {confidence: datasheet, note: "from the vendor STEP"}}
+      - {name: h3, at: [33.02, 2.54], diameter: 2.5, screw: M2, src: {confidence: datasheet, note: "from the vendor STEP"}}
+      - {name: h4, at: [33.02, 44.45], diameter: 2.5, screw: M2, src: {confidence: datasheet, note: "from the vendor STEP"}}
+
     volumes:
       - name: glass
         kind: body
