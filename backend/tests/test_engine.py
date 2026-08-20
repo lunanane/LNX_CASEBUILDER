@@ -941,3 +941,61 @@ def test_duplicate_volume_names_are_rejected(lib):
         PartLibrary([make(["a", "a"])])
     with pytest.raises(ValueError, match="collides"):
         PartLibrary([make(["pcb"])])
+
+
+# --------------------------------------------------------------------------
+# the faceplate is the top of the case
+# --------------------------------------------------------------------------
+
+def test_no_layers_above_the_faceplate(demo):
+    """The case used to be sized to the tallest solid, which is the encoder
+    shafts -- and those deliberately stand proud of the panel for the knobs. So
+    it grew upwards to 'enclose' the knobs and drew three layers above the
+    faceplate that could not exist."""
+    model = build(demo)
+    panel_z = demo.panels["main"]
+    above = [l for l in model.layers if l.z0 >= panel_z - 1e-6]
+    assert above == [], f"{len(above)} layers float above the faceplate"
+    assert model.z1 == pytest.approx(panel_z, abs=1e-6)
+
+
+def test_the_lid_is_the_faceplate(demo):
+    model = build(demo)
+    assert model.layers[-1].z1 == pytest.approx(demo.panels["main"], abs=1e-6)
+    assert model.layers[-1].role == "lid"
+
+
+def test_things_poking_through_do_not_grow_the_case(lib):
+    """Lengthen the knob shafts and the case must not get taller."""
+    scene = load_scene(SCENE)
+    before = build(resolve(scene, lib)).z1
+
+    enc = next(p for p in scene.placements if p.id == "encoders")
+    enc.panel_offset = 0.0
+    tall = lib["adafruit-5752-quad-encoder"].model_copy(deep=True)
+    shafts = next(v for v in tall.volumes if v.name == "shafts")
+    shafts.z = (shafts.z[0], shafts.z[1] + 25.0)      # much longer shafts
+    from hwcase.library import PartLibrary
+    bigger = PartLibrary([p for p in lib if p.id != tall.id] + [tall])
+
+    after = build(resolve(scene, bigger)).z1
+    assert after == pytest.approx(before, abs=1e-6)
+
+
+def test_without_panels_the_case_still_closes_over_everything(lib):
+    """No panel means no faceplate to pin to, so fall back to enclosing the lot."""
+    scene = load_scene(SCENE)
+    scene.panels = []
+    for pl in scene.placements:
+        pl.on_panel = None
+        pl.mount = "manual"
+    res = resolve(scene, lib)
+    model = build(res)
+    assert model.z1 >= res.bounds()[5] - 1e-6
+
+
+def test_the_floor_keeps_its_clearance(demo):
+    """Slack from rounding the sheet stack goes under the floor, never on top."""
+    model = build(demo)
+    deepest = min(s.z[0] for s in demo.solids)
+    assert deepest - model.z0 >= demo.scene.case.floor_gap - 1e-6

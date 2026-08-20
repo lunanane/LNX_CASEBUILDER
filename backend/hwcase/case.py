@@ -99,9 +99,22 @@ def build(res: Resolved, spec: Optional[CaseSpec] = None) -> CaseModel:
     outer = outer_shape(res, spec)
 
     _, _, zmin, _, _, zmax = res.bounds()
+
+    # The top of the case is the faceplate, not the tallest thing in the scene.
+    # Knob shafts, jack bushings and button caps deliberately stand proud of the
+    # panel -- they are outside the box. Sizing the case to them grew it upwards
+    # to "enclose" the knobs and produced phantom layers above the faceplate.
+    if res.panels:
+        z1 = max(res.panels.values())
+    else:
+        z1 = zmax + spec.ceiling_gap
     z0 = zmin - spec.floor_gap
-    z1 = zmax + spec.ceiling_gap
     materials = _materials_for(spec, z1 - z0)
+
+    # A sheet stack rarely divides the height exactly. Land the top face on the
+    # panel plane and let the slack fall under the floor, where it is just extra
+    # clearance rather than a lid floating above the surface.
+    z0 = z1 - sum(m.thickness for m in materials)
 
     layers: list[Layer] = []
     cursor = z0

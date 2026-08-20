@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { snapDelta, snapLines } from './snap.js';
 import { FINISHES, finishFor } from './finishes.js';
+import { createHistory } from './history.js';
 
 // ---------------------------------------------------------------------------
 // state
@@ -28,6 +29,26 @@ const KIND_STYLE = {
 };
 const BAD_COLOR = 0xff5c5c;
 const BAD_OPACITY = 0.28;
+
+const history = createHistory();
+
+/** Snapshot before a change. `key` coalesces a run -- a whole drag is one step,
+ *  not one step per frame. */
+function edit(key = null) {
+  if (state.scene) history.push(state.scene, key);
+}
+
+async function applyScene(scene) {
+  if (!scene) return;
+  state.scene = scene;
+  if (state.selection && !state.scene.placements.some((p) => p.id === state.selection)) {
+    state.selection = null;
+  }
+  shellFor = placementsSig = issuesSig = null;
+  $('sel-interior').value = state.scene.case?.interior || 'pocketed';
+  await doResolve();
+  buildGizmo();
+}
 
 const $ = (id) => document.getElementById(id);
 const status = (msg, cls = '') => { const el = $('status'); el.textContent = msg; el.className = cls; };
@@ -640,9 +661,15 @@ function renderMaterials() {
       `<input type="number" step="0.1" value="${m.thickness}" title="thickness, mm">` +
       `<span class="preset">${f.preset || 'plain'}</span>`;
     const [colour, name, thick] = row.querySelectorAll('input');
-    colour.onchange = () => { m.color = colour.value; buildCase(state.caseModel); };
-    name.onchange = () => { m.name = name.value; renderMaterials(); buildCase(state.caseModel); };
+    colour.onchange = () => { edit(); m.color = colour.value; buildCase(state.caseModel); };
+    name.onchange = () => {
+      edit();
+      m.name = name.value;
+      renderMaterials();
+      buildCase(state.caseModel);
+    };
     thick.onchange = () => {
+      edit();
       m.thickness = parseFloat(thick.value) || m.thickness;
       refreshCase();
     };
@@ -776,6 +803,7 @@ function wireSides(pl) {
   const box = $('selection');
   box.querySelectorAll('[data-policy]').forEach((el) => {
     el.onchange = () => {
+      edit();
       sideEntry(pl, el.dataset.policy, true).cutout = el.value;
       renderSelection(true);
       scheduleResolve(0);
@@ -783,6 +811,7 @@ function wireSides(pl) {
   });
   box.querySelectorAll('[data-conn]').forEach((el) => {
     el.onchange = () => {
+      edit();
       toggleConnector(pl, el.dataset.side, el.dataset.conn, el.checked);
       renderSelection(true);
       scheduleResolve(0);
@@ -801,7 +830,11 @@ function wireSides(pl) {
     };
   });
   const up = $('f-underpanel');
-  if (up) up.onchange = () => { pl.under_panel = up.checked; scheduleResolve(0); };
+  if (up) up.onchange = () => {
+    edit();
+    pl.under_panel = up.checked;
+    scheduleResolve(0);
+  };
 }
 
 function buildSelectionShell(pl) {
@@ -853,7 +886,11 @@ function buildSelectionShell(pl) {
 
   const num = (id, set) => {
     const el = $(id);
-    if (el) el.onchange = () => { set(parseFloat(el.value) || 0); scheduleResolve(0); };
+    if (el) el.onchange = () => {
+      edit();
+      set(parseFloat(el.value) || 0);
+      scheduleResolve(0);
+    };
   };
   num('f-x', (v) => (pl.pos[0] = v));
   num('f-y', (v) => (pl.pos[1] = v));
@@ -865,7 +902,12 @@ function buildSelectionShell(pl) {
 
   const sel = (id, set) => {
     const el = $(id);
-    if (el) el.onchange = () => { set(el.value); renderSelection(true); scheduleResolve(0); };
+    if (el) el.onchange = () => {
+      edit();
+      set(el.value);
+      renderSelection(true);
+      scheduleResolve(0);
+    };
   };
   sel('f-mount', (v) => (pl.mount = v));
   sel('f-panel', (v) => (pl.on_panel = v || null));
@@ -875,7 +917,11 @@ function buildSelectionShell(pl) {
     const el = $(id);
     if (el) el.onclick = () => {
       const target = movableRoot(pl.id);
-      if (target && !target.locked) { quarterTurn(target, dir); scheduleResolve(0); }
+      if (target && !target.locked) {
+        edit();
+        quarterTurn(target, dir);
+        scheduleResolve(0);
+      }
     };
   };
   turn('b-ccw', 1);
@@ -921,6 +967,7 @@ function uniqueId(base) {
 }
 
 function addPlacement(partId) {
+  edit();
   const part = state.partsById.get(partId);
   const base = partId.split('-').slice(-1)[0].replace(/[^a-z0-9]/gi, '') || 'part';
   const e = state.resolved?.extent;
@@ -939,6 +986,7 @@ function removeSelected() {
   const pl = currentPlacement();
   if (!pl) return;
   if (pl.locked) { status('locked -- not removed', 'err'); return; }
+  edit();
   const doomed = new Set([pl.id]);
   let grew = true;
   while (grew) {
@@ -1116,6 +1164,7 @@ function startMove(ev, point) {
   const start = planePoint();
   if (!start) return;
 
+  edit(`move:${pl.id}`);          // one undo step for the whole drag
   const family = new Set([pl.id, ...descendants(pl.id)]);
   drag = {
     mode: 'move', id: pl.id, vertical, start, origin: [...pl.pos], moved: null,
@@ -1136,6 +1185,7 @@ function startRotate(ev) {
   const start = planePoint();
   if (!start) return;
 
+  edit(`rotate:${pl.id}`);
   drag = {
     mode: 'rotate', id: pl.id,
     center: [gizmo.center.x, gizmo.center.y],
@@ -1218,6 +1268,7 @@ function endDrag(ev) {
     ];
   }
   drag = null;
+  history.seal();
   gizmoGroup.visible = true;
   hint(DEFAULT_HINT);
   if (ev) { try { renderer.domElement.releasePointerCapture(ev.pointerId); } catch {} }
@@ -1230,7 +1281,18 @@ renderer.domElement.addEventListener('pointercancel', endDrag, { capture: true }
 // keyboard
 // ---------------------------------------------------------------------------
 
-window.addEventListener('keydown', (ev) => {
+window.addEventListener('keydown', async (ev) => {
+  // undo works even from a field: it is the one shortcut you want everywhere
+  const z = (ev.key === 'z' || ev.key === 'Z');
+  if ((ev.ctrlKey || ev.metaKey) && (z || ev.key === 'y' || ev.key === 'Y')) {
+    ev.preventDefault();
+    const redo = ev.key === 'y' || ev.key === 'Y' || (z && ev.shiftKey);
+    const next = redo ? history.redo(state.scene) : history.undo(state.scene);
+    if (!next) { status(redo ? 'nothing to redo' : 'nothing to undo'); return; }
+    await applyScene(next);
+    status(redo ? 'redone' : `undone (${history.depth} left)`, 'ok');
+    return;
+  }
   if (['INPUT', 'SELECT', 'TEXTAREA'].includes(ev.target.tagName)) return;
   const pl = movableRoot(state.selection);
   const step = ev.shiftKey ? 0.1 : 1;
@@ -1238,11 +1300,13 @@ window.addEventListener('keydown', (ev) => {
                   ArrowUp: [0, step], ArrowDown: [0, -step] }[ev.key];
 
   if (nudge && pl && !pl.locked) {
+    edit(`nudge:${pl.id}`);
     pl.pos[0] = +(pl.pos[0] + nudge[0]).toFixed(2);
     pl.pos[1] = +(pl.pos[1] + nudge[1]).toFixed(2);
     ev.preventDefault();
     scheduleResolve(60);
   } else if ((ev.key === 'r' || ev.key === 'R') && pl && !pl.locked) {
+    edit();
     quarterTurn(pl, ev.shiftKey ? -1 : 1);
     scheduleResolve(0);
   } else if (ev.key === 'Delete' || ev.key === 'Backspace') {
@@ -1259,6 +1323,7 @@ window.addEventListener('keydown', (ev) => {
 async function loadScene(name) {
   state.sceneName = name;
   state.scene = await api(`/api/scenes/${name}`);
+  history.clear();
   $('sel-interior').value = state.scene.case?.interior || 'pocketed';
   state.selection = null;
   shellFor = placementsSig = issuesSig = null;
@@ -1303,6 +1368,7 @@ const turnSelection = (dir) => {
   const pl = movableRoot(state.selection);
   if (!pl) { status('select a part first', 'err'); return; }
   if (pl.locked) { status(`${pl.id} is locked`, 'err'); return; }
+  edit();
   quarterTurn(pl, dir);
   scheduleResolve(0);
 };
@@ -1312,6 +1378,7 @@ $('btn-cw').onclick = () => turnSelection(-1);
 $('chk-case').onchange = () => ($('chk-case').checked ? refreshCase() : caseGroup.clear());
 $('sel-interior').onchange = () => {
   if (!state.scene) return;
+  edit();
   state.scene.case.interior = $('sel-interior').value;
   // no point changing it if you cannot see the result
   if (!$('chk-case').checked) { $('chk-case').checked = true; }
