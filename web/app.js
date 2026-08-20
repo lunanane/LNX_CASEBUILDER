@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { snapDelta, snapLines } from './snap.js';
 
 // ---------------------------------------------------------------------------
 // state
@@ -71,7 +72,9 @@ const corridorGroup = new THREE.Group();
 const panelGroup = new THREE.Group();
 const gizmoGroup = new THREE.Group();
 const openingGroup = new THREE.Group();
-view.add(solidsGroup, caseGroup, corridorGroup, panelGroup, gizmoGroup, openingGroup);
+const snapGroup = new THREE.Group();
+view.add(solidsGroup, caseGroup, corridorGroup, panelGroup, gizmoGroup,
+         openingGroup, snapGroup);
 
 const groupsByPlacement = new Map();   // id -> { group, meshes: [{mesh, style}] }
 
@@ -841,6 +844,44 @@ function quarterTurn(pl, dir) {
 }
 
 // ---------------------------------------------------------------------------
+// snapping
+//
+// Two NeoTrellis boards have to sit exactly 60 mm apart or the button grid
+// breaks across the seam, and no amount of careful dragging gets you there.
+// So while you drag, the board's own edges and centreline are matched against
+// every other board's edges and centrelines, and the nearest match within
+// SNAP_TOL wins -- independently in x and y.
+//
+// The candidate lines come from bounds the *engine* resolved; the browser only
+// picks the nearest one, which is cheap enough to do every frame.
+// ---------------------------------------------------------------------------
+
+function applySnap(d) {
+  snapGroup.clear();
+  if (!drag) return d;
+  drag.snapped = null;                       // never let a stale snap linger
+  if (!drag.box || !$('chk-snap').checked || drag.noSnap) return d;
+
+  const r = snapDelta(drag.box, d, drag.lines);
+  d.x = r.x;
+  d.y = r.y;
+  drag.snapped = [r.sx, r.sy];
+
+  const e = state.resolved?.extent;
+  if (e && (r.sx || r.sy)) {
+    const mat = new THREE.LineBasicMaterial({ color: 0x6bd68a, transparent: true, opacity: 0.9 });
+    const z = (drag.box.z0 + drag.box.z1) / 2;
+    if (r.sx) snapGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(r.sx.at, e.min[1] - 20, z),
+      new THREE.Vector3(r.sx.at, e.max[1] + 20, z)]), mat));
+    if (r.sy) snapGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(e.min[0] - 20, r.sy.at, z),
+      new THREE.Vector3(e.max[0] + 20, r.sy.at, z)]), mat));
+  }
+  return d;
+}
+
+// ---------------------------------------------------------------------------
 // pointer handling
 //
 // OrbitControls attaches its own pointerdown in its constructor, so it would
@@ -919,7 +960,14 @@ function startMove(ev, point) {
   const start = planePoint();
   if (!start) return;
 
-  drag = { mode: 'move', id: pl.id, vertical, start, origin: [...pl.pos], moved: null };
+  const family = new Set([pl.id, ...descendants(pl.id)]);
+  drag = {
+    mode: 'move', id: pl.id, vertical, start, origin: [...pl.pos], moved: null,
+    box: assemblyBounds(pl.id),
+    lines: snapLines(state.scene.placements.map((p) => p.id), placementBounds, family),
+    snapped: null,
+    noSnap: ev.altKey,          // hold alt to place something off-grid
+  };
   captureGroups();
   gizmoGroup.visible = false;
   renderer.domElement.setPointerCapture(ev.pointerId);
@@ -956,6 +1004,7 @@ function reacquireDrag() {
   if (!drag || drag.mode !== 'move') return;
   const pl = state.scene.placements.find((p) => p.id === drag.id);
   if (pl) drag.origin = [...pl.pos];
+  drag.box = assemblyBounds(drag.id);
   captureGroups();
   const now = planePoint();
   if (now) drag.start = now;
@@ -971,12 +1020,19 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
   if (!pl) return;
 
   if (drag.mode === 'move') {
-    const d = new THREE.Vector3().subVectors(now, drag.start);
+    let d = new THREE.Vector3().subVectors(now, drag.start);
     if (drag.vertical) { d.x = 0; d.y = 0; } else { d.z = 0; }
+    drag.noSnap = ev.altKey;
+    if (!drag.vertical) d = applySnap(d);
     for (const m of drag.moved) m.group.position.copy(m.base).add(d);
     pl.pos = [drag.origin[0] + d.x, drag.origin[1] + d.y, drag.origin[2] + d.z];
+    const [sx, sy] = drag.snapped || [null, null];
+    const snapNote = (sx || sy)
+      ? ` &nbsp; <span style="color:#6bd68a">snapped to ${
+          [...new Set([sx && sx.id, sy && sy.id].filter(Boolean))].join(' + ')}</span>`
+      : '';
     hint(`<b>${drag.id}</b> &nbsp; x ${pl.pos[0].toFixed(1)} &nbsp; y ${pl.pos[1].toFixed(1)}` +
-         `${drag.vertical ? ` &nbsp; z ${pl.pos[2].toFixed(1)}` : ''}`);
+         `${drag.vertical ? ` &nbsp; z ${pl.pos[2].toFixed(1)}` : ''}${snapNote}`);
   } else {
     const angle = Math.atan2(now.y - drag.center[1], now.x - drag.center[0]);
     let deg = THREE.MathUtils.radToDeg(angle - drag.startAngle);
@@ -993,8 +1049,17 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
 
 function endDrag(ev) {
   if (!drag) return;
+  snapGroup.clear();
   const pl = state.scene.placements.find((p) => p.id === drag.id);
-  if (pl && drag.mode === 'move') pl.pos = pl.pos.map((v) => Math.round(v * 10) / 10);
+  // round to 0.1 mm, but never round away a snap we just made exact
+  if (pl && drag.mode === 'move') {
+    const [sx, sy] = drag.snapped || [null, null];
+    pl.pos = [
+      sx ? pl.pos[0] : Math.round(pl.pos[0] * 10) / 10,
+      sy ? pl.pos[1] : Math.round(pl.pos[1] * 10) / 10,
+      Math.round(pl.pos[2] * 10) / 10,
+    ];
+  }
   drag = null;
   gizmoGroup.visible = true;
   hint(DEFAULT_HINT);

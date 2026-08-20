@@ -1,0 +1,6 @@
+{
+  "name": "hwcase-editor",
+  "private": true,
+  "type": "module",
+  "description": "No build step and no dependencies: three.js is vendored. This file only exists so node treats the editor sources as ES modules when running the headless tests."
+}

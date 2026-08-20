@@ -76,6 +76,14 @@ same target whether you grabbed a 25 mm breakout or the 128 mm Eurorack panel.
 `90°` buttons in the header and in the inspector turn the selection a quarter
 turn, as does `R`. Arrows nudge 1 mm, shift+arrows 0.1 mm, `Del` removes.
 
+**Snapping** is on by default: while you drag, the moving assembly's edges and
+centreline are matched against every other board's, and the nearest match within
+2 mm wins — independently in x and y, with a green guide line showing what it
+caught. That is how two 60 mm Trellis boards end up *exactly* 60 mm apart with
+the 15 mm button pitch continuous across the seam; there is a test for precisely
+that. Hold **alt** to place something off-grid, or turn `snap` off in the header.
+A snapped coordinate is kept exact rather than rounded to 0.1 mm on drop.
+
 Rotation pivots on the part's own centre, not its local origin — otherwise every
 `origin: min` part would swing around a corner and fly off the bench.
 
@@ -111,6 +119,14 @@ pip install -r requirements.txt
 python -m hwcase.cli parts                                  # what's in the library
 python -m hwcase.cli check scenes/soundmachine-v0.yaml      # will this work?
 python -m hwcase.cli build scenes/soundmachine-v0.yaml -o ../out
+python -m pytest tests/                    # engine suite
+```
+
+The editor's own maths is tested headlessly too, with no browser and no
+dependencies:
+
+```bash
+cd web && node --test tests/
 ```
 
 `build` writes `*-layers.svg`, `*-layers.dxf`, plus `*-scene.json` and
