@@ -78,8 +78,12 @@ The *layout* is now right, which matters more than the millimetres:
 - USB-C and microSD are both on the same side edge, above the jacks
 - Eurorack power, the Tulip host I²C port and the debug header are on the back
 
-**Measure:** panel-to-PCB-back depth, the jack grid origin and pitch, and how
-far the jack columns sit from the panel edge.
+**Measure:** panel-to-PCB-back depth, the jack grid origin and pitch, how far
+the jack columns sit from the panel edge, and **the four mounting holes**. The
+holes are the only ones in the library that are not either from a drawing or
+extracted from a STEP — Shorepine publish neither, so they are scaled off the
+board photo at 3.5 mm in from each corner. If you screw a bottom plate to this
+board, measure them first.
 
 ### 5. Grove TCA9548A hub  `estimated`
 

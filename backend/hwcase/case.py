@@ -22,8 +22,9 @@ from typing import Literal, Optional
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import unary_union
 
-from shapely.geometry import Point
+from shapely.geometry import LineString, Point
 from shapely.geometry import box as shapely_box
+from shapely.ops import nearest_points
 
 from .geom import outline_polygon, rounded_rect, z_overlap
 from .schema import CaseSpec, Interior, Material, Support, VolumeKind
@@ -200,8 +201,71 @@ def _ribs(outer: Polygon, void: Polygon, spec: CaseSpec,
     return unary_union(keep) if keep else grid.difference(grid)
 
 
+def _tie_loose_pieces(geom, outer: Polygon, spec: CaseSpec, notes: list[str]):
+    """Nothing may come off the cutting bed as a separate part.
+
+    Pruning ribs when they are generated is not enough: a rib can be severed
+    later by a part pocket, and a boss can attach to a fragment that is itself
+    adrift. So this runs last, on the finished layer, where the truth is
+    finally known. Anything not joined to the outer wall is either debris from
+    the booleans, which is dropped, or real material, which is tied back.
+    """
+    pieces = list(geom.geoms) if hasattr(geom, "geoms") else ([geom] if not geom.is_empty else [])
+    if len(pieces) <= 1:
+        return geom
+
+    # A tolerance, not an exact touch: the boolean chain leaves the wall a
+    # hair inside `outer`, and at 1e-6 nothing counted as anchored at all, so
+    # this bailed out and tied nothing.
+    edge = outer.boundary.buffer(0.05)
+    anchored = [p for p in pieces if p.intersects(edge)]
+    adrift = [p for p in pieces if not p.intersects(edge)]
+    if not adrift:
+        return geom
+    if not anchored:
+        # nothing reaches the wall: anchor everything to the biggest piece
+        anchored = [max(pieces, key=lambda p: p.area)]
+        adrift = [p for p in pieces if p is not anchored[0]]
+
+    keep = list(anchored)
+    ribs: list[Polygon] = []
+    for piece in sorted(adrift, key=lambda p: -p.area):
+        if piece.area < 1.0:
+            continue                       # numerical crumbs, not material
+        here, there = nearest_points(piece, unary_union(keep))
+        if here.distance(there) > 1e-9:
+            # Round caps, deliberately: a flat cap ends exactly on the two
+            # boundaries, and a zero-area touch is a hairline gap once floating
+            # point is involved -- the union then leaves both pieces separate,
+            # which is the very thing this is here to prevent.
+            ribs.append(LineString([here, there]).buffer(
+                spec.support_rib / 2.0, cap_style=1))
+            notes.append(f"rib tying a {piece.area:.0f} mm2 island back to the wall")
+        keep.append(piece)
+    return unary_union(keep + ribs).intersection(outer)
+
+
+def _corner_screws(spec: CaseSpec, outer: Polygon, role: Role):
+    """Bolts near the four corners, tying the whole stack together."""
+    if not spec.corner_screws:
+        return [], []
+    x0, y0, x1, y1 = outer.bounds
+    i = spec.corner_screw_inset
+    d = spec.corner_screw_head if role in ("floor", "lid") else spec.corner_screw_d
+    holes, notes = [], []
+    for cx, cy in ((x0 + i, y0 + i), (x1 - i, y0 + i),
+                   (x0 + i, y1 - i), (x1 - i, y1 - i)):
+        p = Point(cx, cy)
+        if not outer.contains(p):
+            continue
+        holes.append(p.buffer(d / 2.0, quad_segs=24))
+        notes.append(f"corner bolt at ({cx:.1f}, {cy:.1f})")
+    return holes, notes
+
+
 def _support_features(res: Resolved, spec: CaseSpec, slab: tuple[float, float],
-                      role: Role, zspan: tuple[float, float]):
+                      role: Role, zspan: tuple[float, float],
+                      main: Polygon | MultiPolygon):
     """Material to keep, and holes to punch, for the boards the case carries.
 
     A `from_floor` board gets a column of material from the bottom plate up to
@@ -216,15 +280,14 @@ def _support_features(res: Resolved, spec: CaseSpec, slab: tuple[float, float],
     case_z0, case_z1 = zspan
 
     for sp in res.supports:
-        # Reach rather than overlap. A board flush with the faceplate has its
-        # top exactly at the lid's top, so an overlap test measures zero and the
-        # lid never gets drilled -- which is precisely the board you most want
-        # to screw down from above.
+        # A boss may only occupy layers that are ENTIRELY clear of the board.
+        # A layer straddling the board's underside contains the board itself, so
+        # a post there would be driven straight through it.
         if sp.mode == Support.from_floor:
-            involved = slab[0] < sp.board_bottom - 1e-6 and slab[1] > case_z0 - 1e-6
+            involved = slab[1] <= sp.board_bottom + 1e-6 and slab[1] > case_z0 - 1e-6
             countersunk = role == "floor"
         elif sp.mode == Support.from_lid:
-            involved = slab[1] > sp.board_top - 1e-6 and slab[0] < case_z1 + 1e-6
+            involved = slab[0] >= sp.board_top - 1e-6 and slab[0] < case_z1 + 1e-6
             countersunk = role == "lid"
         else:
             continue
@@ -235,11 +298,14 @@ def _support_features(res: Resolved, spec: CaseSpec, slab: tuple[float, float],
         if countersunk:
             holes.append(centre.buffer(spec.screw_head / 2.0, quad_segs=24))
             notes.append(f"countersink for {sp.ref}")
-        else:
-            bosses.append(centre.buffer(spec.support_boss / 2.0, quad_segs=24))
-            holes.append(centre.buffer(
-                (sp.screw_d + spec.screw_clearance) / 2.0, quad_segs=24))
-            notes.append(f"boss for {sp.ref}")
+            continue
+
+        disc = centre.buffer(spec.support_boss / 2.0, quad_segs=24)
+        bosses.append(disc)
+        holes.append(centre.buffer(
+            (sp.screw_d + spec.screw_clearance) / 2.0, quad_segs=24))
+        notes.append(f"boss for {sp.ref}")
+
     return bosses, holes, notes
 
 
@@ -306,14 +372,22 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
 
     # Bosses go on last but one: after the pockets and the hollowing, because
     # both would otherwise remove the post, and before the screw holes, which
-    # have to be drilled through it.
+    # have to be drilled through it. `geom` at this point is what the boss has
+    # to reach to stay attached.
     bosses, screw_holes, support_notes = _support_features(
-        res, spec, slab, role, zspan)
+        res, spec, slab, role, zspan, geom)
     if bosses:
         geom = geom.union(unary_union(bosses).intersection(outer))
     if screw_holes:
         geom = geom.difference(unary_union(screw_holes))
     notes += support_notes
+
+    corner_holes, corner_notes = _corner_screws(spec, outer, role)
+    if corner_holes:
+        geom = geom.difference(unary_union(corner_holes))
+        notes += corner_notes
+
+    geom = _tie_loose_pieces(geom, outer, spec, notes)
 
     if geom.is_empty:
         notes.append("nothing left of this layer -- it is pure air")

@@ -533,8 +533,11 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
                     f"so the case cannot post up to them",
                     [pl.id]))
             else:
-                bottom = _part_bottom(part, frame)
-                top = _part_top(part, frame) or bottom
+                # The PCB's own faces, not the part's extremes. A screw seats on
+                # the board; the encoder shafts that stand 8 mm proud of the
+                # faceplate are not somewhere a boss can reach, and taking them
+                # as the top meant `from_lid` found no layer at all to drill.
+                bottom, top = frame.z_interval((0.0, part.pcb_thickness))
                 for h in part.holes:
                     at = frame.point((h.at[0], h.at[1], 0.0))
                     supports.append(SupportPoint(

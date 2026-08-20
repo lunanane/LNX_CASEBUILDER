@@ -481,6 +481,15 @@ class CaseSpec(Strict):
     screw_clearance: float = 0.4
     #: countersink in the outermost plate, so a screw head finishes flush
     screw_head: float = 6.5
+    #: width of the strut tying an otherwise free-standing boss back to
+    #: material -- a ring floating in a hollow layer is an offcut, not a post
+    support_rib: float = 4.0
+
+    #: bolts through the whole stack near the corners, holding it together
+    corner_screws: bool = False
+    corner_screw_d: float = 3.4        # M3 clearance
+    corner_screw_inset: float = 6.0    # in from the outline's bounding corners
+    corner_screw_head: float = 6.5
     #: vertical room wanted where one board passes over another
     overlap_clearance: float = 1.5
     corner_radius: float = 6.0

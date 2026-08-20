@@ -1437,13 +1437,15 @@ def test_from_lid_drills_a_board_that_is_flush_with_it(lib):
 
 
 def test_from_lid_does_not_post_below_the_board(lib):
+    """Measured against the board's own top face, not the top of its
+    components: a standoff sits at the hole, which is clear of them."""
     scene = _supported(load_scene(SCENE), "from_lid", "trellis_a")
     res = resolve(scene, lib)
     model = build(res)
-    board_top = max(s.z[1] for s in res.solids if s.placement == "trellis_a")
+    board_top = res.supports[0].board_top
     for layer in model.layers:
         if [n for n in layer.notes if n.startswith("boss")]:
-            assert layer.z1 > board_top - 1e-6, \
+            assert layer.z0 >= board_top - 1e-6, \
                 f"layer {layer.index} posts down past the board"
 
 
@@ -1503,3 +1505,120 @@ def test_support_uses_the_real_hole_positions(lib):
         want = frame.point((h.at[0], h.at[1], 0.0))
         assert any(sp.at[0] == pytest.approx(want[0])
                    and sp.at[1] == pytest.approx(want[1]) for sp in res.supports)
+
+
+# --------------------------------------------------------------------------
+# supports that are actually manufacturable
+# --------------------------------------------------------------------------
+
+def _all_pieces(geom):
+    return list(geom.geoms) if hasattr(geom, "geoms") else ([geom] if not geom.is_empty else [])
+
+
+@pytest.mark.parametrize("interior", ["pocketed", "hollow", "ribs", "grown"])
+def test_no_support_leaves_a_loose_ring(lib, interior):
+    """A boss floating in a hollow layer is a washer on the cutting bed. Every
+    piece of every layer has to reach the outer wall."""
+    from hwcase.schema import Interior
+
+    scene = _supported(load_scene(SCENE), "from_floor", "trellis_a", "encoders")
+    scene.case.interior = Interior(interior)
+    model = build(resolve(scene, lib))
+    edge = model.outer.boundary.buffer(0.05)
+    for layer in model.layers:
+        for piece in _all_pieces(layer.geom):
+            assert piece.intersects(edge), \
+                f"layer {layer.index} ({interior}) has a piece not joined to the wall"
+
+
+def test_a_stranded_boss_gets_a_rib(lib):
+    from hwcase.schema import Interior
+
+    scene = _supported(load_scene(SCENE), "from_floor", "trellis_a")
+    scene.case.interior = Interior.hollow
+    model = build(resolve(scene, lib))
+    assert _notes(model, "rib tying"), \
+        "a boss in the middle of a hollow layer must be tied back"
+
+
+def test_a_boss_never_shares_a_layer_with_its_board(lib):
+    """A layer straddling the board's underside contains the board, so a post
+    there would be driven straight through it."""
+    scene = _supported(load_scene(SCENE), "from_floor", "trellis_a")
+    res = resolve(scene, lib)
+    model = build(res)
+    bottom = res.supports[0].board_bottom
+    for layer in model.layers:
+        if [n for n in layer.notes if n.startswith("boss")]:
+            assert layer.z1 <= bottom + 1e-6, \
+                f"layer {layer.index} posts into the board"
+
+
+def test_support_measures_the_board_not_its_knobs(lib):
+    """`from_lid` on the encoder strip found no layer at all, because the part's
+    top was taken as the shaft tips standing proud of the faceplate."""
+    scene = _supported(load_scene(SCENE), "from_lid", "encoders")
+    res = resolve(scene, lib)
+    part = lib["adafruit-5752-quad-encoder"]
+    sp = res.supports[0]
+    assert sp.board_top - sp.board_bottom == pytest.approx(part.pcb_thickness)
+
+    shaft_top = max(s.z[1] for s in res.solids if s.placement == "encoders")
+    assert sp.board_top < shaft_top - 10.0, "the shafts are not the board"
+
+    lid = build(res).layers[-1]
+    assert len([n for n in lid.notes if n.startswith("countersink")]) == len(part.holes)
+
+
+# --------------------------------------------------------------------------
+# bolts through the whole stack
+# --------------------------------------------------------------------------
+
+def test_corner_bolts_are_off_by_default(demo):
+    assert demo.scene.case.corner_screws is False
+    assert _notes(build(demo), "corner bolt") == []
+
+
+def test_corner_bolts_go_through_every_layer(demo):
+    spec = demo.scene.case.model_copy(update={"corner_screws": True})
+    model = build(demo, spec)
+    for layer in model.layers:
+        assert len([n for n in layer.notes if n.startswith("corner bolt")]) == 4, \
+            f"layer {layer.index} is missing bolt holes"
+
+
+def test_corner_bolts_are_countersunk_at_both_faces(demo):
+    import math
+
+    spec = demo.scene.case.model_copy(update={"corner_screws": True})
+    model = build(demo, spec)
+
+    def smallest_round_hole(layer):
+        best = None
+        for p in _all_pieces(layer.geom):
+            for r in p.interiors:
+                from shapely.geometry import Polygon
+                poly = Polygon(r)
+                if 4 * math.pi * poly.area / (poly.length ** 2) > 0.99:
+                    best = poly.area if best is None else min(best, poly.area)
+        return best
+
+    mid = next(l for l in model.layers if l.role == "body")
+    shank = math.pi * (spec.corner_screw_d / 2) ** 2
+    head = math.pi * (spec.corner_screw_head / 2) ** 2
+    assert head > shank
+    assert smallest_round_hole(mid) == pytest.approx(shank, rel=0.02)
+    assert smallest_round_hole(model.layers[0]) == pytest.approx(head, rel=0.02)
+
+
+def test_corner_bolts_sit_inside_the_wall(demo):
+    """Inset from the corners, so they land in material rather than fresh air."""
+    from shapely.geometry import Point
+
+    spec = demo.scene.case.model_copy(update={"corner_screws": True})
+    model = build(demo, spec)
+    x0, y0, x1, y1 = model.outer.bounds
+    i = spec.corner_screw_inset
+    for cx, cy in ((x0 + i, y0 + i), (x1 - i, y0 + i),
+                   (x0 + i, y1 - i), (x1 - i, y1 - i)):
+        assert model.outer.contains(Point(cx, cy))

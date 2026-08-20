@@ -34,6 +34,16 @@ parts:
       origin: min
     pcb_thickness: 1.6
 
+    # Four corner holes, visible in the vendor's board photos at roughly 3.5 mm
+    # in from each edge. Shorepine publish no drawing and there is no STEP to
+    # read, so unlike the Adafruit boards these are NOT extracted -- they are
+    # scaled off the photograph. MEASURE ME before you drill a bottom plate.
+    holes:
+      - {name: h1, at: [3.5, 3.5], diameter: 3.2, screw: M3, src: {confidence: estimated, note: "from the vendor photo"}}
+      - {name: h2, at: [47.0, 3.5], diameter: 3.2, screw: M3, src: {confidence: estimated, note: "from the vendor photo"}}
+      - {name: h3, at: [3.5, 101.5], diameter: 3.2, screw: M3, src: {confidence: estimated, note: "from the vendor photo"}}
+      - {name: h4, at: [47.0, 101.5], diameter: 3.2, screw: M3, src: {confidence: estimated, note: "from the vendor photo"}}
+
     volumes:
       - name: back_components
         kind: body
@@ -95,7 +105,10 @@ parts:
         plug_depth: 10.0
         bend_radius: 14.0
         cutout: [14.0, 8.0]
-        external: true
+        # Faces the front, but the lead it takes runs to another board inside
+        # this case -- it is not a port anyone plugs into from outside, so it
+        # must not punch a hole through the faceplate.
+        external: false
         src: {confidence: estimated, note: "vendor calls this the front-panel I2C port"}
       - name: usb_c
         type: usb_c
