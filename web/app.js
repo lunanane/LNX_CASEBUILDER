@@ -1102,6 +1102,7 @@ window.addEventListener('keydown', (ev) => {
 async function loadScene(name) {
   state.sceneName = name;
   state.scene = await api(`/api/scenes/${name}`);
+  $('sel-interior').value = state.scene.case?.interior || 'pocketed';
   state.selection = null;
   shellFor = placementsSig = issuesSig = null;
   await doResolve();
@@ -1152,6 +1153,14 @@ $('btn-ccw').onclick = () => turnSelection(1);
 $('btn-cw').onclick = () => turnSelection(-1);
 
 $('chk-case').onchange = () => ($('chk-case').checked ? refreshCase() : caseGroup.clear());
+$('sel-interior').onchange = () => {
+  if (!state.scene) return;
+  state.scene.case.interior = $('sel-interior').value;
+  // no point changing it if you cannot see the result
+  if (!$('chk-case').checked) { $('chk-case').checked = true; }
+  refreshCase();
+  scheduleResolve(0);
+};
 $('chk-corridors').onchange = () => buildCorridors(state.resolved);
 $('chk-panels').onchange = () => buildPanels(state.resolved);
 $('chk-openings').onchange = () => buildSideOpenings(state.resolved);

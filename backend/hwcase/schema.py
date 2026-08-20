@@ -384,10 +384,36 @@ class Material(Strict):
     color: str = "#c8a165"
 
 
+class Interior(str, Enum):
+    """What the middle layers look like between the hardware.
+
+    A case full of I2C cables needs somewhere to put them. Left solid, the
+    layers are a block of plywood with a pocket per board and nowhere for a
+    wire to run; hollowed out completely, the faceplate has nothing holding it
+    up in the middle.
+    """
+
+    #: solid, with a pocket per part and a corridor per external port.
+    #: Thick and heavy, and internal wiring gets no room at all.
+    pocketed = "pocketed"
+    #: a wall of `wall` thickness all the way round, empty inside
+    hollow = "hollow"
+    #: hollow, plus ribs on a grid -- routed around the hardware and the
+    #: cables, and pruned so nothing is left floating
+    ribs = "ribs"
+    #: pockets grown to include every cable port and the clearance around each
+    #: board, so the wall is as thick as it can be without crushing a wire
+    grown = "grown"
+
+
 class CaseSpec(Strict):
     """How to wrap the scene in a box."""
 
     style: Literal["layered", "solid"] = "layered"
+    interior: Interior = Interior.pocketed
+    #: `ribs` only: width of each stiffener and how far apart they sit
+    rib_width: float = 6.0
+    rib_spacing: float = 45.0
     #: material stack from bottom to top; the last entry repeats as needed
     materials: list[Material] = Field(default_factory=lambda: [Material()])
     wall: float = 6.0                 # material around the parts, in XY

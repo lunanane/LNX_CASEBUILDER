@@ -232,6 +232,31 @@ The grid is centred on `at`, so the pad's buttons land at 7.5 / 22.5 / 37.5 /
 52.5 mm from each edge and stay continuous across tiled pads. Instances are
 named `buttons[2,3]` in the issue list.
 
+## What the inside looks like
+
+A case full of I²C leads needs somewhere to put them. Left solid, the middle
+layers are a block of plywood with a pocket per board and nowhere for a wire to
+run; hollowed out completely, the faceplate has nothing holding it up. So the
+interior is a choice, on the case spec or from the header dropdown:
+
+| `interior` | the middle layers become |
+|---|---|
+| `pocketed` | solid, one pocket per part, corridors for the external ports (the default — unchanged) |
+| `hollow` | a wall of `wall` thickness all the way round, empty inside |
+| `ribs` | hollow plus stiffeners on a `rib_spacing` grid, `rib_width` wide, routed around the hardware and the cables |
+| `grown` | pockets grown to clear **every** cable port plus `cable_clearance` around each board, so the wall is as thick as it can be without crushing a wire |
+
+On the current machine that runs 75% of solid for `pocketed`, 66% for `grown`,
+27% for `ribs` and 12% for `hollow`.
+
+Ribs are pruned: a stiffener chopped free by a cable run would be an offcut on
+the cutting bed and no help to the faceplate, so only fragments still joined to
+the surrounding wall survive. There's a test asserting every piece of every
+ribbed layer touches the wall, and another asserting no rib sits on a board.
+
+The floor and the lid are structural faces and keep their own rules whatever the
+interior is set to.
+
 ## Coordinate conventions
 
 Part-local: X and Y in the board plane, +Z out of the component side, **z = 0 at

@@ -707,3 +707,118 @@ def test_passing_too_close_over_is_reported(lib):
     assert any(i.code == "tight_overlap" for i in issues), \
         "0.4 mm of clearance should be called out"
     assert not any(i.code == "collision" for i in issues), "but it is not a collision"
+
+
+# --------------------------------------------------------------------------
+# what the middle layers look like: interior strategies
+# --------------------------------------------------------------------------
+
+def _mid_layers(model):
+    return [l for l in model.layers if l.role == "body"]
+
+
+def _pieces(geom):
+    return list(geom.geoms) if hasattr(geom, "geoms") else ([geom] if not geom.is_empty else [])
+
+
+def _built(demo, mode, **kw):
+    from hwcase.schema import Interior
+    spec = demo.scene.case.model_copy(update={"interior": Interior(mode), **kw})
+    return build(demo, spec)
+
+
+def test_pocketed_is_still_the_default(demo):
+    from hwcase.schema import Interior
+    assert demo.scene.case.interior is Interior.pocketed
+    a = [l.geom.area for l in _mid_layers(build(demo))]
+    b = [l.geom.area for l in _mid_layers(_built(demo, "pocketed"))]
+    assert a == pytest.approx(b)
+
+
+def test_the_strategies_order_by_how_much_material_they_leave(demo):
+    def avg(mode):
+        mids = _mid_layers(_built(demo, mode))
+        return sum(l.geom.area for l in mids) / len(mids)
+
+    hollow, ribs, grown, pocketed = (avg(m) for m in
+                                     ("hollow", "ribs", "grown", "pocketed"))
+    assert hollow < ribs < grown <= pocketed, (hollow, ribs, grown, pocketed)
+
+
+def test_hollow_leaves_a_wall_all_the_way_round(demo):
+    model = _built(demo, "hollow")
+    wall = model.spec.wall
+    for layer in _mid_layers(model):
+        # eroding by slightly less than the wall must leave something;
+        # eroding by more than it must not (there is no thick region left)
+        assert not layer.geom.buffer(-wall * 0.45).is_empty, "the wall vanished"
+        for piece in _pieces(layer.geom):
+            assert piece.intersects(model.outer.boundary.buffer(1e-6)), \
+                "a hollow layer should only be the outer wall and pocket edges"
+
+
+def test_ribs_are_never_left_floating(demo):
+    """A rib chopped free by a cable run is an offcut on the cutting bed and no
+    help to the faceplate, so the pruning has to hold."""
+    model = _built(demo, "ribs")
+    edge = model.outer.boundary.buffer(0.05)
+    for layer in _mid_layers(model):
+        for piece in _pieces(layer.geom):
+            assert piece.intersects(edge), \
+                f"layer {layer.index} has a piece not joined to the wall"
+
+
+def test_ribs_add_material_over_hollow_but_stay_off_the_hardware(demo):
+    hollow = _built(demo, "hollow")
+    ribbed = _built(demo, "ribs")
+    for a, b in zip(_mid_layers(hollow), _mid_layers(ribbed)):
+        assert b.geom.area >= a.geom.area - 1e-6, "ribs should only add material"
+    # and they must not sit on top of a board
+    from hwcase.geom import z_overlap
+    for layer in _mid_layers(ribbed):
+        slab = (layer.z0, layer.z1)
+        for s in demo.solids:
+            if s.kind.value == "body" and z_overlap(s.z, slab) > 0:
+                overlap = layer.geom.intersection(s.poly).area
+                assert overlap < s.poly.area * 0.02, \
+                    f"a rib is sitting on {s.ref}"
+
+
+def test_wider_ribs_leave_more_material(demo):
+    thin = _built(demo, "ribs", rib_width=3.0)
+    thick = _built(demo, "ribs", rib_width=12.0)
+    a = sum(l.geom.area for l in _mid_layers(thin))
+    b = sum(l.geom.area for l in _mid_layers(thick))
+    assert b > a
+
+
+def test_grown_reserves_room_for_internal_wiring(demo):
+    """`pocketed` only opens up for external ports, so an I2C cable has nowhere
+    to go. `grown` clears every connector, internal ones included."""
+    from hwcase.geom import z_overlap
+
+    pocketed = _built(demo, "pocketed")
+    grown = _built(demo, "grown")
+    internal = [c for c in demo.connectors if not c.conn.external]
+    assert internal, "the scene should have internal wiring"
+
+    improved = 0
+    for layer_p, layer_g in zip(_mid_layers(pocketed), _mid_layers(grown)):
+        slab = (layer_p.z0, layer_p.z1)
+        for wc in internal:
+            if z_overlap(wc.corridor_z, slab) <= 0:
+                continue
+            before = layer_p.geom.intersection(wc.corridor_poly).area
+            after = layer_g.geom.intersection(wc.corridor_poly).area
+            if after < before - 1e-6:
+                improved += 1
+    assert improved, "grown should have opened up around at least one cable run"
+
+
+def test_interior_does_not_touch_the_floor_or_the_lid(demo):
+    """Those two are structural faces; hollowing them out would be daft."""
+    for mode in ("hollow", "ribs", "grown"):
+        model = _built(demo, mode)
+        base = build(demo)
+        assert model.layers[0].geom.area == pytest.approx(base.layers[0].geom.area)
+        assert model.layers[-1].geom.area == pytest.approx(base.layers[-1].geom.area)

@@ -22,8 +22,10 @@ from typing import Literal, Optional
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import unary_union
 
+from shapely.geometry import box as shapely_box
+
 from .geom import outline_polygon, rounded_rect, z_overlap
-from .schema import CaseSpec, Material, VolumeKind
+from .schema import CaseSpec, Interior, Material, VolumeKind
 from .scene import Resolved
 
 Role = Literal["floor", "body", "lid"]
@@ -113,6 +115,59 @@ def build(res: Resolved, spec: Optional[CaseSpec] = None) -> CaseModel:
     return CaseModel(spec=spec, outer=outer, layers=layers, z0=z0, z1=cursor)
 
 
+def _hardware_in(res: Resolved, spec: CaseSpec, slab: tuple[float, float],
+                 pad: float = 0.0) -> list[Polygon]:
+    """Everything physical in this slab -- boards, plugs, cable runs alike.
+
+    Used to keep ribs and walls off the hardware. `pad` widens it, which is how
+    `grown` reserves the room a wire actually needs rather than the room its
+    connector body occupies.
+    """
+    out: list[Polygon] = []
+    for s in res.solids:
+        if z_overlap(s.z, slab) > 0:
+            out.append(s.poly.buffer(spec.part_clearance + pad, join_style=2))
+    # every connector, not just the ones that pierce a wall: an I2C lead never
+    # leaves the box and still has to go somewhere
+    for wc in res.connectors:
+        if z_overlap(wc.corridor_z, slab) > 0:
+            out.append(wc.corridor_poly.buffer(spec.part_clearance, join_style=2))
+    return out
+
+
+def _ribs(outer: Polygon, void: Polygon, spec: CaseSpec,
+          blocked: list[Polygon]) -> Polygon:
+    """Stiffeners across the void, on a grid, routed around the hardware.
+
+    A rib that has been chopped up by cable runs can end up as an island in the
+    middle of the void -- a loose offcut on the cutting bed and no help at all
+    to the faceplate. So only the fragments still joined to the surrounding
+    wall are kept.
+    """
+    x0, y0, x1, y1 = outer.bounds
+    strips: list[Polygon] = []
+    half = spec.rib_width / 2.0
+    n = max(1, int((x1 - x0) // spec.rib_spacing))
+    for i in range(1, n + 1):
+        x = x0 + i * (x1 - x0) / (n + 1)
+        strips.append(shapely_box(x - half, y0, x + half, y1))
+    n = max(1, int((y1 - y0) // spec.rib_spacing))
+    for i in range(1, n + 1):
+        y = y0 + i * (y1 - y0) / (n + 1)
+        strips.append(shapely_box(x0, y - half, x1, y + half))
+
+    grid = unary_union(strips).intersection(outer)
+    if blocked:
+        grid = grid.difference(unary_union(blocked))
+    if grid.is_empty:
+        return grid
+
+    wall = outer.difference(void)
+    keep = [g for g in (grid.geoms if hasattr(grid, "geoms") else [grid])
+            if not g.is_empty and g.buffer(1e-6).intersects(wall)]
+    return unary_union(keep) if keep else grid.difference(grid)
+
+
 def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
                     slab: tuple[float, float], role: Role):
     """outer shape minus whatever occupies this slab."""
@@ -148,6 +203,26 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
             continue
         cuts.append(so.poly)
         notes.append(so.reason)
+
+    # How much of the inside to take out. The floor and the lid are structural
+    # faces and keep their own rules; only the layers in between are hollowed.
+    if role == "body" and spec.interior is not Interior.pocketed:
+        void = outer.buffer(-spec.wall, join_style=2)
+        if not void.is_empty:
+            if spec.interior is Interior.grown:
+                # the void is only the hardware and the room its cables need
+                grown = _hardware_in(res, spec, slab, pad=spec.cable_clearance)
+                if grown:
+                    cuts.extend(grown)
+                    notes.append("pockets grown to clear the cable runs")
+            elif spec.interior is Interior.hollow:
+                cuts.append(void)
+                notes.append(f"hollow, {spec.wall:.1f} mm wall")
+            elif spec.interior is Interior.ribs:
+                blocked = _hardware_in(res, spec, slab)
+                rib = _ribs(outer, void, spec, blocked)
+                cuts.append(void.difference(rib) if not rib.is_empty else void)
+                notes.append(f"hollow with stiffeners, {spec.wall:.1f} mm wall")
 
     geom: Polygon | MultiPolygon = outer
     if cuts:
