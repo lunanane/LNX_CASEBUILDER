@@ -112,21 +112,30 @@ def test_panel_is_derived_from_the_screen(demo):
     assert demo.panels["main"] == pytest.approx(25.4)
 
 
+def _base(name):
+    """`buttons[2,3]` -> `buttons`: repeat grids suffix their instances."""
+    return name.split("[")[0]
+
+
 def test_everything_on_the_panel_lands_flush(demo):
     z = demo.panels["main"]
     flush = {"screen.active_area", "pad_a.buttons", "pad_b.buttons",
              "encoders.bushings", "oled.active_area", "amy.panel_face"}
     seen = set()
     for s in demo.solids:
-        if s.ref in flush:
-            seen.add(s.ref)
+        ref = f"{s.placement}.{_base(s.name)}"
+        if ref in flush:
+            seen.add(ref)
             assert s.z[1] == pytest.approx(z, abs=1e-6), f"{s.ref} is not flush"
     assert seen == flush
 
 
 def test_encoder_shafts_stand_proud_for_the_knobs(demo):
-    shafts = next(s for s in demo.solids if s.ref == "encoders.shafts")
-    assert shafts.z[1] > demo.panels["main"] + 5.0
+    shafts = [s for s in demo.solids
+              if s.placement == "encoders" and _base(s.name) == "shafts"]
+    assert len(shafts) == 4, "four encoders, four shafts"
+    for s in shafts:
+        assert s.z[1] > demo.panels["main"] + 5.0
 
 
 def test_panel_follows_when_the_screen_moves(lib):
@@ -572,3 +581,62 @@ def test_side_opening_outline_is_clipped_for_the_browser(lib):
     xs = [p[0] for p in payload["side_openings"][0]["outline"]]
     ys = [p[1] for p in payload["side_openings"][0]["outline"]]
     assert max(xs) - min(xs) < 500 and max(ys) - min(ys) < 500
+
+
+# --------------------------------------------------------------------------
+# repeat grids and round features
+# --------------------------------------------------------------------------
+
+def test_keypad_is_sixteen_buttons_not_one_window(demo):
+    """A 55 mm square cut in the faceplate is a hole, not a keypad."""
+    btns = [s for s in demo.solids
+            if s.placement == "pad_a" and _base(s.name) == "buttons"]
+    assert len(btns) == 16
+    for s in btns:
+        assert s.poly.area == pytest.approx(98.07, abs=0.3)      # 10x10, r1.5
+    xs = sorted({round(s.poly.centroid.x, 3) for s in btns})
+    assert len(xs) == 4
+    for a, b in zip(xs, xs[1:]):
+        assert b - a == pytest.approx(15.0, abs=1e-3)            # the 15 mm pitch
+
+
+def test_encoder_holes_are_round_and_on_pitch(demo):
+    import math
+
+    holes = [s for s in demo.solids
+             if s.placement == "encoders" and _base(s.name) == "bushings"]
+    assert len(holes) == 4
+    for s in holes:
+        assert s.poly.area == pytest.approx(math.pi * 3.4 ** 2, rel=0.01)
+    centres = sorted(s.poly.centroid.coords[0] for s in holes)
+    for a, b in zip(centres, centres[1:]):
+        d = math.dist(a, b)
+        assert d == pytest.approx(19.05, abs=1e-3)               # 0.75"
+
+
+def test_the_faceplate_gets_the_individual_holes(demo):
+    """The layer at the panel should carry 16 + 16 button holes and 4 shaft
+    holes, not two big rectangles."""
+    model = build(demo)
+    panel_z = demo.panels["main"]
+    lid = min(model.layers, key=lambda l: abs((l.z0 + l.z1) / 2 - (panel_z - 1.0)))
+    holes = sum(len(p.interiors) for p in
+                (lid.geom.geoms if hasattr(lid.geom, "geoms") else [lid.geom]))
+    assert holes >= 30, f"expected the button grid to be cut individually, got {holes}"
+
+
+def test_repeat_grid_is_centred_on_at():
+    from hwcase.schema import Box, Repeat
+
+    b = Box(name="g", at=(30.0, 30.0), size=(10.0, 10.0), z=(0.0, 1.0),
+            repeat=Repeat(count=(4, 4), pitch=(15.0, 15.0)))
+    xs = sorted({at[0] for _, at in b.instances()})
+    assert xs == [7.5, 22.5, 37.5, 52.5]
+    assert len(b.instances()) == 16
+
+
+def test_no_repeat_means_one_instance():
+    from hwcase.schema import Box
+
+    b = Box(name="solo", at=(1.0, 2.0), size=(3.0, 4.0), z=(0.0, 1.0))
+    assert b.instances() == [("solo", (1.0, 2.0))]

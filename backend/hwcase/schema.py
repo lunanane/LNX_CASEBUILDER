@@ -121,11 +121,24 @@ _FACE_NORMAL: dict["Face", Vec3] = {
 }
 
 
+class Repeat(Strict):
+    """A grid of identical features, centred on the parent's `at`.
+
+    A 4x4 keypad is sixteen 10 mm buttons on a 15 mm pitch, not one 55 mm
+    square -- and the difference is the difference between a faceplate that
+    works and a hole. Same for the four shafts on an encoder strip.
+    """
+
+    count: tuple[int, int] = (1, 1)
+    pitch: Vec2 = (0.0, 0.0)
+
+
 class Box(Strict):
-    """An axis-aligned box in part-local coordinates.
+    """One feature in part-local coordinates.
 
     `at` is the XY centre; `z` is the (z_min, z_max) interval measured from the
-    PCB bottom face.
+    PCB bottom face. `shape: circle` makes it a cylinder -- an encoder bushing
+    wants a round hole, not a square one.
     """
 
     name: str
@@ -133,7 +146,28 @@ class Box(Strict):
     at: Vec2
     size: Vec2
     z: Vec2
+    shape: Literal["rect", "circle"] = "rect"
+    #: rounds the corners of a rect; ignored for circles
+    corner_radius: float = 0.0
+    repeat: Optional[Repeat] = None
     src: Source = Field(default_factory=Source)
+
+    def instances(self) -> list[tuple[str, Vec2]]:
+        """(name, centre) for every copy of this feature."""
+        r = self.repeat
+        if r is None or (r.count[0] <= 1 and r.count[1] <= 1):
+            return [(self.name, self.at)]
+        nx, ny = max(1, r.count[0]), max(1, r.count[1])
+        dx, dy = r.pitch
+        out = []
+        for j in range(ny):
+            for i in range(nx):
+                out.append((
+                    f"{self.name}[{i},{j}]",
+                    (self.at[0] + (i - (nx - 1) / 2) * dx,
+                     self.at[1] + (j - (ny - 1) / 2) * dy),
+                ))
+        return out
 
     def z_min(self) -> float:
         return min(self.z)

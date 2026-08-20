@@ -194,6 +194,28 @@ one you want to reach.
 unbroken: no window, no actuator hole. The checker errors if the board is too
 tall to actually fit under the plate.
 
+## Features that repeat
+
+A 4x4 keypad is sixteen 10 mm buttons on a 15 mm pitch, not one 55 mm square —
+and the difference is the difference between a faceplate and a hole. Volumes
+take a `repeat` grid and a `shape`:
+
+```yaml
+      - name: buttons
+        at: [30.0, 30.0]
+        size: [10.0, 10.0]
+        corner_radius: 1.5
+        repeat: {count: [4, 4], pitch: [15.0, 15.0]}   # centred on `at`
+      - name: bushings
+        size: [6.8, 6.8]
+        shape: circle                                   # round hole, round part
+        repeat: {count: [4, 1], pitch: [19.05, 0.0]}
+```
+
+The grid is centred on `at`, so the pad's buttons land at 7.5 / 22.5 / 37.5 /
+52.5 mm from each edge and stay continuous across tiled pads. Instances are
+named `buttons[2,3]` in the issue list.
+
 ## Coordinate conventions
 
 Part-local: X and Y in the board plane, +Z out of the component side, **z = 0 at

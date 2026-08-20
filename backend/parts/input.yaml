@@ -101,11 +101,16 @@ parts:
         size: [60.0, 60.0]
         z: [0.0, 5.0]
         src: {confidence: estimated, note: "silicone web between the buttons"}
+      # Sixteen separate buttons, so the faceplate gets sixteen holes rather
+      # than one 55 mm window. Centres land at 7.5 / 22.5 / 37.5 / 52.5 mm from
+      # each edge, which is what keeps the grid continuous across tiled pads.
       - name: buttons
         kind: actuator
         at: [30.0, 30.0]
-        size: [55.0, 55.0]
+        size: [10.0, 10.0]
         z: [5.0, 11.5]
+        corner_radius: 1.5
+        repeat: {count: [4, 4], pitch: [15.0, 15.0]}
         src: {confidence: vendor, note: "4x4 of 10x10 buttons on a 15 mm pitch"}
 
     mates:
@@ -146,23 +151,31 @@ parts:
     pcb_thickness: 1.6
 
     volumes:
+      # Four encoders on a 19.05 mm (0.75") pitch, modelled individually so the
+      # faceplate gets four 6.8 mm round holes instead of one 64 mm slot.
+      # Centres: 9.525 / 28.575 / 47.625 / 66.675 mm along the board.
       - name: encoder_bodies
         kind: body
         at: [38.1, 10.795]
-        size: [69.25, 12.1]
+        size: [12.4, 12.1]
         z: [1.6, 8.0]
+        repeat: {count: [4, 1], pitch: [19.05, 0.0]}
         src: {confidence: datasheet, note: "4x PEC11, 19.05 mm pitch, from the vendor mesh"}
       - name: bushings
         kind: actuator
         at: [38.1, 10.795]
-        size: [63.95, 6.8]
+        size: [6.8, 6.8]
         z: [8.0, 15.2]
+        shape: circle
+        repeat: {count: [4, 1], pitch: [19.05, 0.0]}
         src: {confidence: datasheet, note: "threaded collar; this is what a panel clamps on"}
       - name: shafts
         kind: actuator
         at: [38.1, 10.795]
-        size: [63.15, 6.0]
+        size: [6.0, 6.0]
         z: [15.2, 23.0]
+        shape: circle
+        repeat: {count: [4, 1], pitch: [19.05, 0.0]}
         src: {confidence: datasheet, note: "6 mm D-shaft -- knobs go here"}
       - name: underside
         kind: body

@@ -13,7 +13,7 @@ import math
 from dataclasses import dataclass
 
 from shapely.affinity import rotate, translate
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon
 from shapely.geometry.base import BaseGeometry
 
 from .schema import Box, Face, Outline, PolyOutline, RectOutline, Vec2, Vec3
@@ -91,15 +91,22 @@ def outline_polygon(outline: Outline) -> Polygon:
     raise TypeError(f"unsupported outline {outline!r}")
 
 
-def box_polygon(b: Box) -> Polygon:
-    cx, cy = b.at
+def box_polygon(b: Box, at: Vec2 | None = None) -> Polygon:
+    """Footprint of one feature, optionally re-centred (for repeat grids)."""
+    cx, cy = at if at is not None else b.at
     w, h = b.size
-    return Polygon([
+    if b.shape == "circle":
+        return Point(cx, cy).buffer(max(w, h) / 2.0, quad_segs=24)
+    poly = Polygon([
         (cx - w / 2, cy - h / 2),
         (cx + w / 2, cy - h / 2),
         (cx + w / 2, cy + h / 2),
         (cx - w / 2, cy + h / 2),
     ])
+    r = min(b.corner_radius, w / 2.0, h / 2.0)
+    if r > 1e-9:
+        poly = poly.buffer(-r, join_style=2).buffer(r, join_style=1, quad_segs=12)
+    return poly
 
 
 def corridor(at: Vec3, face: Face, length: float, width: float, height: float,

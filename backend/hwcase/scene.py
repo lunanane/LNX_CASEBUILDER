@@ -372,9 +372,11 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
                                 frame.z_interval((0.0, part.pcb_thickness)), part.src))
 
         for v in part.volumes:
-            solids.append(Solid(pl.id, part.id, v.name, v.kind,
-                                frame.polygon(box_polygon(v)),
-                                frame.z_interval((v.z_min(), v.z_max())), v.src))
+            # a repeat grid expands here: sixteen buttons, four shafts
+            for inst_name, inst_at in v.instances():
+                solids.append(Solid(pl.id, part.id, inst_name, v.kind,
+                                    frame.polygon(box_polygon(v, inst_at)),
+                                    frame.z_interval((v.z_min(), v.z_max())), v.src))
 
         by_side: dict[Face, SidePolicy] = {sp.side: sp for sp in pl.sides}
 
