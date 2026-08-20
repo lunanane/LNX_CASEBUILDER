@@ -120,7 +120,7 @@ def _base(name):
 def test_everything_on_the_panel_lands_flush(demo):
     z = demo.panels["main"]
     flush = {"screen.active_area", "pad_a.buttons", "pad_b.buttons",
-             "encoders.bushings", "oled.active_area", "amy.panel_face"}
+             "encoders.bushings", "oled.active_area", "amy.jack_threads"}
     seen = set()
     for s in demo.solids:
         ref = f"{s.placement}.{_base(s.name)}"
@@ -194,6 +194,7 @@ def test_blocking_a_port_is_an_error(lib):
 def test_burying_a_display_is_an_error(lib):
     scene = load_scene(SCENE)
     mux = next(p for p in scene.placements if p.id == "mux")
+    mux.mount = "manual"              # we mean this z, not whatever auto picks
     mux.pos = (-40.0, -30.0, 30.0)    # hovering directly over the screen
     issues = check(resolve(scene, lib), lib)
     assert any(i.code == "obstructed" and "screen.active_area" in i.message
@@ -272,8 +273,9 @@ def test_rotation_moves_the_footprint_not_just_the_label(lib):
     part = Part(id="t", name="t", outline=RectOutline(size=(40.0, 10.0), origin="min"),
                 volumes=[Box(name="b", at=(20.0, 5.0), size=(40.0, 10.0), z=(0.0, 2.0))])
     small = PartLibrary([part])
-    flat = resolve(Scene(placements=[Placement(id="p", part="t")]), small)
-    turned = resolve(Scene(placements=[Placement(id="p", part="t", rot_z=90.0)]), small)
+    flat = resolve(Scene(placements=[Placement(id="p", part="t", mount="manual")]), small)
+    turned = resolve(Scene(placements=[
+        Placement(id="p", part="t", rot_z=90.0, mount="manual")]), small)
     fx0, fy0, fx1, fy1 = flat.solids[0].poly.bounds
     tx0, ty0, tx1, ty1 = turned.solids[0].poly.bounds
     assert (fx1 - fx0) == pytest.approx(ty1 - ty0)
@@ -285,8 +287,9 @@ def test_flip_mirrors_z_about_the_board_plane(lib):
                 pcb_thickness=1.6,
                 volumes=[Box(name="tall", at=(0.0, 0.0), size=(5.0, 5.0), z=(1.6, 11.6))])
     small = PartLibrary([part])
-    up = resolve(Scene(placements=[Placement(id="p", part="t")]), small)
-    down = resolve(Scene(placements=[Placement(id="p", part="t", flip=True)]), small)
+    up = resolve(Scene(placements=[Placement(id="p", part="t", mount="manual")]), small)
+    down = resolve(Scene(placements=[
+        Placement(id="p", part="t", flip=True, mount="manual")]), small)
     tall_up = next(s for s in up.solids if s.name == "tall")
     tall_down = next(s for s in down.solids if s.name == "tall")
     assert tall_up.z == pytest.approx((1.6, 11.6))
@@ -523,6 +526,7 @@ def test_under_panel_leaves_the_faceplate_unbroken(lib):
     before = build(resolve(scene, lib))
     oled.under_panel = True
     oled.on_panel = None
+    oled.mount = "manual"
     oled.pos = (oled.pos[0], oled.pos[1], panel_z - 12.0)   # tuck it well under
     after = build(resolve(scene, lib))
 
@@ -687,6 +691,7 @@ def test_boards_may_pass_over_each_other(lib):
     oled = next(p for p in scene.placements if p.id == "oled")
     mux = next(p for p in scene.placements if p.id == "mux")
     oled.on_panel = None
+    oled.mount = mux.mount = "manual"
     mux.pos = (oled.pos[0], oled.pos[1], 0.0)
     oled.pos = (mux.pos[0], mux.pos[1], 40.0)     # well clear above
     issues = check(resolve(scene, lib), lib)
@@ -699,6 +704,7 @@ def test_passing_too_close_over_is_reported(lib):
     oled = next(p for p in scene.placements if p.id == "oled")
     mux = next(p for p in scene.placements if p.id == "mux")
     oled.on_panel = None
+    oled.mount = mux.mount = "manual"
     mux.pos = (oled.pos[0], oled.pos[1], 0.0)
     mux_top = max(s.z[1] for s in resolve(scene, lib).solids if s.placement == "mux")
     oled_bottom = min(v.z_min() for v in lib["adafruit-4741-oled-1v5"].volumes)
@@ -822,3 +828,116 @@ def test_interior_does_not_touch_the_floor_or_the_lid(demo):
         base = build(demo)
         assert model.layers[0].geom.area == pytest.approx(base.layers[0].geom.area)
         assert model.layers[-1].geom.area == pytest.approx(base.layers[-1].geom.area)
+
+
+# --------------------------------------------------------------------------
+# auto mounting: the faceplate or the floor, never a typed-in z
+# --------------------------------------------------------------------------
+
+def test_auto_sends_anything_facing_up_to_the_faceplate(lib):
+    from hwcase.scene import Mount, mount_of
+
+    scene = load_scene(SCENE)
+    for pl in scene.placements:
+        pl.on_panel = None                  # let auto decide unaided
+    res = resolve(scene, lib)
+    panel_z = res.panels["main"]
+
+    for pid in ("encoders", "oled", "amy", "trellis_a"):
+        pl = next(p for p in scene.placements if p.id == pid)
+        assert mount_of(scene, lib, pl) is Mount.panel, pid
+    # and the feature really is level with the plate
+    tops = {s.placement: s.z[1] for s in res.solids
+            if s.kind.value in ("display", "actuator")}
+    for pid in ("encoders", "oled", "amy", "pad_a"):
+        assert tops[pid] >= panel_z - 1e-6
+
+
+def test_auto_reads_the_whole_mate_stack(lib):
+    """A NeoTrellis has nothing facing up -- the buttons belong to the pad glued
+    on top of it. Judging the board alone would drop the keypad to the floor."""
+    from hwcase.scene import Mount, has_top_periphery, mount_of
+
+    scene = load_scene(SCENE)
+    trellis = next(p for p in scene.placements if p.id == "trellis_a")
+    trellis.on_panel = None
+    assert not has_top_periphery(lib["adafruit-3954-neotrellis"])
+    assert mount_of(scene, lib, trellis) is Mount.panel
+
+
+def test_auto_puts_internal_boards_on_the_floor(lib):
+    from hwcase.scene import Mount, mount_of
+
+    scene = load_scene(SCENE)
+    mux = next(p for p in scene.placements if p.id == "mux")
+    assert mount_of(scene, lib, mux) is Mount.floor, "the hub faces nowhere"
+
+    res = resolve(scene, lib)
+    bottom = min(s.z[0] for s in res.solids if s.placement == "mux")
+    assert bottom == pytest.approx(res.floor, abs=1e-6)
+
+
+def test_the_floor_sits_under_the_deepest_hardware(lib):
+    scene = load_scene(SCENE)
+    res = resolve(scene, lib)
+    deepest = min(s.z[0] for s in res.solids)
+    assert res.floor == pytest.approx(deepest, abs=1e-6)
+
+
+def test_an_explicit_floor_overrides_the_derived_one(lib):
+    scene = load_scene(SCENE)
+    scene.floor = -20.0
+    res = resolve(scene, lib)
+    bottom = min(s.z[0] for s in res.solids if s.placement == "mux")
+    assert bottom == pytest.approx(-20.0, abs=1e-6)
+
+
+def test_locked_placements_are_never_moved(lib):
+    from hwcase.scene import Mount, mount_of
+
+    scene = load_scene(SCENE)
+    pi = next(p for p in scene.placements if p.id == "pi")
+    assert pi.locked
+    assert mount_of(scene, lib, pi) is Mount.manual
+    assert resolve(scene, lib).frames["pi"].pos[2] == pytest.approx(pi.pos[2])
+
+
+def test_manual_keeps_the_z_you_typed(lib):
+    scene = load_scene(SCENE)
+    mux = next(p for p in scene.placements if p.id == "mux")
+    mux.mount = "manual"
+    mux.pos = (mux.pos[0], mux.pos[1], 12.75)
+    assert resolve(scene, lib).frames["mux"].pos[2] == pytest.approx(12.75)
+
+
+def test_amyboard_has_no_hovering_slab(lib):
+    """It used to be modelled panel-first, so the outline solid was the 128 mm
+    acrylic panel floating 11 mm above the board with nothing under most of it."""
+    amy = lib["shorepine-amyboard"]
+    assert amy.outline.size == (50.5, 105.0), "the outline is the board, not the panel"
+    names = [v.name for v in amy.volumes]
+    assert len(names) == len(set(names)), "duplicate volume names"
+    assert "pcb" not in names, "that name belongs to the solid made from the outline"
+
+    scene = load_scene(SCENE)
+    res = resolve(scene, lib)
+    solids = sorted((s for s in res.solids if s.placement == "amy"), key=lambda s: s.z[0])
+    for a, b in zip(solids, solids[1:]):
+        assert b.z[0] <= a.z[1] + 1e-6 or any(
+            o.z[0] <= b.z[0] <= o.z[1] for o in solids if o is not b), \
+            f"{b.name} floats above {a.name}"
+
+
+def test_duplicate_volume_names_are_rejected(lib):
+    from hwcase.library import PartLibrary
+    from hwcase.schema import Box, Part, RectOutline
+
+    def make(names):
+        return Part(id="x", name="x", outline=RectOutline(size=(10.0, 10.0)),
+                    volumes=[Box(name=n, at=(0.0, 0.0), size=(1.0, 1.0), z=(0.0, 1.0))
+                             for n in names])
+
+    with pytest.raises(ValueError, match="two volumes"):
+        PartLibrary([make(["a", "a"])])
+    with pytest.raises(ValueError, match="collides"):
+        PartLibrary([make(["pcb"])])

@@ -7,102 +7,100 @@ parts:
     tags: [esp32s3, eurorack, midi, cv, spdif, patchbay, i2c]
     cad: ../img/amyboard_front_panel_annotated.jpg
     notes: >-
-      Modelled panel-first, because that is how we use it: the panel IS the
-      outward face and every jack lives on it, so it wants to sit flush in a
-      surface of the case.
-      LOCAL FRAME: origin at the panel's bottom-left, +Z out towards the user,
-      z = 0 at the panel's BACK face -- so the acrylic is 0..2 and everything
-      else is negative. This part is the odd one out: its outline is the panel,
-      not a PCB.
-      Panel size is a standard (10 HP = 10*5.08-0.3 = 50.5 mm, 3U = 128.5 mm,
-      rail holes 123.5 mm apart). Everything else is scaled off the vendor's
-      annotated photos in vendor/img/, using the USB-C shell (8.94 mm) as the
-      ruler: PCB about 50.5 x 105 mm, jack pitch about 12 mm.
-      LAYOUT (from the photos, all of it estimated):
-      ten 3.5 mm jacks in TWO COLUMNS OF FIVE hard against the +X edge, with
-      the silkscreen labels filling the left half of the panel. Rows top to
-      bottom are SPDIF, LINE, MIDI, CV1, CV2; the left column is IN and the
-      right column is OUT. The jack field only reaches about 68 mm up the
-      panel -- the top ~60 mm is empty, which the vendor calls "front panel
-      free space for display". Worth remembering: there is room there for our
-      own OLED behind the same panel.
-      USB-C and the microSD slot are both on the +X edge, above the jacks.
-      The I2C Grove port for accessories is on the FRONT face at bottom-left
-      (reached through the panel), NOT on a side. Eurorack power, the Tulip
-      host I2C port and the debug header are all on the BACK.
+      Modelled BOARD-first, like every other part: origin at the PCB's
+      bottom-left, z = 0 at the PCB bottom face, +Z out of the jack side.
+      (It used to be modelled panel-first, which put a full-size 50.5 x 128.5
+      slab 11 mm above the board with nothing under most of it -- a plane
+      apparently hovering in mid air. The acrylic panel is a separate object
+      that happens to ship in the same box, so it is now a separate part:
+      shorepine-amyboard-panel, mated on at the jack plane.)
+      The jacks are panel-mount: their bodies stand ~11 mm off the PCB and the
+      threaded bushings pass through whatever panel you use -- theirs, or the
+      faceplate of this case. Ten of them in TWO COLUMNS OF FIVE hard against
+      the +X edge, rows SPDIF / LINE / MIDI / CV1 / CV2 top to bottom, left
+      column IN and right column OUT.
+      Dimensions are scaled off the vendor's annotated photos in vendor/img/
+      using the USB-C shell (8.94 mm) as the ruler. The shape is right; the
+      millimetres are estimates and the jack pitch is the weakest of them.
+      MEASURE ME -- you own this board.
     src:
       confidence: estimated
       url: https://github.com/shorepine/tulipcc/blob/main/docs/amyboard/README.md
 
     outline:
       type: rect
-      size: [50.5, 128.5]
-      corner_radius: 1.0
+      size: [50.5, 105.0]
+      corner_radius: 2.0
       origin: min
-    pcb_thickness: 2.0            # the acrylic panel, not a PCB
-
-    holes:
-      - {name: rail_bl, at: [3.5, 3.0], diameter: 3.2, screw: M3, src: {confidence: datasheet, note: "Doepfer A-100, 123.5 mm apart"}}
-      - {name: rail_tl, at: [3.5, 126.5], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
-      - {name: rail_br, at: [47.0, 3.0], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
-      - {name: rail_tr, at: [47.0, 126.5], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
+    pcb_thickness: 1.6
 
     volumes:
-      - name: panel_face
-        kind: display
-        at: [25.25, 64.25]
-        size: [50.5, 128.5]
-        z: [0.0, 2.0]
-        src: {confidence: datasheet, note: "the whole panel must stay reachable"}
-      - name: jack_bodies
-        kind: body
-        at: [39.0, 43.75]
-        size: [23.0, 71.5]
-        z: [-11.0, 0.0]
-        src: {confidence: estimated, note: "2x5 jack block behind the panel"}
-      - name: pcb
-        kind: body
-        at: [25.25, 64.25]
-        size: [50.5, 105.0]
-        z: [-12.6, -11.0]
-        src: {confidence: estimated, note: "PCB sits one jack-body behind the panel"}
       - name: back_components
         kind: body
-        at: [25.25, 64.25]
+        at: [25.25, 52.5]
         size: [50.5, 105.0]
-        z: [-24.0, -12.6]
+        z: [-11.4, 0.0]
         src: {confidence: estimated, note: "power header and Tulip port are the tall ones"}
+      # Ten panel-mount jacks, 2 columns x 5 rows on a 12 mm pitch. Grid centre
+      # (39.0, 32.05): columns at x 33 and 45, rows at y 8.05 .. 56.05.
+      - name: jack_bodies
+        kind: body
+        at: [39.0, 32.05]
+        size: [9.5, 9.5]
+        z: [1.6, 12.6]
+        repeat: {count: [2, 5], pitch: [12.0, 12.0]}
+        src: {confidence: estimated, note: "body height sets how far the panel stands off"}
+      - name: jack_threads
+        kind: actuator
+        at: [39.0, 32.05]
+        size: [6.5, 6.5]
+        z: [12.6, 17.0]
+        shape: circle
+        repeat: {count: [2, 5], pitch: [12.0, 12.0]}
+        src:
+          confidence: estimated
+          note: >-
+            The threaded bushing that goes through the panel, and the nut that
+            holds it. This is what a faceplate needs a round hole for -- ten of
+            them, not one slot.
+      - name: display_space
+        kind: keepout
+        at: [25.25, 86.0]
+        size: [46.0, 34.0]
+        z: [1.6, 12.6]
+        src:
+          confidence: estimated
+          note: >-
+            The vendor calls this "front panel free space for display" -- the
+            top ~34 mm of the board carries nothing, and is big enough for our
+            own OLED behind the same faceplate.
 
     connectors:
-      # Two columns of five, +X edge. Left column IN at x=33, right column OUT
-      # at x=45; rows 12 mm apart, SPDIF at the top.
-      - {name: spdif_in,  type: jack_3v5, face: +z, at: [33.0, 67.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
-      - {name: spdif_out, type: jack_3v5, face: +z, at: [45.0, 67.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
-      - {name: line_in,   type: jack_3v5, face: +z, at: [33.0, 55.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
-      - {name: line_out,  type: jack_3v5, face: +z, at: [45.0, 55.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
-      - {name: midi_in,   type: jack_3v5, face: +z, at: [33.0, 43.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
-      - {name: midi_out,  type: jack_3v5, face: +z, at: [45.0, 43.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
-      - {name: cv1_in,    type: jack_3v5, face: +z, at: [33.0, 31.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
-      - {name: cv1_out,   type: jack_3v5, face: +z, at: [45.0, 31.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
-      - {name: cv2_in,    type: jack_3v5, face: +z, at: [33.0, 19.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
-      - {name: cv2_out,   type: jack_3v5, face: +z, at: [45.0, 19.8, 2.0], plug_depth: 22.0, bend_radius: 25.0, cutout: [9.0, 9.0], external: true, src: {confidence: estimated}}
+      # mouths sit at the panel plane, z = 12.6
+      - {name: spdif_in,  type: jack_3v5, face: +z, at: [33.0, 56.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: spdif_out, type: jack_3v5, face: +z, at: [45.0, 56.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: line_in,   type: jack_3v5, face: +z, at: [33.0, 44.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: line_out,  type: jack_3v5, face: +z, at: [45.0, 44.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: midi_in,   type: jack_3v5, face: +z, at: [33.0, 32.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: midi_out,  type: jack_3v5, face: +z, at: [45.0, 32.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: cv1_in,    type: jack_3v5, face: +z, at: [33.0, 20.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: cv1_out,   type: jack_3v5, face: +z, at: [45.0, 20.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: cv2_in,    type: jack_3v5, face: +z, at: [33.0, 8.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: cv2_out,   type: jack_3v5, face: +z, at: [45.0, 8.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
 
-      # front face, reached through the panel -- horizontal JST, cable leaves sideways
       - name: i2c_accessories
         type: grove
         face: +z
-        at: [9.5, 21.4, 2.0]
+        at: [9.5, 9.65, 1.6]
         plug_depth: 10.0
         bend_radius: 14.0
         cutout: [14.0, 8.0]
         external: true
         src: {confidence: estimated, note: "vendor calls this the front-panel I2C port"}
-
-      # +X edge, above the jack field
       - name: usb_c
         type: usb_c
         face: +x
-        at: [50.5, 79.9, -11.8]
+        at: [50.5, 68.15, 0.8]
         plug_depth: 18.0
         bend_radius: 20.0
         cutout: [12.0, 8.0]
@@ -111,18 +109,16 @@ parts:
       - name: microsd
         type: microsd
         face: +x
-        at: [50.5, 111.8, -11.8]
+        at: [50.5, 100.05, 0.8]
         plug_depth: 16.0
         bend_radius: 0.0
         cutout: [16.0, 4.0]
         external: true
         src: {confidence: estimated}
-
-      # back face
       - name: i2c_tulip_host
         type: grove
         face: -z
-        at: [45.9, 94.2, -24.0]
+        at: [45.9, 82.45, -11.4]
         plug_depth: 12.0
         bend_radius: 15.0
         external: false
@@ -130,18 +126,72 @@ parts:
       - name: debug_serial
         type: header_1x6
         face: -z
-        at: [6.6, 93.9, -24.0]
+        at: [6.6, 82.15, -11.4]
         plug_depth: 10.0
         external: false
         src: {confidence: estimated}
 
     mates:
+      - name: panel
+        standard: amyboard_panel
+        role: socket
+        at: [39.0, 32.05, 12.6]
+        face: +z
+        src: {confidence: estimated, note: "the plane the jack bushings clamp"}
       - name: eurorack_power
         standard: eurorack_power_10
         role: socket
-        at: [6.0, 79.7, -24.0]
+        at: [6.0, 67.95, -11.4]
         face: -z
         src: {confidence: estimated, note: "10-pin shrouded IDC on the back"}
+
+  - id: shorepine-amyboard-panel
+    name: AMYboard acrylic front panel (10 HP)
+    vendor: Shorepine / Makerfabs
+    url: https://github.com/shorepine/tulipcc/blob/main/docs/modular.md
+    category: panel
+    tags: [eurorack, acrylic, accessory]
+    notes: >-
+      The unlabelled acrylic panel that ships with an AMYboard, as its own part
+      -- mate it onto the board's `panel` mate if you want to keep it, or leave
+      it out and let this case's own faceplate carry the jacks. That choice
+      changes the front of the machine, so it should be a placement you can see
+      and delete rather than something welded into the board model.
+      Panel size is a standard: 10 HP = 10*5.08 - 0.3 = 50.5 mm, 3U = 128.5 mm,
+      rail holes 123.5 mm apart. The board sits 11.75 mm up from the panel's
+      bottom edge, which is where the mate lands.
+    src:
+      confidence: datasheet
+      url: https://doepfer.de/a100_man/a100m_e.htm
+
+    outline:
+      type: rect
+      size: [50.5, 128.5]
+      corner_radius: 1.0
+      origin: min
+    pcb_thickness: 2.0
+
+    holes:
+      - {name: rail_bl, at: [3.5, 3.0], diameter: 3.2, screw: M3, src: {confidence: datasheet, note: "Doepfer A-100, 123.5 mm apart"}}
+      - {name: rail_tl, at: [3.5, 126.5], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
+      - {name: rail_br, at: [47.0, 3.0], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
+      - {name: rail_tr, at: [47.0, 126.5], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
+
+    volumes:
+      - name: face
+        kind: display
+        at: [25.25, 64.25]
+        size: [50.5, 128.5]
+        z: [0.0, 2.0]
+        src: {confidence: datasheet, note: "the labelled face; keep it reachable"}
+
+    mates:
+      - name: board
+        standard: amyboard_panel
+        role: plug
+        at: [39.0, 43.8, 0.0]
+        face: -z
+        src: {confidence: estimated, note: "jack grid centre, 11.75 mm up from the panel foot"}
 
   - id: seeed-grove-tca9548a
     name: Grove - 8 Channel I2C Multiplexer / I2C Hub (TCA9548A)

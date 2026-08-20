@@ -320,6 +320,21 @@ class SidePolicy(Strict):
     span: Literal["full", "board"] = "full"
 
 
+class Mount(str, Enum):
+    """How a board's height is decided.
+
+    Nobody should be typing a z. A board with something on top of it -- a
+    screen, a knob, a jack, a button -- wants that feature exactly level with
+    the faceplate. A board with nothing on top wants to be out of the way, flat
+    on the bottom plate. `auto` picks between those two by looking at the part.
+    """
+
+    auto = "auto"        # panel if the board has anything facing up, else floor
+    panel = "panel"      # a feature of it sits flush with a panel
+    floor = "floor"      # it rests on the inside floor
+    manual = "manual"    # pos[2] is used exactly as written
+
+
 class Panel(Strict):
     """A user-facing surface: the plane your fingers and eyes meet.
 
@@ -366,7 +381,11 @@ class Placement(Strict):
     #: the surface, so no window or actuator hole is cut for it
     under_panel: bool = False
 
-    #: sit flush with this panel -- z is solved for, `pos[2]` is then ignored
+    #: how z is decided. `auto` reads the part: anything facing up goes to the
+    #: faceplate, anything else goes to the floor.
+    mount: Mount = Mount.auto
+    #: sit flush with this panel -- z is solved for, `pos[2]` is then ignored.
+    #: Setting it implies `mount: panel`.
     on_panel: Optional[str] = None
     #: which feature lands on the panel: a volume name (searched in this part
     #: and in anything mated on top of it), "top" for the highest point of the
@@ -431,5 +450,9 @@ class Scene(Strict):
     name: str = "untitled"
     anchor: Optional[str] = None       # placement id that defines the origin
     panels: list[Panel] = Field(default_factory=list)
+    #: world z of the inside floor -- the top face of the bottom plate. Left
+    #: unset it is derived: the lowest point of everything that is not itself
+    #: floor-mounted, so the floor sits under the deepest hardware.
+    floor: Optional[float] = None
     placements: list[Placement] = Field(default_factory=list)
     case: CaseSpec = Field(default_factory=CaseSpec)

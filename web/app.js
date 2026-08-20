@@ -252,13 +252,18 @@ function buildPanels(resolved) {
   if (!$('chk-panels').checked || !resolved?.extent) return;
   const e = resolved.extent;
   const pad = 12;
-  for (const p of resolved.panels || []) {
+  const planes = [...(resolved.panels || [])];
+  if (resolved.floor != null) {
+    planes.push({ name: 'floor', z: resolved.floor, isFloor: true });
+  }
+  for (const p of planes) {
     if (p.z == null) continue;
     const w = e.max[0] - e.min[0] + pad * 2;
     const h = e.max[1] - e.min[1] + pad * 2;
+    const tint = p.isFloor ? 0x6bd68a : 0x57c7ff;
     const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
       new THREE.MeshBasicMaterial({
-        color: 0x57c7ff, transparent: true, opacity: 0.05,
+        color: tint, transparent: true, opacity: 0.05,
         side: THREE.DoubleSide, depthWrite: false,
       }));
     plane.position.set((e.min[0] + e.max[0]) / 2, (e.min[1] + e.max[1]) / 2, p.z);
@@ -270,7 +275,7 @@ function buildPanels(resolved) {
     ].map(([x, y]) => new THREE.Vector3(x, y, p.z));
     panelGroup.add(new THREE.Line(
       new THREE.BufferGeometry().setFromPoints(corners),
-      new THREE.LineBasicMaterial({ color: 0x57c7ff, transparent: true, opacity: 0.45 })));
+      new THREE.LineBasicMaterial({ color: tint, transparent: true, opacity: 0.45 })));
   }
 }
 
@@ -686,7 +691,8 @@ function renderSelection(force = false) {
     if (shellFor !== null || force) { box.innerHTML = '<div class="note">nothing selected</div>'; shellFor = null; }
     return;
   }
-  const key = [pl.id, pl.parent ? 1 : 0, pl.on_panel || '', pl.under_panel ? 1 : 0,
+  const key = [pl.id, pl.parent ? 1 : 0, pl.on_panel || '', pl.mount || 'auto',
+    pl.under_panel ? 1 : 0,
     JSON.stringify(pl.sides || [])].join('|');
   if (force || shellFor !== key) { buildSelectionShell(pl); shellFor = key; }
   updateSelectionValues(pl);
@@ -810,7 +816,7 @@ function buildSelectionShell(pl) {
     .filter(Boolean)
     .flatMap((p) => (p.volumes || []).map((v) => v.name))];
 
-  const solvedZ = attached || pl.on_panel;
+  const solvedZ = attached || (pl.mount || 'auto') !== 'manual';
   $('selection').innerHTML = `
     <div class="note">${part ? part.name : pl.part}</div>
     ${attached ? `<div class="note">mated to <b>${pl.parent}</b> via
@@ -825,6 +831,12 @@ function buildSelectionShell(pl) {
       <button id="b-ccw" title="rotate 90&deg; counter-clockwise">&#8634;90</button>
       <button id="b-cw" title="rotate 90&deg; clockwise">90&#8635;</button></div>
     ${attached ? '<div class="field"><label>gap</label><input id="f-g" type="number" step="0.5"></div>' : `
+      <div class="field"><label>height</label><select id="f-mount">
+        <option value="auto">auto</option>
+        <option value="panel">flush to panel</option>
+        <option value="floor">on the floor</option>
+        <option value="manual">manual z</option>
+      </select></div>
       <div class="field"><label>panel</label><select id="f-panel">
         <option value="">-- free --</option>
         ${panelNames.map((n) => `<option value="${n}">${n}</option>`).join('')}
@@ -845,7 +857,8 @@ function buildSelectionShell(pl) {
   };
   num('f-x', (v) => (pl.pos[0] = v));
   num('f-y', (v) => (pl.pos[1] = v));
-  num('f-z', (v) => (pl.pos[2] = v));
+  // typing a height means you want that height, not whatever auto picks
+  num('f-z', (v) => { pl.pos[2] = v; pl.mount = 'manual'; renderSelection(true); });
   num('f-r', (v) => rotateTo(pl, v));
   num('f-g', (v) => (pl.mate_gap = v));
   num('f-panelofs', (v) => (pl.panel_offset = v));
@@ -854,6 +867,7 @@ function buildSelectionShell(pl) {
     const el = $(id);
     if (el) el.onchange = () => { set(el.value); renderSelection(true); scheduleResolve(0); };
   };
+  sel('f-mount', (v) => (pl.mount = v));
   sel('f-panel', (v) => (pl.on_panel = v || null));
   sel('f-panelref', (v) => (pl.panel_ref = v));
 
@@ -872,7 +886,7 @@ function buildSelectionShell(pl) {
 
 function updateSelectionValues(pl) {
   const frame = state.resolved?.frames?.[pl.id];
-  const solved = !!(pl.parent || pl.on_panel);
+  const solved = !!pl.parent || (pl.mount || 'auto') !== 'manual';
   const set = (id, v) => {
     const el = $(id);
     if (el && document.activeElement !== el) el.value = Number(v).toFixed(2);
@@ -883,6 +897,7 @@ function updateSelectionValues(pl) {
   set('f-r', pl.rot_z || 0);
   set('f-g', pl.mate_gap || 0);
   set('f-panelofs', pl.panel_offset || 0);
+  const mo = $('f-mount'); if (mo) mo.value = pl.mount || 'auto';
   const p = $('f-panel'); if (p) p.value = pl.on_panel || '';
   const r = $('f-panelref'); if (r) r.value = pl.panel_ref || 'auto';
 }
@@ -914,7 +929,7 @@ function addPlacement(partId) {
     pos: e ? [e.max[0] + 20, e.min[1], 0] : [0, 0, 0],
     rot_z: 0, flip: false, locked: false,
     parent: null, parent_mate: null, mate: null, mate_gap: 0,
-    on_panel: null, panel_ref: 'auto', panel_offset: 0,
+    mount: 'auto', on_panel: null, panel_ref: 'auto', panel_offset: 0,
   });
   select(state.scene.placements.at(-1).id);
   scheduleResolve(0);
@@ -1164,6 +1179,7 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
     let d = new THREE.Vector3().subVectors(now, drag.start);
     if (drag.vertical) { d.x = 0; d.y = 0; } else { d.z = 0; }
     drag.noSnap = ev.altKey;
+    if (drag.vertical && pl.mount !== 'manual') pl.mount = 'manual';   // same rule
     if (!drag.vertical) d = applySnap(d);
     for (const m of drag.moved) m.group.position.copy(m.base).add(d);
     pl.pos = [drag.origin[0] + d.x, drag.origin[1] + d.y, drag.origin[2] + d.z];

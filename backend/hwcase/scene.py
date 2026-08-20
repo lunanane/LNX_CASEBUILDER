@@ -16,8 +16,8 @@ from shapely.ops import unary_union
 
 from .geom import Frame, box_polygon, corridor, outline_polygon, z_overlap
 from .library import PartLibrary
-from .schema import (Box, Confidence, Connector, CutoutPolicy, Face, Panel,
-                     Part, Placement, Scene, SidePolicy, Source, Vec2,
+from .schema import (Box, Confidence, Connector, CutoutPolicy, Face, Mount,
+                     Panel, Part, Placement, Scene, SidePolicy, Source, Vec2,
                      VolumeKind)
 
 #: how far a slot or an open side reaches outwards before the case outline
@@ -99,6 +99,7 @@ class Resolved:
     side_openings: list[SideOpening]
     parents: dict[str, Optional[str]]
     panels: dict[str, float] = field(default_factory=dict)
+    floor: Optional[float] = None
     issues: list[Issue] = field(default_factory=list)
 
     def bodies(self) -> list[Solid]:
@@ -218,6 +219,87 @@ def _part_top(part: Part, frame: Frame, kinds: Optional[set] = None) -> Optional
     return max(tops) if tops else None
 
 
+def has_top_periphery(part: Part) -> bool:
+    """Does anything on this board want to reach the faceplate?
+
+    A screen, a knob, a button, or a connector you plug into from above. If
+    none of that is present the board is internal and belongs on the floor.
+    """
+    if any(v.kind in (VolumeKind.display, VolumeKind.actuator) for v in part.volumes):
+        return True
+    return any(c.face is Face.pz for c in part.connectors)
+
+
+def effective_mount(pl: Placement, part: Part,
+                    subtree: Optional[list[Part]] = None) -> Mount:
+    """What `auto` actually resolves to for this placement.
+
+    `subtree` is the part plus anything mated on top of it. A NeoTrellis has
+    nothing facing up -- its buttons belong to the silicone pad glued to it --
+    so judging the board alone would send the whole keypad to the floor.
+    """
+    if pl.locked:
+        return Mount.manual                 # locked means locked
+    if pl.mount is not Mount.auto:
+        return pl.mount
+    if pl.on_panel:
+        return Mount.panel
+    parts = subtree if subtree is not None else [part]
+    return Mount.panel if any(has_top_periphery(p) for p in parts) else Mount.floor
+
+
+def _subtree_parts(scene: Scene, lib: PartLibrary, root: str) -> list[Part]:
+    return [lib[p.part] for p in scene.placements
+            if p.id in _subtree(scene.placements, root)]
+
+
+def mount_of(scene: Scene, lib: PartLibrary, pl: Placement) -> Mount:
+    """`effective_mount` with the mate stack taken into account."""
+    return effective_mount(pl, lib[pl.part], _subtree_parts(scene, lib, pl.id))
+
+
+def _part_bottom(part: Part, frame: Frame) -> float:
+    zs = [frame.z_interval((0.0, part.pcb_thickness))[0]]
+    for v in part.volumes:
+        zs.append(frame.z_interval((v.z_min(), v.z_max()))[0])
+    for c in part.connectors:
+        if c.body is not None:
+            zs.append(frame.z_interval((c.body.z_min(), c.body.z_max()))[0])
+    return min(zs)
+
+
+def _fit_to_floor(scene: Scene, lib: PartLibrary, frames: dict[str, Frame],
+                  by_id: dict[str, Placement]) -> tuple[Optional[float], list[Issue]]:
+    """Drop the internal boards onto the inside floor.
+
+    The datum is whatever the deepest non-floor board reaches, so the floor
+    lands under the hardware rather than under an arbitrary origin.
+    """
+    issues: list[Issue] = []
+    resting = [pl for pl in scene.placements
+               if not pl.parent and mount_of(scene, lib, pl) is Mount.floor]
+    if not resting:
+        return scene.floor, issues
+
+    if scene.floor is not None:
+        datum = scene.floor
+    else:
+        others = [_part_bottom(lib[pl.part], frames[pl.id])
+                  for pl in scene.placements
+                  if pl.id in frames and pl not in resting]
+        datum = min(others) if others else 0.0
+
+    for pl in resting:
+        ids = _subtree(scene.placements, pl.id)
+        bottom = min(_part_bottom(lib[by_id[pid].part], frames[pid]) for pid in ids)
+        dz = datum - bottom
+        for pid in ids:
+            f = frames[pid]
+            frames[pid] = Frame(pos=(f.pos[0], f.pos[1], f.pos[2] + dz),
+                                rot_z=f.rot_z, flip=f.flip)
+    return datum, issues
+
+
 def _resolve_panels(scene: Scene, lib: PartLibrary, frames: dict[str, Frame],
                     by_id: dict[str, Placement]) -> tuple[dict[str, float], list[Issue]]:
     panels: dict[str, float] = {}
@@ -257,9 +339,14 @@ def _fit_to_panels(scene: Scene, lib: PartLibrary, frames: dict[str, Frame],
     so its reference feature lands on the panel. Mates are pure z stacks, so
     translating the whole subtree keeps every one of them valid."""
     issues: list[Issue] = []
+    default_panel = next(iter(panels), None)
     for pl in scene.placements:
-        if not pl.on_panel:
+        if mount_of(scene, lib, pl) is not Mount.panel:
             continue
+        if not pl.on_panel:
+            if default_panel is None:
+                continue                    # no panels in this scene
+            pl = pl.model_copy(update={"on_panel": default_panel})
         if pl.parent:
             issues.append(Issue("warning", "panel_ignored",
                                 f"{pl.id} is mated to {pl.parent}, so its height comes from "
@@ -359,6 +446,8 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
     panels, panel_issues = _resolve_panels(scene, lib, frames, by_id)
     issues += panel_issues
     issues += _fit_to_panels(scene, lib, frames, panels, by_id)
+    floor_z, floor_issues = _fit_to_floor(scene, lib, frames, by_id)
+    issues += floor_issues
 
     for pl in ordered:
         part = lib[pl.part]
@@ -439,7 +528,7 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
 
     return Resolved(scene=scene, frames=frames, solids=solids,
                     connectors=connectors, side_openings=side_openings,
-                    parents=parents, panels=panels, issues=issues)
+                    parents=parents, panels=panels, floor=floor_z, issues=issues)
 
 
 # --------------------------------------------------------------------------
