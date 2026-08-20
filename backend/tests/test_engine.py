@@ -1568,23 +1568,23 @@ def test_support_measures_the_board_not_its_knobs(lib):
 # bolts through the whole stack
 # --------------------------------------------------------------------------
 
-def test_corner_bolts_are_off_by_default(demo):
-    assert demo.scene.case.corner_screws is False
-    assert _notes(build(demo), "corner bolt") == []
+def test_case_bolts_are_off_by_default(demo):
+    assert demo.scene.case.case_screws.value == "none"
+    assert _notes(build(demo), "case bolt") == []
 
 
-def test_corner_bolts_go_through_every_layer(demo):
-    spec = demo.scene.case.model_copy(update={"corner_screws": True})
+def test_case_bolts_go_through_every_layer(demo):
+    spec = demo.scene.case.model_copy(update={"case_screws": "corners"})
     model = build(demo, spec)
     for layer in model.layers:
-        assert len([n for n in layer.notes if n.startswith("corner bolt")]) == 4, \
+        assert len([n for n in layer.notes if n.startswith("case bolt")]) == 4, \
             f"layer {layer.index} is missing bolt holes"
 
 
-def test_corner_bolts_are_countersunk_at_both_faces(demo):
+def test_case_bolts_are_countersunk_at_both_faces(demo):
     import math
 
-    spec = demo.scene.case.model_copy(update={"corner_screws": True})
+    spec = demo.scene.case.model_copy(update={"case_screws": "corners"})
     model = build(demo, spec)
 
     def smallest_round_hole(layer):
@@ -1598,21 +1598,21 @@ def test_corner_bolts_are_countersunk_at_both_faces(demo):
         return best
 
     mid = next(l for l in model.layers if l.role == "body")
-    shank = math.pi * (spec.corner_screw_d / 2) ** 2
-    head = math.pi * (spec.corner_screw_head / 2) ** 2
+    shank = math.pi * (spec.case_screw_d / 2) ** 2
+    head = math.pi * (spec.case_screw_head / 2) ** 2
     assert head > shank
     assert smallest_round_hole(mid) == pytest.approx(shank, rel=0.02)
     assert smallest_round_hole(model.layers[0]) == pytest.approx(head, rel=0.02)
 
 
-def test_corner_bolts_sit_inside_the_wall(demo):
+def test_case_bolts_sit_inside_the_wall(demo):
     """Inset from the corners, so they land in material rather than fresh air."""
     from shapely.geometry import Point
 
-    spec = demo.scene.case.model_copy(update={"corner_screws": True})
+    spec = demo.scene.case.model_copy(update={"case_screws": "corners"})
     model = build(demo, spec)
     x0, y0, x1, y1 = model.outer.bounds
-    i = spec.corner_screw_inset
+    i = spec.case_screw_inset
     for cx, cy in ((x0 + i, y0 + i), (x1 - i, y0 + i),
                    (x0 + i, y1 - i), (x1 - i, y1 - i)):
         assert model.outer.contains(Point(cx, cy))
@@ -1887,3 +1887,141 @@ def test_the_listing_shows_new_scenes(client):
     c, _ = client
     c.post("/api/scenes", json={"name": "another"})
     assert set(c.get("/api/scenes").json()["scenes"]) == {"base", "another"}
+
+
+# --------------------------------------------------------------------------
+# material too thin to survive
+# --------------------------------------------------------------------------
+
+def test_slivers_are_opened_out(demo):
+    """Two cutouts passing close together leave a thread of plywood that snaps
+    the first time it is handled. It is better not to be there."""
+    wide = build(demo, demo.scene.case.model_copy(update={"min_segment": 4.0}))
+    raw = build(demo, demo.scene.case.model_copy(update={"min_segment": 0.0}))
+    assert sum(l.geom.area for l in wide.layers) < sum(l.geom.area for l in raw.layers)
+    assert _notes(wide, "opened out"), "it should say what it removed"
+
+
+def test_nothing_narrower_than_the_minimum_survives(demo):
+    """Eroding by half the minimum must not wipe a layer out: whatever is left
+    is at least that wide."""
+    w = 4.0
+    model = build(demo, demo.scene.case.model_copy(update={"min_segment": w}))
+    for layer in model.layers:
+        if layer.geom.is_empty:
+            continue
+        core = layer.geom.buffer(-w / 2.0 + 0.01, join_style=2)
+        assert not core.is_empty, f"layer {layer.index} is thinner than {w} mm"
+
+
+def test_a_bigger_minimum_removes_more(demo):
+    def area(w):
+        return sum(l.geom.area for l in
+                   build(demo, demo.scene.case.model_copy(update={"min_segment": w})).layers)
+
+    assert area(8.0) < area(4.0) < area(1.0)
+
+
+def test_zero_leaves_the_geometry_alone(demo):
+    off = build(demo, demo.scene.case.model_copy(update={"min_segment": 0.0}))
+    assert not _notes(off, "opened out")
+
+
+def test_opening_runs_before_the_bosses(demo):
+    """A boss ring around an M2.5 screw is legitimately narrow. Eroding it away
+    would take the very thing holding the board up."""
+    scene = _supported(load_scene(SCENE), "from_floor", "trellis_a")
+    scene.case.min_segment = 6.0          # wider than the 9 mm boss's 3.1 mm ring
+    model = build(resolve(scene, lib_for(scene)))
+    assert _notes(model, "boss for"), "the bosses must survive"
+
+
+def lib_for(_scene):
+    return PartLibrary.load()
+
+
+# --------------------------------------------------------------------------
+# bolts along the edges, not only at the corners
+# --------------------------------------------------------------------------
+
+def test_perimeter_adds_bolts_between_the_corners(demo):
+    from hwcase.case import case_screw_points, outer_shape
+
+    corners = demo.scene.case.model_copy(update={"case_screws": "corners"})
+    around = demo.scene.case.model_copy(
+        update={"case_screws": "perimeter", "case_screw_spacing": 80.0})
+    outer = outer_shape(demo, corners)
+    assert len(case_screw_points(corners, outer)) == 4
+    assert len(case_screw_points(around, outer)) > 4
+
+
+def test_closer_spacing_means_more_bolts(demo):
+    from hwcase.case import case_screw_points, outer_shape
+
+    def count(spacing):
+        spec = demo.scene.case.model_copy(
+            update={"case_screws": "perimeter", "case_screw_spacing": spacing})
+        return len(case_screw_points(spec, outer_shape(demo, spec)))
+
+    assert count(40.0) > count(120.0) >= 4
+
+
+def test_every_case_bolt_lands_in_the_wall(demo):
+    from shapely.geometry import Point
+    from hwcase.case import case_screw_points, outer_shape
+
+    spec = demo.scene.case.model_copy(
+        update={"case_screws": "perimeter", "case_screw_spacing": 50.0})
+    outer = outer_shape(demo, spec)
+    model = build(demo, spec)
+    for cx, cy in case_screw_points(spec, outer):
+        assert outer.contains(Point(cx, cy))
+    for layer in model.layers:
+        assert len([n for n in layer.notes if n.startswith("case bolt")]) == \
+            len(case_screw_points(spec, outer))
+
+
+def test_opening_never_adds_material(demo):
+    """Dilating back after eroding rounds off the inner end of a narrow slot,
+    which was filling the tip of a 5 mm connector pocket with plywood. An
+    opening has to be a subset of what it started from."""
+    raw = build(demo, demo.scene.case.model_copy(update={"min_segment": 0.0}))
+    cut = build(demo, demo.scene.case.model_copy(update={"min_segment": 4.0}))
+    for a, b in zip(raw.layers, cut.layers):
+        assert b.geom.area <= a.geom.area + 1e-6, f"layer {a.index} gained material"
+        assert b.geom.difference(a.geom).area < 1e-6, \
+            f"layer {a.index} put material somewhere new"
+
+
+def test_opening_keeps_out_of_the_connector_pockets(demo):
+    """The Pi's 5.08 mm header pocket is the narrowest thing in the scene."""
+    from hwcase.geom import z_overlap
+
+    model = build(demo, demo.scene.case.model_copy(update={"min_segment": 4.0}))
+    header = next(s for s in demo.solids if s.ref == "pi.gpio_header")
+    for layer in model.layers:
+        if z_overlap(header.z, (layer.z0, layer.z1)) <= 0 or layer.role != "body":
+            continue
+        assert layer.geom.intersection(header.poly).area < 1.0, \
+            f"layer {layer.index} has material inside the header pocket"
+
+
+def test_a_severed_stiffener_is_dropped_not_bridged(lib):
+    """Bridging an offcut back would run a strip of plywood straight across the
+    hardware, which is worse than losing a fragment of stiffener."""
+    from hwcase.geom import z_overlap
+    from hwcase.schema import Interior
+
+    scene = load_scene(SCENE)
+    scene.case.interior = Interior.ribs
+    res = resolve(scene, lib)
+    model = build(res)
+
+    for layer in model.layers:
+        if layer.role != "body":
+            continue
+        for s in res.solids:
+            if s.kind.value != "body" or z_overlap(s.z, (layer.z0, layer.z1)) <= 0:
+                continue
+            assert layer.geom.intersection(s.poly).area < s.poly.area * 0.02, \
+                f"layer {layer.index} has material sitting on {s.ref}"

@@ -448,6 +448,16 @@ class Material(Strict):
     color: str = "#c8a165"
 
 
+class CaseScrews(str, Enum):
+    """Bolts that hold the sheet stack together."""
+
+    none = "none"
+    #: one near each corner of the outline
+    corners = "corners"
+    #: corners plus a run along each edge, for a case too big to hold with four
+    perimeter = "perimeter"
+
+
 class Interior(str, Enum):
     """What the middle layers look like between the hardware.
 
@@ -495,11 +505,19 @@ class CaseSpec(Strict):
     #: material -- a ring floating in a hollow layer is an offcut, not a post
     support_rib: float = 4.0
 
-    #: bolts through the whole stack near the corners, holding it together
-    corner_screws: bool = False
-    corner_screw_d: float = 3.4        # M3 clearance
-    corner_screw_inset: float = 6.0    # in from the outline's bounding corners
-    corner_screw_head: float = 6.5
+    #: Material narrower than this snaps. Two cutouts that pass close to each
+    #: other leave a sliver of plywood between them that will not survive being
+    #: handled, let alone glued up -- so anything thinner is opened out and the
+    #: two cutouts become one. Set 0 to leave the geometry exactly as computed.
+    min_segment: float = 4.0
+
+    #: bolts through the whole stack, holding it together
+    case_screws: CaseScrews = CaseScrews.none
+    case_screw_d: float = 3.4          # M3 clearance
+    case_screw_inset: float = 6.0      # in from the outline's bounding corners
+    case_screw_head: float = 6.5       # countersink in the outer plate
+    #: `perimeter` only: roughly how far apart bolts sit along each edge
+    case_screw_spacing: float = 80.0
     #: vertical room wanted where one board passes over another
     overlap_clearance: float = 1.5
     corner_radius: float = 6.0

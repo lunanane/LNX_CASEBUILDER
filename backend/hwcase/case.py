@@ -27,7 +27,8 @@ from shapely.geometry import box as shapely_box
 from shapely.ops import nearest_points
 
 from .geom import outline_polygon, rounded_rect, z_overlap
-from .schema import CaseSpec, Interior, Material, Support, VolumeKind
+from .schema import (CaseScrews, CaseSpec, Interior, Material, Support,
+                     VolumeKind)
 from .scene import Resolved
 
 Role = Literal["floor", "body", "lid"]
@@ -201,14 +202,22 @@ def _ribs(outer: Polygon, void: Polygon, spec: CaseSpec,
     return unary_union(keep) if keep else grid.difference(grid)
 
 
-def _tie_loose_pieces(geom, outer: Polygon, spec: CaseSpec, notes: list[str]):
+def _tie_loose_pieces(geom, outer: Polygon, spec: CaseSpec, notes: list[str],
+                      must_keep: list[Polygon] | None = None):
     """Nothing may come off the cutting bed as a separate part.
 
     Pruning ribs when they are generated is not enough: a rib can be severed
     later by a part pocket, and a boss can attach to a fragment that is itself
     adrift. So this runs last, on the finished layer, where the truth is
-    finally known. Anything not joined to the outer wall is either debris from
-    the booleans, which is dropped, or real material, which is tied back.
+    finally known.
+
+    What happens to an island depends on what it is. One holding a board up --
+    a boss, whose DISC is listed in `must_keep` -- has to stay and is tied
+    back. The disc, not its centre: drilling the screw hole turns a boss into a
+    ring, and a ring does not contain its own centroid. Anything
+    else is a severed stiffener or boolean debris, and gets dropped: bridging
+    it back would run a strip of plywood straight across the hardware, which is
+    worse than losing a fragment of stiffener.
     """
     pieces = list(geom.geoms) if hasattr(geom, "geoms") else ([geom] if not geom.is_empty else [])
     if len(pieces) <= 1:
@@ -227,11 +236,15 @@ def _tie_loose_pieces(geom, outer: Polygon, spec: CaseSpec, notes: list[str]):
         anchored = [max(pieces, key=lambda p: p.area)]
         adrift = [p for p in pieces if p is not anchored[0]]
 
+    needed = must_keep or []
     keep = list(anchored)
     ribs: list[Polygon] = []
     for piece in sorted(adrift, key=lambda p: -p.area):
         if piece.area < 1.0:
             continue                       # numerical crumbs, not material
+        if not any(piece.intersects(disc) for disc in needed):
+            notes.append(f"dropped a loose {piece.area:.0f} mm2 offcut")
+            continue
         here, there = nearest_points(piece, unary_union(keep))
         if here.distance(there) > 1e-9:
             # Round caps, deliberately: a flat cap ends exactly on the two
@@ -245,22 +258,79 @@ def _tie_loose_pieces(geom, outer: Polygon, spec: CaseSpec, notes: list[str]):
     return unary_union(keep + ribs).intersection(outer)
 
 
-def _corner_screws(spec: CaseSpec, outer: Polygon, role: Role):
-    """Bolts near the four corners, tying the whole stack together."""
-    if not spec.corner_screws:
-        return [], []
+def case_screw_points(spec: CaseSpec, outer: Polygon) -> list[tuple[float, float]]:
+    """Where the bolts through the stack go.
+
+    Inset from the outline's bounding corners so they land in the wall rather
+    than in fresh air, and -- in `perimeter` mode -- spread along each edge at
+    roughly `case_screw_spacing`, evenly, so a long case is held all the way
+    along rather than only at its ends.
+    """
+    # `==` not `is`: these arrive as raw strings from JSON and from
+    # model_copy, where identity against the enum member silently fails
+    if spec.case_screws == CaseScrews.none:
+        return []
     x0, y0, x1, y1 = outer.bounds
-    i = spec.corner_screw_inset
-    d = spec.corner_screw_head if role in ("floor", "lid") else spec.corner_screw_d
+    i = spec.case_screw_inset
+    ax0, ay0, ax1, ay1 = x0 + i, y0 + i, x1 - i, y1 - i
+    if ax1 <= ax0 or ay1 <= ay0:
+        return []
+
+    pts = [(ax0, ay0), (ax1, ay0), (ax0, ay1), (ax1, ay1)]
+    if spec.case_screws == CaseScrews.perimeter and spec.case_screw_spacing > 0:
+        for lo, hi, horizontal in ((ax0, ax1, True), (ay0, ay1, False)):
+            n = int((hi - lo) // spec.case_screw_spacing)
+            for k in range(1, n + 1):
+                v = lo + k * (hi - lo) / (n + 1)
+                if horizontal:
+                    pts += [(v, ay0), (v, ay1)]
+                else:
+                    pts += [(ax0, v), (ax1, v)]
+    return pts
+
+
+def _case_screws(spec: CaseSpec, outer: Polygon, role: Role):
+    """Bolt holes for one layer: a countersink at the outer faces, a shank
+    everywhere in between."""
+    d = spec.case_screw_head if role in ("floor", "lid") else spec.case_screw_d
     holes, notes = [], []
-    for cx, cy in ((x0 + i, y0 + i), (x1 - i, y0 + i),
-                   (x0 + i, y1 - i), (x1 - i, y1 - i)):
+    for cx, cy in case_screw_points(spec, outer):
         p = Point(cx, cy)
         if not outer.contains(p):
             continue
         holes.append(p.buffer(d / 2.0, quad_segs=24))
-        notes.append(f"corner bolt at ({cx:.1f}, {cy:.1f})")
+        notes.append(f"case bolt at ({cx:.1f}, {cy:.1f})")
     return holes, notes
+
+
+def _open_out_slivers(geom, spec: CaseSpec, notes: list[str]):
+    """Remove material too narrow to survive.
+
+    A morphological opening: erode by half the minimum and dilate back. Any
+    neck thinner than `min_segment` disappears and the cutouts either side of
+    it merge into one, which is both stronger and easier to cut than a 1 mm
+    thread of plywood that snaps the first time it is handled.
+
+    Deliberately before the bosses and bolts are added -- a boss ring around an
+    M2.5 screw is legitimately narrow, and eroding it away would take the very
+    thing holding a board up.
+    """
+    w = spec.min_segment
+    if w <= 0 or geom.is_empty:
+        return geom
+    opened = geom.buffer(-w / 2.0, join_style=2).buffer(w / 2.0, join_style=2)
+    # Clamp to the original. Dilating back rounds off the inner end of a narrow
+    # slot, so the tip of a 5 mm connector pocket was being filled in with
+    # plywood -- an opening must only ever take material away, never put it
+    # somewhere the hardware is.
+    opened = opened.intersection(geom)
+    if opened.is_empty:
+        notes.append(f"every part of this layer is thinner than {w:.1f} mm")
+        return geom
+    lost = geom.area - opened.area
+    if lost > 0.5:
+        notes.append(f"opened out {lost:.0f} mm2 of material thinner than {w:.1f} mm")
+    return opened
 
 
 def _support_features(res: Resolved, spec: CaseSpec, slab: tuple[float, float],
@@ -351,16 +421,16 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
     if role == "body" and spec.interior is not Interior.pocketed:
         void = outer.buffer(-spec.wall, join_style=2)
         if not void.is_empty:
-            if spec.interior is Interior.grown:
+            if spec.interior == Interior.grown:
                 # the void is only the hardware and the room its cables need
                 grown = _hardware_in(res, spec, slab, pad=spec.cable_clearance)
                 if grown:
                     cuts.extend(grown)
                     notes.append("pockets grown to clear the cable runs")
-            elif spec.interior is Interior.hollow:
+            elif spec.interior == Interior.hollow:
                 cuts.append(void)
                 notes.append(f"hollow, {spec.wall:.1f} mm wall")
-            elif spec.interior is Interior.ribs:
+            elif spec.interior == Interior.ribs:
                 blocked = _hardware_in(res, spec, slab)
                 rib = _ribs(outer, void, spec, blocked)
                 cuts.append(void.difference(rib) if not rib.is_empty else void)
@@ -370,24 +440,27 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
     if cuts:
         geom = outer.difference(unary_union(cuts))
 
+    geom = _open_out_slivers(geom, spec, notes)
+
     # Bosses go on last but one: after the pockets and the hollowing, because
     # both would otherwise remove the post, and before the screw holes, which
     # have to be drilled through it. `geom` at this point is what the boss has
     # to reach to stay attached.
     bosses, screw_holes, support_notes = _support_features(
         res, spec, slab, role, zspan, geom)
+    boss_discs = list(bosses)
     if bosses:
         geom = geom.union(unary_union(bosses).intersection(outer))
     if screw_holes:
         geom = geom.difference(unary_union(screw_holes))
     notes += support_notes
 
-    corner_holes, corner_notes = _corner_screws(spec, outer, role)
-    if corner_holes:
-        geom = geom.difference(unary_union(corner_holes))
-        notes += corner_notes
+    bolt_holes, bolt_notes = _case_screws(spec, outer, role)
+    if bolt_holes:
+        geom = geom.difference(unary_union(bolt_holes))
+        notes += bolt_notes
 
-    geom = _tie_loose_pieces(geom, outer, spec, notes)
+    geom = _tie_loose_pieces(geom, outer, spec, notes, boss_discs)
 
     if geom.is_empty:
         notes.append("nothing left of this layer -- it is pure air")
