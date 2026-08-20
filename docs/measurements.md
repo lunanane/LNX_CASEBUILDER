@@ -32,6 +32,13 @@ y −27.5…56.5 relative to the Pi — overhanging the power/HDMI/audio edge by
 
 **Measure:** from the board edge to the centreline of the socket, both axes.
 
+Related, and now modelled: the lit area is **not centred on the board**. The
+vendor's bezels are 5.5 left/right but **4.5 top and 6.5 bottom**, so the window
+sits 1 mm towards the header edge — centre y = 43.0 against a board centre of
+42.0. Both axes' bezels sum to 83 rather than 84, so there is 1 mm unaccounted
+for and the offset is good to about half a millimetre. **Measure** the four
+borders from the board edge to the lit area.
+
 ### 2. The header stack height  `estimated`
 
 `placement.mate_gap` in the scene, currently 17.0 mm for the bundled booster

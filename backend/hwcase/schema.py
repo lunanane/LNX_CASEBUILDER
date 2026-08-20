@@ -395,6 +395,8 @@ class CaseSpec(Strict):
     ceiling_gap: float = 2.0
     part_clearance: float = 0.6       # slop around each part pocket
     cable_clearance: float = 5.0      # min gap between parts for wiring
+    #: vertical room wanted where one board passes over another
+    overlap_clearance: float = 1.5
     corner_radius: float = 6.0
     outline: Optional[Outline] = None  # override the auto bounding shape
 

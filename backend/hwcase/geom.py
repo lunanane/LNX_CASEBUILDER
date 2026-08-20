@@ -110,12 +110,18 @@ def box_polygon(b: Box, at: Vec2 | None = None) -> Polygon:
 
 
 def corridor(at: Vec3, face: Face, length: float, width: float, height: float,
-             ) -> tuple[Polygon, Vec2]:
+             z_range: Vec2 | None = None) -> tuple[Polygon, Vec2]:
     """The volume a plug + its cable bend needs, in part-local coordinates.
 
     Returns (footprint, z interval). For a connector on a side face the
     corridor runs horizontally; for +z/-z it is a vertical column, in which
     case the footprint is just the opening and the z interval carries the run.
+
+    `z_range` pins the vertical extent to the socket body when the part
+    declares one. Without it the corridor is centred on `at`, and a connector
+    whose `at` sits on the board surface rather than at the mouth centre then
+    reaches *below the board* -- which is how USB ports came to be cut out of
+    the floor.
     """
     x, y, z = at
     nx, ny, nz = face.normal
@@ -133,7 +139,7 @@ def corridor(at: Vec3, face: Face, length: float, width: float, height: float,
                 (x - width / 2, min(y0, y1)), (x + width / 2, min(y0, y1)),
                 (x + width / 2, max(y0, y1)), (x - width / 2, max(y0, y1)),
             ])
-        return poly, (z - height / 2, z + height / 2)
+        return poly, z_range if z_range is not None else (z - height / 2, z + height / 2)
     poly = Polygon([
         (x - width / 2, y - width / 2), (x + width / 2, y - width / 2),
         (x + width / 2, y + width / 2), (x - width / 2, y + width / 2),

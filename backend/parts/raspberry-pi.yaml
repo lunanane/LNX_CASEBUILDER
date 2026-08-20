@@ -70,7 +70,7 @@ parts:
       - name: pwr_micro_usb
         type: usb_micro_b
         face: -y
-        at: [10.6, 0.0, 1.4]
+        at: [10.6, 0.0, 2.8]
         body: {name: pwr_micro_usb_body, at: [10.6, 1.4], size: [8.0, 5.6], z: [1.4, 4.15]}
         plug_depth: 16.0
         bend_radius: 18.0
@@ -80,7 +80,7 @@ parts:
       - name: hdmi
         type: hdmi_a
         face: -y
-        at: [32.0, 0.0, 1.4]
+        at: [32.0, 0.0, 4.65]
         body: {name: hdmi_body, at: [32.0, 5.0], size: [15.2, 11.7], z: [1.4, 7.9]}
         plug_depth: 22.0
         bend_radius: 30.0
@@ -90,7 +90,7 @@ parts:
       - name: av_jack
         type: jack_3v5
         face: -y
-        at: [53.5, 0.0, 1.4]
+        at: [53.5, 0.0, 4.4]
         body: {name: av_jack_body, at: [53.5, 6.0], size: [7.0, 14.5], z: [1.4, 7.4]}
         plug_depth: 20.0
         bend_radius: 20.0
@@ -102,7 +102,7 @@ parts:
       - name: usb1
         type: usb_a_dual
         face: +x
-        at: [85.0, 47.0, 1.4]
+        at: [85.0, 47.0, 9.4]
         body: {name: usb1_body, at: [76.5, 47.0], size: [17.5, 13.2], z: [1.4, 17.4]}
         plug_depth: 20.0
         bend_radius: 25.0
@@ -112,7 +112,7 @@ parts:
       - name: usb2
         type: usb_a_dual
         face: +x
-        at: [85.0, 29.0, 1.4]
+        at: [85.0, 29.0, 9.4]
         body: {name: usb2_body, at: [76.5, 29.0], size: [17.5, 13.2], z: [1.4, 17.4]}
         plug_depth: 20.0
         bend_radius: 25.0
@@ -122,7 +122,7 @@ parts:
       - name: ethernet
         type: rj45
         face: +x
-        at: [85.0, 10.25, 1.4]
+        at: [85.0, 10.25, 8.15]
         body: {name: eth_body, at: [74.5, 10.25], size: [21.0, 16.0], z: [1.4, 14.9]}
         plug_depth: 25.0
         bend_radius: 30.0

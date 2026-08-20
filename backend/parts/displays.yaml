@@ -36,16 +36,23 @@ parts:
         size: [84.0, 84.0]
         z: [1.6, 7.0]
         src: {confidence: vendor, note: "glass + backlight stack on top of the PCB"}
+      # NOT centred on the board. The vendor quotes bezels of 5.5 mm left and
+      # right but 4.5 top and 6.5 bottom, so the lit area sits 1 mm towards the
+      # header edge: centre y = (6.5 + (84 - 4.5)) / 2 = 43.0, against a board
+      # centre of 42.0. That 1 mm is the difference between a window that frames
+      # the picture and one that clips it.
+      # The quoted bezels sum to 83, not 84, on both axes -- so there is 1 mm
+      # unaccounted for and the offset is good to about half a millimetre.
       - name: active_area
         kind: display
-        at: [42.0, 42.0]
+        at: [42.0, 43.0]
         size: [72.0, 72.0]
         z: [6.0, 7.0]
         src:
           confidence: vendor
           note: >-
-            72x72 active. Vendor quotes bezels 5.5 L/R, 4.5 top, 6.5 bottom,
-            which does not close on 84 mm -- treated as centred here.
+            72x72 active, offset +1.0 mm in Y from the board centre because the
+            top and bottom bezels differ (4.5 vs 6.5).
       - name: gpio_socket
         kind: body
         at: [42.0, 80.0]

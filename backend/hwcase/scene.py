@@ -405,7 +405,8 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
                 reach = REACH          # run the slot out through the wall
             width = max(c.cutout[0] if c.cutout else 10.0, 8.0)
             height = max(c.cutout[1] if c.cutout else 10.0, 8.0)
-            poly, zi = corridor(c.at, c.face, reach, width, height)
+            body_z = (c.body.z_min(), c.body.z_max()) if c.body is not None else None
+            poly, zi = corridor(c.at, c.face, reach, width, height, body_z)
             connectors.append(WorldConnector(
                 pl.id, part.id, c, frame.point(c.at), frame.direction(c.face.normal),
                 frame.polygon(poly), frame.z_interval(zi), policy, included))
@@ -489,6 +490,31 @@ def check(res: Resolved, lib: PartLibrary) -> list[Issue]:
                         f"{a.placement} and {b.placement} are {d:.1f} mm apart; "
                         f"{gap:.1f} mm wanted for cable runs",
                         [a.ref, b.ref]))
+
+    # 2b. boards that pass over each other: allowed, but say how much room
+    # there actually is. A flat board sliding under another one is exactly what
+    # you want -- right up until the gap is 0.3 mm and you cannot get it in.
+    seen_gap: set[tuple[str, str]] = set()
+    for i, a in enumerate(bodies):
+        for b in bodies[i + 1:]:
+            if a.placement == b.placement or _related(res, a.placement, b.placement):
+                continue
+            key = tuple(sorted((a.placement, b.placement)))
+            if key in seen_gap:
+                continue
+            if z_overlap(a.z, b.z) > 0:
+                continue                      # that is a collision, handled above
+            if a.poly.intersection(b.poly).area <= 1.0:
+                continue                      # they do not pass over each other
+            gap = max(a.z[0], b.z[0]) - min(a.z[1], b.z[1])
+            if gap < case.overlap_clearance:
+                seen_gap.add(key)
+                lower, upper = (a, b) if a.z[1] <= b.z[0] else (b, a)
+                issues.append(Issue(
+                    "warning", "tight_overlap",
+                    f"{upper.ref} passes {gap:.1f} mm over {lower.ref} -- "
+                    f"{case.overlap_clearance:.1f} mm wanted to get it in",
+                    [a.ref, b.ref]))
 
     # 3. connector access -- one issue per (connector, offending placement)
     blocked: set[tuple[str, str]] = set()

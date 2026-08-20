@@ -640,3 +640,70 @@ def test_no_repeat_means_one_instance():
 
     b = Box(name="solo", at=(1.0, 2.0), size=(3.0, 4.0), z=(0.0, 1.0))
     assert b.instances() == [("solo", (1.0, 2.0))]
+
+
+# --------------------------------------------------------------------------
+# corridors, overlap, and the screen's offset window
+# --------------------------------------------------------------------------
+
+def test_the_floor_has_no_holes_in_it(demo):
+    """Regression: connector corridors were centred on `at`, and since the Pi's
+    ports had `at` on the board surface rather than at the mouth centre, a
+    15.5 mm USB corridor reached 6.35 mm *below the board* and cut the floor."""
+    model = build(demo)
+    floor = model.layers[0]
+    assert floor.notes == [], f"the floor should be solid, got {floor.notes}"
+    assert floor.geom.area == pytest.approx(model.outer.area, rel=1e-9)
+
+
+def test_corridor_follows_the_socket_body(lib):
+    """When a part declares a socket body, the corridor takes its z extent
+    rather than guessing from the cutout height."""
+    res = resolve(load_scene(SCENE), lib)
+    pi = lib["rpi-3b"]
+    for wc in res.connectors:
+        if wc.placement != "pi" or wc.conn.body is None:
+            continue
+        body = next(s for s in res.solids
+                    if s.placement == "pi" and s.name == wc.conn.body.name)
+        assert wc.corridor_z[0] == pytest.approx(body.z[0], abs=1e-6), wc.ref
+        assert wc.corridor_z[1] == pytest.approx(body.z[1], abs=1e-6), wc.ref
+
+
+def test_screen_window_is_offset_towards_the_header(lib):
+    """The HyperPixel's bezels are 4.5 top / 6.5 bottom, so the lit area is not
+    centred on the board -- and a centred window would clip the picture."""
+    screen = lib["hyperpixel4-square-touch"]
+    active = next(v for v in screen.volumes if v.name == "active_area")
+    board_cx, board_cy = screen.outline.size[0] / 2, screen.outline.size[1] / 2
+    assert active.at[0] == pytest.approx(board_cx)          # centred in X
+    assert active.at[1] == pytest.approx(board_cy + 1.0)    # 1 mm towards the header
+
+
+def test_boards_may_pass_over_each_other(lib):
+    """A flat board sliding under another one is allowed -- it is only a
+    collision when they actually share space."""
+    scene = load_scene(SCENE)
+    oled = next(p for p in scene.placements if p.id == "oled")
+    mux = next(p for p in scene.placements if p.id == "mux")
+    oled.on_panel = None
+    mux.pos = (oled.pos[0], oled.pos[1], 0.0)
+    oled.pos = (mux.pos[0], mux.pos[1], 40.0)     # well clear above
+    issues = check(resolve(scene, lib), lib)
+    assert not any(i.code == "collision" for i in issues)
+    assert not any(i.code == "tight_overlap" for i in issues)
+
+
+def test_passing_too_close_over_is_reported(lib):
+    scene = load_scene(SCENE)
+    oled = next(p for p in scene.placements if p.id == "oled")
+    mux = next(p for p in scene.placements if p.id == "mux")
+    oled.on_panel = None
+    mux.pos = (oled.pos[0], oled.pos[1], 0.0)
+    mux_top = max(s.z[1] for s in resolve(scene, lib).solids if s.placement == "mux")
+    oled_bottom = min(v.z_min() for v in lib["adafruit-4741-oled-1v5"].volumes)
+    oled.pos = (mux.pos[0], mux.pos[1], mux_top - oled_bottom + 0.4)   # 0.4 mm gap
+    issues = check(resolve(scene, lib), lib)
+    assert any(i.code == "tight_overlap" for i in issues), \
+        "0.4 mm of clearance should be called out"
+    assert not any(i.code == "collision" for i in issues), "but it is not a collision"
