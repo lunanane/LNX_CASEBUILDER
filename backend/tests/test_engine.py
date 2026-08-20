@@ -1239,3 +1239,122 @@ def test_only_quarter_turns_are_accepted():
     Placement(id="a", part="x", tilt=90)
     with pytest.raises(ValidationError):
         Placement(id="a", part="x", tilt=45)
+
+
+# --------------------------------------------------------------------------
+# how close the wall comes to a connector
+# --------------------------------------------------------------------------
+
+def _wall_gap(res, spec, ref, axis, sign):
+    """Distance from a connector's mouth to the outside of the case."""
+    from hwcase.case import outer_shape
+
+    x0, y0, x1, y1 = outer_shape(res, spec).bounds
+    edge = (x1 if sign > 0 else x0) if axis == 0 else (y1 if sign > 0 else y0)
+    mouth = next(c for c in res.connectors if c.ref == ref).at[axis]
+    return abs(edge - mouth)
+
+
+def test_without_a_margin_the_wall_is_measured_from_the_bounding_box(lib):
+    """The problem the margin exists to solve.
+
+    The wall is offset from the bounding box of the WHOLE scene, so a port on a
+    board that is not the outermost one ends up far inside -- here the hub sits
+    140 mm right of the Pi, and its left-facing port is a long way from the left
+    wall no matter how thin that wall is made.
+    """
+    scene = lab()                       # pi at x 0, hub at x 140
+    res = resolve(scene, lib)
+    gap = _wall_gap(res, scene.case, "hub.up", 0, -1)
+    assert gap > scene.case.wall + 100.0, \
+        f"expected the hub port to be buried; it is only {gap:.1f} mm in"
+
+
+def test_a_margin_brings_the_wall_to_the_connector(lib):
+    from hwcase.schema import Face, SidePolicy
+
+    scene = lab()
+    scene.placements = [p for p in scene.placements if p.id == "hub"]
+    hub = scene.placements[0]
+    hub.sides = [SidePolicy(side=Face.nx, margin=2.5, include=["up"])]
+    res = resolve(scene, lib)
+    assert len(res.wall_targets) == 1
+    assert _wall_gap(res, scene.case, "hub.up", 0, -1) == pytest.approx(2.5, abs=1e-6)
+
+
+def test_a_margin_only_moves_its_own_side(lib):
+    from hwcase.case import outer_shape
+    from hwcase.schema import Face, SidePolicy
+
+    scene = lab()
+    scene.placements = [p for p in scene.placements if p.id == "hub"]
+    hub = scene.placements[0]
+    before = outer_shape(resolve(scene, lib), scene.case).bounds
+    hub.sides = [SidePolicy(side=Face.nx, margin=2.0, include=["up"])]
+    after = outer_shape(resolve(scene, lib), scene.case).bounds
+    assert after[0] != pytest.approx(before[0]), "the -x edge should move"
+    for i in (1, 2, 3):
+        assert after[i] == pytest.approx(before[i]), "and nothing else should"
+
+
+def test_a_margin_never_slices_through_the_hardware(lib):
+    """Ask for an impossible margin and the wall stops at the boards."""
+    from hwcase.case import outer_shape
+    from hwcase.schema import Face, SidePolicy
+
+    scene = lab()
+    scene.placements = [p for p in scene.placements if p.id == "hub"]
+    hub = scene.placements[0]
+    hub.sides = [SidePolicy(side=Face.nx, margin=-50.0, include=["up"])]
+    res = resolve(scene, lib)
+    x0 = outer_shape(res, scene.case).bounds[0]
+    parts_x0 = res.bounds()[0]
+    assert x0 <= parts_x0 + 1e-6, "the wall must stay outside the hardware"
+
+
+def test_a_side_that_no_longer_faces_an_axis_is_reported(lib):
+    from hwcase.schema import Face, SidePolicy
+
+    scene = lab()
+    hub = next(p for p in scene.placements if p.id == "hub")
+    hub.rot_z = 37.0
+    hub.sides = [SidePolicy(side=Face.nx, margin=2.0, include=["up"])]
+    codes = [i.code for i in resolve(scene, lib).issues]
+    assert "margin_skewed" in codes
+
+
+# --------------------------------------------------------------------------
+# round holes for round connectors
+# --------------------------------------------------------------------------
+
+def test_a_round_connector_cuts_a_round_hole(lib):
+    import math
+
+    amy = lib["shorepine-amyboard"]
+    jack = next(c for c in amy.connectors if c.name == "spdif_in")
+    assert jack.cutout_shape == "circle"
+
+    res = resolve(load_scene(SCENE), lib)
+    wc = next(c for c in res.connectors if c.ref == "amy.spdif_in")
+    p = wc.corridor_poly
+    roundness = 4 * math.pi * p.area / (p.length ** 2)
+    assert roundness > 0.99, f"expected a circle, got roundness {roundness:.3f}"
+
+
+def test_an_explicit_cutout_is_not_widened(lib):
+    """A measured 6.5 mm hole must stay 6.5 mm -- it used to be clamped to 8."""
+    import math
+
+    res = resolve(load_scene(SCENE), lib)
+    wc = next(c for c in res.connectors if c.ref == "amy.spdif_in")
+    dia = 2 * math.sqrt(wc.corridor_poly.area / math.pi)
+    assert dia == pytest.approx(6.5, abs=0.05)
+
+
+def test_a_square_connector_still_cuts_a_square(lib):
+    import math
+
+    res = resolve(load_scene(SCENE), lib)
+    wc = next(c for c in res.connectors if c.ref == "amy.i2c_accessories")
+    p = wc.corridor_poly
+    assert 4 * math.pi * p.area / (p.length ** 2) < 0.95

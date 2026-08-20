@@ -77,16 +77,16 @@ parts:
 
     connectors:
       # mouths sit at the panel plane, z = 12.6
-      - {name: spdif_in,  type: jack_3v5, face: +z, at: [33.0, 56.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: spdif_out, type: jack_3v5, face: +z, at: [45.0, 56.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: line_in,   type: jack_3v5, face: +z, at: [33.0, 44.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: line_out,  type: jack_3v5, face: +z, at: [45.0, 44.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: midi_in,   type: jack_3v5, face: +z, at: [33.0, 32.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: midi_out,  type: jack_3v5, face: +z, at: [45.0, 32.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: cv1_in,    type: jack_3v5, face: +z, at: [33.0, 20.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: cv1_out,   type: jack_3v5, face: +z, at: [45.0, 20.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: cv2_in,    type: jack_3v5, face: +z, at: [33.0, 8.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
-      - {name: cv2_out,   type: jack_3v5, face: +z, at: [45.0, 8.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.0, 7.0], external: true, src: {confidence: estimated}}
+      - {name: spdif_in,  type: jack_3v5, face: +z, at: [33.0, 56.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
+      - {name: spdif_out, type: jack_3v5, face: +z, at: [45.0, 56.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
+      - {name: line_in,   type: jack_3v5, face: +z, at: [33.0, 44.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
+      - {name: line_out,  type: jack_3v5, face: +z, at: [45.0, 44.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
+      - {name: midi_in,   type: jack_3v5, face: +z, at: [33.0, 32.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
+      - {name: midi_out,  type: jack_3v5, face: +z, at: [45.0, 32.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
+      - {name: cv1_in,    type: jack_3v5, face: +z, at: [33.0, 20.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
+      - {name: cv1_out,   type: jack_3v5, face: +z, at: [45.0, 20.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
+      - {name: cv2_in,    type: jack_3v5, face: +z, at: [33.0, 8.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
+      - {name: cv2_out,   type: jack_3v5, face: +z, at: [45.0, 8.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
 
       - name: i2c_accessories
         type: grove

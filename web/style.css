@@ -116,7 +116,9 @@ label.port {
 label.port input { margin: 0; }
 label.port .off { color: var(--dim); text-decoration: line-through; }
 label.port .ptype { color: var(--dim); margin-left: auto; font-size: 10px; }
+.side .field { margin-bottom: 3px; }
 .side .field label { width: 34px; }
+.side .field input::placeholder { color: var(--dim); }
 .side .field input { width: 52px; }
 
 #case-size .field label { width: 42px; }

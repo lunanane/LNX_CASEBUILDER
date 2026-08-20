@@ -795,7 +795,8 @@ function sideEntry(pl, side, create = false) {
   if (!Array.isArray(pl.sides)) pl.sides = [];
   let e = pl.sides.find((s) => s.side === side);
   if (!e && create) {
-    e = { side, cutout: 'per_connector', include: null, headroom: 2.0, span: 'full' };
+    e = { side, cutout: 'per_connector', include: null, margin: null,
+          headroom: 2.0, span: 'full' };
     pl.sides.push(e);
   }
   return e || null;
@@ -830,6 +831,11 @@ function sidesSection(pl) {
         <span class="${c.included ? '' : 'off'}">${c.name}</span>
         <span class="ptype">${c.type}</span>
       </label>`).join('');
+    const wall = `
+      <div class="field"><label>wall</label>
+        <input type="number" step="0.5" min="0" placeholder="auto"
+               data-margin="${side}" value="${e && e.margin != null ? e.margin : ''}">
+        <span class="preset">mm to outside</span></div>`;
     const extra = policy === 'open_side' ? `
       <div class="field"><label>head</label>
         <input type="number" step="0.5" data-headroom="${side}"
@@ -841,7 +847,7 @@ function sidesSection(pl) {
     return `<div class="side">
       <div class="side-head"><span>${SIDE_LABEL[side]}</span>
         <select data-policy="${side}">${opts}</select></div>
-      ${extra}<div class="ports">${ports}</div>
+      ${wall}${extra}<div class="ports">${ports}</div>
     </div>`;
   }).join('');
   if (!rows) return '';
@@ -867,6 +873,14 @@ function wireSides(pl) {
       edit();
       toggleConnector(pl, el.dataset.side, el.dataset.conn, el.checked);
       renderSelection(true);
+      scheduleResolve(0);
+    };
+  });
+  box.querySelectorAll('[data-margin]').forEach((el) => {
+    el.onchange = () => {
+      edit();
+      const v = el.value.trim();
+      sideEntry(pl, el.dataset.margin, true).margin = v === '' ? null : (parseFloat(v) || 0);
       scheduleResolve(0);
     };
   });

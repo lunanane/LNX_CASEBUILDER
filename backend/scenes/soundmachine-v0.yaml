@@ -35,17 +35,17 @@ case:
   cable_clearance: 5.0
   corner_radius: 8.0
 
-  interior: hollow
+  interior: grown
   outline:
-    size: [233.475, 134.797]
+    size: [239.95, 137.639]
     corner_radius: 8.0
     origin: custom
-    origin_offset: [100.775, 68.3]
+    origin_offset: [107.25, 68.3]
 placements:
 - id: pi
   part: rpi-3b
   label: Raspberry Pi 3B
-  pos: [-13.2, -3.1999999999999957, 0.0]
+  pos: [-13.4, 28.2, 0.0]
     # Turned 180 deg so the USB/Ethernet stack faces the LEFT wall. Facing it
     # right put 45 mm of plug run straight through the button block -- the
     # checker caught it, and rotating the anchor is the cheap fix.
@@ -92,7 +92,7 @@ placements:
   # --- four push encoders above the keypads ---
 - id: encoders
   part: adafruit-5752-quad-encoder
-  pos: [-3.6999999999999957, 55.19499999999999, 0.0]
+  pos: [-7.8250000000000135, -35.9, 0.0]
   on_panel: main
   panel_ref: bushings         # the threaded collar is what a panel clamps on;
                               # the shaft is meant to stand proud for the knob
@@ -102,7 +102,7 @@ placements:
   panel_offset: 3.0
 - id: oled
   part: adafruit-4741-oled-1v5
-  pos: [39.66, 57.89750000000001, 0.0]
+  pos: [42.9, 60.73861427868181, 0.0]
   on_panel: main
   panel_ref: active_area
 
@@ -110,11 +110,11 @@ placements:
   rot_z: 180.0
 - id: mux
   part: seeed-grove-tca9548a
-  pos: [0.20000000000000284, 54.4, 0.0]
+  pos: [-3.8999999999999986, -39.69999999999999, 0.0]
   rot_z: 180.0
 - id: amy
   part: shorepine-amyboard
-  pos: [109.1, 3.8999999999999972, 0.0]
+  pos: [124.1, 0.943614278681796, 0.0]
   on_panel: main
   panel_ref: jack_threads
   rot_z: 90.0

@@ -85,13 +85,30 @@ def _materials_for(spec: CaseSpec, total: float) -> list[Material]:
 def outer_shape(res: Resolved, spec: CaseSpec) -> Polygon:
     if spec.outline is not None:
         return outline_polygon(spec.outline)
-    x0, y0, _, x1, y1, _ = res.bounds()
-    w = (x1 - x0) + 2 * (spec.wall + spec.part_clearance)
-    h = (y1 - y0) + 2 * (spec.wall + spec.part_clearance)
-    shape = rounded_rect((w, h), spec.corner_radius, origin="min")
+
+    px0, py0, _, px1, py1, _ = res.bounds()
+    pad = spec.wall + spec.part_clearance
+    edges = {"x0": px0 - pad, "y0": py0 - pad, "x1": px1 + pad, "y1": py1 + pad}
+    # the wall may never come inside the hardware, whatever margin was asked for
+    limit = {"x0": px0 - spec.part_clearance, "y0": py0 - spec.part_clearance,
+             "x1": px1 + spec.part_clearance, "y1": py1 + spec.part_clearance}
+
+    chosen: dict[str, float] = {}
+    for t in res.wall_targets:
+        key = ("x" if t.axis == 0 else "y") + ("1" if t.sign > 0 else "0")
+        want = max(t.value, limit[key]) if t.sign > 0 else min(t.value, limit[key])
+        if key not in chosen:
+            chosen[key] = want
+        else:
+            # two boards pulling the same edge: take the outermost, so nobody
+            # gets walled in
+            chosen[key] = max(chosen[key], want) if t.sign > 0 else min(chosen[key], want)
+    edges.update(chosen)
+
+    x0, y0, x1, y1 = edges["x0"], edges["y0"], edges["x1"], edges["y1"]
+    shape = rounded_rect((x1 - x0, y1 - y0), spec.corner_radius, origin="min")
     from shapely.affinity import translate
-    return translate(shape, x0 - spec.wall - spec.part_clearance,
-                     y0 - spec.wall - spec.part_clearance)
+    return translate(shape, x0, y0)
 
 
 def build(res: Resolved, spec: Optional[CaseSpec] = None) -> CaseModel:

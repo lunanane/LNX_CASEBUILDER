@@ -201,6 +201,18 @@ board**, not a global rule:
 | `open_to_edge` | the same openings run out to the edge as slots, so an already-fitted plug can be threaded in from outside |
 | `open_side` | remove everything beyond that edge from the floor up to just above the cable — a **seamless faceplate over an open, variable underside** |
 
+**`margin`** decides how close the outside of the case comes to that side's
+ports. Left unset, the wall is offset from the bounding box of the *whole*
+scene — so a port on a board that is not the outermost one ends up buried,
+however thin you make the wall. Set `margin: 2.5` and the case wall on that side
+is brought to exactly 2.5 mm from the socket mouth. It only moves its own edge,
+two boards pulling the same edge take the outermost, and it will never come
+inside the hardware.
+
+Connectors also carry a `cutout_shape`: a 3.5 mm jack asks for `circle` and gets
+a round hole rather than a 7 mm square. An explicit `cutout` is treated as a
+measurement and is never widened.
+
 `include` names which of that side's ports count. Left out, the case makes room
 for the external ones and ignores internal wiring; naming a list overrides that
 in both directions — drop a port you will never plug into, or add an internal

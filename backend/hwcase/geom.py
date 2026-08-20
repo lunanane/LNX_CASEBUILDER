@@ -165,7 +165,8 @@ def box_polygon(b: Box, at: Vec2 | None = None) -> Polygon:
 
 
 def corridor(at: Vec3, face: Face, length: float, width: float, height: float,
-             z_range: Vec2 | None = None) -> tuple[Polygon, Vec2]:
+             z_range: Vec2 | None = None, round_mouth: bool = False,
+             ) -> tuple[Polygon, Vec2]:
     """The volume a plug + its cable bend needs, in part-local coordinates.
 
     Returns (footprint, z interval). For a connector on a side face the
@@ -195,10 +196,15 @@ def corridor(at: Vec3, face: Face, length: float, width: float, height: float,
                 (x + width / 2, max(y0, y1)), (x - width / 2, max(y0, y1)),
             ])
         return poly, z_range if z_range is not None else (z - height / 2, z + height / 2)
-    poly = Polygon([
-        (x - width / 2, y - width / 2), (x + width / 2, y - width / 2),
-        (x + width / 2, y + width / 2), (x - width / 2, y + width / 2),
-    ])
+    # a column straight up or down through the panel: this is the one the
+    # faceplate actually cuts, so a round connector has to give a round hole
+    if round_mouth:
+        poly = Point(x, y).buffer(max(width, height) / 2.0, quad_segs=32)
+    else:
+        poly = Polygon([
+            (x - width / 2, y - width / 2), (x + width / 2, y - width / 2),
+            (x + width / 2, y + width / 2), (x - width / 2, y + width / 2),
+        ])
     z0, z1 = sorted((z, z + nz * length))
     return poly, (z0, z1)
 

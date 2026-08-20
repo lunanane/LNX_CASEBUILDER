@@ -68,6 +68,25 @@ class WorldConnector:
 
 
 @dataclass
+class WallTarget:
+    """Where one side of the case wall should sit, in world coordinates.
+
+    The auto outline is the bounding box of the hardware plus a single `wall`.
+    That is measured from the board *edge*, so a socket recessed 20 mm inside
+    its board ends up 20 mm + wall from the outside and no plug reaches it.
+    A margin says instead: put the outer surface exactly this far from the
+    socket mouth.
+    """
+
+    placement: str
+    side: Face
+    axis: int              # 0 = x, 1 = y
+    sign: int              # +1 = the max edge, -1 = the min edge
+    value: float           # world coordinate for the OUTER surface
+    reason: str
+
+
+@dataclass
 class SideOpening:
     """A whole side left open, from the floor up to just above the cable."""
 
@@ -97,6 +116,7 @@ class Resolved:
     solids: list[Solid]
     connectors: list[WorldConnector]
     side_openings: list[SideOpening]
+    wall_targets: list[WallTarget]
     parents: dict[str, Optional[str]]
     panels: dict[str, float] = field(default_factory=dict)
     floor: Optional[float] = None
@@ -426,6 +446,7 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
     solids: list[Solid] = []
     connectors: list[WorldConnector] = []
     side_openings: list[SideOpening] = []
+    wall_targets: list[WallTarget] = []
 
     ordered = _order(list(scene.placements))
     by_id = {p.id: p for p in scene.placements}
@@ -498,14 +519,48 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
             reach = c.plug_depth + (c.bend_radius if c.external else 0.0)
             if policy is CutoutPolicy.open_to_edge:
                 reach = REACH          # run the slot out through the wall
-            width = max(c.cutout[0] if c.cutout else 10.0, 8.0)
-            height = max(c.cutout[1] if c.cutout else 10.0, 8.0)
+            # An explicit cutout is a measurement and must be honoured: a
+            # 3.5 mm jack wants a 6.5 mm hole, and clamping it to 8 mm makes a
+            # sloppy one. The floor only applies when the part did not say.
+            if c.cutout:
+                width, height = c.cutout
+            else:
+                width = height = 10.0
             body_z = (c.body.z_min(), c.body.z_max()) if c.body is not None else None
-            poly, zi = corridor(c.at, c.face, reach, width, height, body_z)
+            poly, zi = corridor(c.at, c.face, reach, width, height, body_z,
+                                round_mouth=c.cutout_shape == "circle")
             wpoly, wzi = frame.place(poly, zi)
             connectors.append(WorldConnector(
                 pl.id, part.id, c, frame.point(c.at), frame.direction(c.face.normal),
                 wpoly, wzi, policy, included))
+
+        # a side asked for the wall to sit a fixed distance from its ports
+        for sp in pl.sides:
+            if sp.margin is None:
+                continue
+            normal = frame.direction(sp.side.normal)
+            axis = 0 if abs(normal[0]) > abs(normal[1]) else 1
+            if abs(normal[2]) > 0.5 or abs(normal[axis]) < 0.999:
+                issues.append(Issue(
+                    "warning", "margin_skewed",
+                    f"{pl.id}: side {sp.side.value} does not face along X or Y "
+                    f"after rotation, so its wall margin was ignored",
+                    [pl.id]))
+                continue
+            sign = 1 if normal[axis] > 0 else -1
+            mouths = [c.at[axis] for c in connectors
+                      if c.placement == pl.id and c.conn.face is sp.side and c.included]
+            if not mouths:
+                issues.append(Issue(
+                    "warning", "margin_no_ports",
+                    f"{pl.id}: side {sp.side.value} has a wall margin but no ports "
+                    f"to measure it from",
+                    [pl.id]))
+                continue
+            outermost = max(mouths) if sign > 0 else min(mouths)
+            wall_targets.append(WallTarget(
+                pl.id, sp.side, axis, sign, outermost + sign * sp.margin,
+                f"{sp.margin:.1f} mm from {pl.id}'s {sp.side.value} ports"))
 
         # a side asked to be left open: work out how high the hole has to go
         for sp in pl.sides:
@@ -535,7 +590,8 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
 
     return Resolved(scene=scene, frames=frames, solids=solids,
                     connectors=connectors, side_openings=side_openings,
-                    parents=parents, panels=panels, floor=floor_z, issues=issues)
+                    wall_targets=wall_targets, parents=parents, panels=panels,
+                    floor=floor_z, issues=issues)
 
 
 # --------------------------------------------------------------------------

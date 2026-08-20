@@ -211,6 +211,10 @@ class Connector(Strict):
     bend_radius: float = 12.0
     #: panel opening (width, height) as seen looking along the face normal
     cutout: Optional[Vec2] = None
+    #: a 3.5 mm jack needs a round hole, not a 7 mm square. `circle` uses the
+    #: larger of the two cutout dimensions as the diameter.
+    cutout_shape: Literal["rect", "circle"] = "rect"
+
     #: True if this must reach the outside world; False = internal wiring only
     external: bool = False
     src: Source = Field(default_factory=Source)
@@ -313,6 +317,12 @@ class SidePolicy(Strict):
     #: which of that side's connectors count. None = every external one.
     #: Naming a subset lets you ignore ports you will never plug into.
     include: Optional[list[str]] = None
+    #: How much material sits between this side's outermost port and the
+    #: OUTSIDE of the case. Unset, the wall lands wherever the global `wall`
+    #: puts it -- which is measured from the bounding box, so a socket set well
+    #: inside its board ends up buried that far in. Set it, and the case wall on
+    #: that side is brought to exactly this distance from the socket mouth.
+    margin: Optional[float] = None
     #: clearance kept above the highest included connector, for `open_side`
     headroom: float = 2.0
     #: `full` opens the whole case beyond that edge; `board` only the width of
