@@ -253,6 +253,39 @@ class Part(Strict):
 # scene
 # --------------------------------------------------------------------------
 
+class CutoutPolicy(str, Enum):
+    """What the case does about the connectors on one side of a board.
+
+    The connectors that end up *under* a faceplate are the awkward ones: an
+    HDMI plug needs to get out sideways, and how you let it out changes the
+    whole look of the case. So it is a decision per side, not a global rule.
+    """
+
+    #: leave the wall solid here -- nothing gets out on this side
+    none = "none"
+    #: one opening per connector, just big enough for the plug and its bend
+    per_connector = "per_connector"
+    #: the same openings, but run out to the edge as slots, so a plug already
+    #: fitted to a cable can be threaded in from outside
+    open_to_edge = "open_to_edge"
+    #: remove everything beyond this edge, from the bottom up to just above the
+    #: cable. Gives a seamless faceplate over an open, variable underside.
+    open_side = "open_side"
+
+
+class SidePolicy(Strict):
+    side: Face
+    cutout: CutoutPolicy = CutoutPolicy.per_connector
+    #: which of that side's connectors count. None = every external one.
+    #: Naming a subset lets you ignore ports you will never plug into.
+    include: Optional[list[str]] = None
+    #: clearance kept above the highest included connector, for `open_side`
+    headroom: float = 2.0
+    #: `full` opens the whole case beyond that edge; `board` only the width of
+    #: the board itself, so neighbouring hardware keeps its floor
+    span: Literal["full", "board"] = "full"
+
+
 class Panel(Strict):
     """A user-facing surface: the plane your fingers and eyes meet.
 
@@ -291,6 +324,13 @@ class Placement(Strict):
     parent_mate: Optional[str] = None
     mate: Optional[str] = None
     mate_gap: float = 0.0
+
+    #: how the case treats each side of this board. Sides not listed use
+    #: `per_connector`, which is what the case did before this existed.
+    sides: list[SidePolicy] = Field(default_factory=list)
+    #: the faceplate passes over this board unbroken -- nothing of it reaches
+    #: the surface, so no window or actuator hole is cut for it
+    under_panel: bool = False
 
     #: sit flush with this panel -- z is solved for, `pos[2]` is then ignored
     on_panel: Optional[str] = None

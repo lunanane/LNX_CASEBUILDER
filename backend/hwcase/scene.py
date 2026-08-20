@@ -11,13 +11,18 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, box
 from shapely.ops import unary_union
 
 from .geom import Frame, box_polygon, corridor, outline_polygon, z_overlap
 from .library import PartLibrary
-from .schema import (Box, Confidence, Connector, Face, Panel, Part, Placement,
-                     Scene, Source, Vec2, VolumeKind)
+from .schema import (Box, Confidence, Connector, CutoutPolicy, Face, Panel,
+                     Part, Placement, Scene, SidePolicy, Source, Vec2,
+                     VolumeKind)
+
+#: how far a slot or an open side reaches outwards before the case outline
+#: clips it. Bigger than any case we would ever cut.
+REACH = 1000.0
 
 
 @dataclass
@@ -46,10 +51,35 @@ class WorldConnector:
     face_normal: tuple[float, float, float]
     corridor_poly: Polygon
     corridor_z: Vec2
+    #: what the case does about this connector, from its side's policy
+    policy: CutoutPolicy = CutoutPolicy.per_connector
+    #: False when the side's `include` list leaves it out, i.e. the user said
+    #: they will never plug into it and the case need not make room
+    included: bool = True
 
     @property
     def ref(self) -> str:
         return f"{self.placement}.{self.conn.name}"
+
+    @property
+    def cuts_the_wall(self) -> bool:
+        return self.included and self.policy in (
+            CutoutPolicy.per_connector, CutoutPolicy.open_to_edge)
+
+
+@dataclass
+class SideOpening:
+    """A whole side left open, from the floor up to just above the cable."""
+
+    placement: str
+    side: Face
+    poly: Polygon          # world XY, already extended past any case outline
+    z: Vec2                # world z interval that gets removed
+    reason: str
+
+    @property
+    def ref(self) -> str:
+        return f"{self.placement}.{self.side.value}"
 
 
 @dataclass
@@ -66,6 +96,7 @@ class Resolved:
     frames: dict[str, Frame]
     solids: list[Solid]
     connectors: list[WorldConnector]
+    side_openings: list[SideOpening]
     parents: dict[str, Optional[str]]
     panels: dict[str, float] = field(default_factory=dict)
     issues: list[Issue] = field(default_factory=list)
@@ -272,12 +303,35 @@ def _fit_to_panels(scene: Scene, lib: PartLibrary, frames: dict[str, Frame],
     return issues
 
 
+def _side_region(part: Part, frame: Frame, side: Face, span: str) -> Polygon:
+    """Everything beyond one edge of a board, in world XY.
+
+    `span: board` keeps the opening as wide as the board, so the hardware next
+    door keeps its floor; `full` opens the case right across, which is what you
+    want when the whole end of the machine should be open underneath.
+    """
+    x0, y0, x1, y1 = outline_polygon(part.outline).bounds
+    wide = REACH if span == "full" else 0.0
+    if side is Face.px:
+        local = box(x1, y0 - wide, x1 + REACH, y1 + wide)
+    elif side is Face.nx:
+        local = box(x0 - REACH, y0 - wide, x0, y1 + wide)
+    elif side is Face.py:
+        local = box(x0 - wide, y1, x1 + wide, y1 + REACH)
+    elif side is Face.ny:
+        local = box(x0 - wide, y0 - REACH, x1 + wide, y0)
+    else:
+        return Polygon()          # +z / -z are the panel and the floor
+    return frame.polygon(local)
+
+
 def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
     frames: dict[str, Frame] = {}
     parents: dict[str, Optional[str]] = {}
     issues: list[Issue] = []
     solids: list[Solid] = []
     connectors: list[WorldConnector] = []
+    side_openings: list[SideOpening] = []
 
     ordered = _order(list(scene.placements))
     by_id = {p.id: p for p in scene.placements}
@@ -322,7 +376,20 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
                                 frame.polygon(box_polygon(v)),
                                 frame.z_interval((v.z_min(), v.z_max())), v.src))
 
+        by_side: dict[Face, SidePolicy] = {sp.side: sp for sp in pl.sides}
+
         for c in part.connectors:
+            policy_for = by_side.get(c.face)
+            policy = policy_for.cutout if policy_for else CutoutPolicy.per_connector
+            # By default the case makes room for the ports that face the
+            # outside world and ignores the internal wiring. Naming an
+            # `include` list overrides that completely, in both directions:
+            # drop a port you will never use, or add an internal one you want
+            # to be able to reach.
+            included = c.external
+            if policy_for is not None and policy_for.include is not None:
+                included = c.name in policy_for.include
+
             if c.body is not None:
                 solids.append(Solid(pl.id, part.id, c.body.name, VolumeKind.body,
                                     frame.polygon(box_polygon(c.body)),
@@ -332,16 +399,44 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
             # turn away from the wall. An internal one only needs the plug body:
             # the cable can curve off in any direction inside the box.
             reach = c.plug_depth + (c.bend_radius if c.external else 0.0)
+            if policy is CutoutPolicy.open_to_edge:
+                reach = REACH          # run the slot out through the wall
             width = max(c.cutout[0] if c.cutout else 10.0, 8.0)
             height = max(c.cutout[1] if c.cutout else 10.0, 8.0)
             poly, zi = corridor(c.at, c.face, reach, width, height)
             connectors.append(WorldConnector(
                 pl.id, part.id, c, frame.point(c.at), frame.direction(c.face.normal),
-                frame.polygon(poly), frame.z_interval(zi)))
+                frame.polygon(poly), frame.z_interval(zi), policy, included))
+
+        # a side asked to be left open: work out how high the hole has to go
+        for sp in pl.sides:
+            if sp.cutout is not CutoutPolicy.open_side:
+                continue
+            tops = [max(c.corridor_z) for c in connectors
+                    if c.placement == pl.id and c.conn.face is sp.side and c.included]
+            if not tops:
+                issues.append(Issue(
+                    "warning", "open_side_empty",
+                    f"{pl.id}: side {sp.side.value} is set to open_side but has no "
+                    f"connectors to clear -- nothing was cut",
+                    [pl.id]))
+                continue
+            region = _side_region(part, frame, sp.side, sp.span)
+            if region.is_empty:
+                issues.append(Issue(
+                    "warning", "open_side_face",
+                    f"{pl.id}: open_side only applies to the four upright sides, "
+                    f"not {sp.side.value}",
+                    [pl.id]))
+                continue
+            ceiling = max(tops) + sp.headroom
+            side_openings.append(SideOpening(
+                pl.id, sp.side, region, (-1e6, ceiling),
+                f"open side for {', '.join(sorted(c.conn.name for c in connectors if c.placement == pl.id and c.conn.face is sp.side and c.included))}"))
 
     return Resolved(scene=scene, frames=frames, solids=solids,
-                    connectors=connectors, parents=parents, panels=panels,
-                    issues=issues)
+                    connectors=connectors, side_openings=side_openings,
+                    parents=parents, panels=panels, issues=issues)
 
 
 # --------------------------------------------------------------------------
@@ -426,7 +521,26 @@ def check(res: Resolved, lib: PartLibrary) -> list[Issue]:
                     f"{s.ref} ({s.kind.value}) is covered by {o.ref}",
                     [s.ref, o.ref]))
 
-    # 5. controls that ended up below the surface you press them through
+    # 5a. a board told to hide under the faceplate that does not actually fit
+    if res.panels:
+        thickness = (case.materials[-1].thickness if case.materials else 3.0)
+        for pl in res.scene.placements:
+            if not pl.under_panel:
+                continue
+            panel_z = res.panels.get(pl.on_panel) if pl.on_panel else (
+                max(res.panels.values()) if res.panels else None)
+            if panel_z is None:
+                continue
+            tops = [s.z[1] for s in res.solids if s.placement == pl.id]
+            if tops and max(tops) > panel_z - thickness + 1e-6:
+                issues.append(Issue(
+                    "error", "under_panel_collision",
+                    f"{pl.id} is set to sit under the faceplate but reaches "
+                    f"{max(tops):.1f} mm, and the underside of the plate is at "
+                    f"{panel_z - thickness:.1f} mm",
+                    [pl.id]))
+
+    # 5b. controls that ended up below the surface you press them through
     if res.panels:
         on_panel = {pl.id: pl.on_panel for pl in res.scene.placements if pl.on_panel}
         subtrees = {root: set(_subtree(res.scene.placements, root)) for root in on_panel}

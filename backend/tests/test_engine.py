@@ -390,3 +390,141 @@ def test_saving_keeps_vectors_on_one_line(tmp_path):
     scenefile.save(load_scene(path), path)
     text = path.read_text(encoding="utf-8")
     assert "pos: [" in text, "coordinates should stay inline, not explode over 3 lines"
+
+
+# --------------------------------------------------------------------------
+# per-side cutout policy
+# --------------------------------------------------------------------------
+
+def _pi_side(scene, side, **kw):
+    from hwcase.schema import SidePolicy
+    pi = next(p for p in scene.placements if p.id == "pi")
+    pi.sides = [SidePolicy(side=side, **kw)]
+    return pi
+
+
+def _layer_at(model, z):
+    return min(model.layers, key=lambda l: abs((l.z0 + l.z1) / 2 - z))
+
+
+def test_default_side_policy_matches_the_old_behaviour(lib):
+    """No `sides` entry must behave exactly as before: external ports get an
+    opening, internal wiring does not."""
+    res = resolve(load_scene(SCENE), lib)
+    for wc in res.connectors:
+        assert wc.cuts_the_wall == wc.conn.external, wc.ref
+
+
+def test_none_leaves_the_wall_solid(lib):
+    from hwcase.schema import Face
+
+    scene = load_scene(SCENE)
+    _pi_side(scene, Face.ny, cutout="none")
+    res = resolve(scene, lib)
+    ny = [c for c in res.connectors if c.placement == "pi" and c.conn.face is Face.ny]
+    assert ny, "the Pi's power/HDMI/AV edge should have connectors"
+    assert not any(c.cuts_the_wall for c in ny)
+    # and the other sides are untouched
+    assert any(c.cuts_the_wall for c in res.connectors if c.placement == "pi")
+
+
+def test_include_list_selects_which_ports_count(lib):
+    from hwcase.schema import Face
+
+    scene = load_scene(SCENE)
+    _pi_side(scene, Face.ny, cutout="per_connector", include=["hdmi"])
+    res = resolve(scene, lib)
+    cutting = {c.conn.name for c in res.connectors
+               if c.placement == "pi" and c.conn.face is Face.ny and c.cuts_the_wall}
+    assert cutting == {"hdmi"}
+
+
+def test_include_can_add_an_internal_port(lib):
+    from hwcase.schema import Face
+
+    scene = load_scene(SCENE)
+    _pi_side(scene, Face.px, cutout="per_connector", include=["ethernet"])
+    res = resolve(scene, lib)
+    eth = next(c for c in res.connectors if c.ref == "pi.ethernet")
+    assert not eth.conn.external          # it is internal in the library
+    assert eth.cuts_the_wall              # but the user asked for it
+
+
+def test_open_to_edge_runs_the_slot_out_through_the_wall(lib):
+    from hwcase.schema import Face
+
+    scene = load_scene(SCENE)
+    plain = resolve(scene, lib)
+    before = next(c for c in plain.connectors if c.ref == "pi.hdmi")
+
+    _pi_side(scene, Face.ny, cutout="open_to_edge")
+    after = next(c for c in resolve(scene, lib).connectors if c.ref == "pi.hdmi")
+    assert after.corridor_poly.area > before.corridor_poly.area * 5
+
+
+def test_open_side_removes_the_floor_beyond_that_edge(lib):
+    from hwcase.schema import Face
+
+    scene = load_scene(SCENE)
+    solid_floor = build(resolve(scene, lib)).layers[0].geom.area
+
+    _pi_side(scene, Face.ny, cutout="open_side")
+    res = resolve(scene, lib)
+    assert len(res.side_openings) == 1
+    opened = build(res)
+    assert opened.layers[0].geom.area < solid_floor * 0.95, \
+        "opening a side should take a visible bite out of the floor"
+
+
+def test_open_side_stops_above_the_cable(lib):
+    """The point of open_side is a seamless faceplate over an open underside --
+    so the panel layer must be untouched by it."""
+    from hwcase.schema import Face
+
+    scene = load_scene(SCENE)
+    _pi_side(scene, Face.ny, cutout="open_side", headroom=2.0)
+    res = resolve(scene, lib)
+    opening = res.side_openings[0]
+    panel_z = res.panels["main"]
+    assert opening.z[1] < panel_z, "the opening must stop below the faceplate"
+
+    before = build(resolve(load_scene(SCENE), lib))
+    after = build(res)
+    top_before = _layer_at(before, panel_z - 1.0).geom.area
+    top_after = _layer_at(after, panel_z - 1.0).geom.area
+    assert top_after == pytest.approx(top_before, rel=1e-6)
+
+
+def test_open_side_span_board_is_narrower_than_full(lib):
+    from hwcase.schema import Face
+
+    def area(span):
+        scene = load_scene(SCENE)
+        _pi_side(scene, Face.ny, cutout="open_side", span=span)
+        return build(resolve(scene, lib)).layers[0].geom.area
+
+    assert area("board") > area("full"), "span=board should remove less material"
+
+
+def test_under_panel_leaves_the_faceplate_unbroken(lib):
+    scene = load_scene(SCENE)
+    oled = next(p for p in scene.placements if p.id == "oled")
+    panel_z = resolve(scene, lib).panels["main"]
+
+    before = build(resolve(scene, lib))
+    oled.under_panel = True
+    oled.on_panel = None
+    oled.pos = (oled.pos[0], oled.pos[1], panel_z - 12.0)   # tuck it well under
+    after = build(resolve(scene, lib))
+
+    lid_before = _layer_at(before, panel_z - 1.0).geom.area
+    lid_after = _layer_at(after, panel_z - 1.0).geom.area
+    assert lid_after > lid_before, "the OLED window should no longer be cut"
+
+
+def test_under_panel_that_does_not_fit_is_an_error(lib):
+    scene = load_scene(SCENE)
+    oled = next(p for p in scene.placements if p.id == "oled")
+    oled.under_panel = True            # but it is still flush with the panel
+    issues = check(resolve(scene, lib), lib)
+    assert any(i.code == "under_panel_collision" for i in issues)

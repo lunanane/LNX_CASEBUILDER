@@ -159,6 +159,41 @@ keypad, knob and window moves with it. There is a test for exactly that. The
 checker also warns when an actuator ends up *below* its panel, because you could
 not press it.
 
+## Getting the cables out: per-side cutout policy
+
+The ports that end up *under* a faceplate are the awkward ones, and how you let
+them out changes the whole look of the case. So it is a decision **per side of a
+board**, not a global rule:
+
+```yaml
+  - id: pi
+    part: rpi-3b
+    sides:
+      - side: -y
+        cutout: open_side       # everything beyond this edge goes, from the
+        headroom: 2.0           # floor up to 2 mm above the cable
+        span: full              # or `board`, to keep the neighbours' floor
+      - side: +x
+        cutout: per_connector   # one opening each, plug + bend only
+        include: [usb1, hdmi]   # and only for the ports you actually use
+```
+
+| `cutout` | what the case does |
+|---|---|
+| `none` | leave the wall solid — nothing gets out on this side |
+| `per_connector` | one opening per port, plug and cable-bend sized (the default) |
+| `open_to_edge` | the same openings run out to the edge as slots, so an already-fitted plug can be threaded in from outside |
+| `open_side` | remove everything beyond that edge from the floor up to just above the cable — a **seamless faceplate over an open, variable underside** |
+
+`include` names which of that side's ports count. Left out, the case makes room
+for the external ones and ignores internal wiring; naming a list overrides that
+in both directions — drop a port you will never plug into, or add an internal
+one you want to reach.
+
+`under_panel: true` on a placement means the faceplate passes over that board
+unbroken: no window, no actuator hole. The checker errors if the board is too
+tall to actually fit under the plate.
+
 ## Coordinate conventions
 
 Part-local: X and Y in the board plane, +Z out of the component side, **z = 0 at

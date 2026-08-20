@@ -150,48 +150,65 @@ parts:
     url: https://wiki.seeedstudio.com/Grove-8-Channel-I2C-Multiplexer-I2C-Hub-TCA9548A/
     category: interconnect
     tags: [i2c, grove, mux]
+    cad: ../datasheets/grove-tca9548a.pdf
     notes: >-
-      Seeed does not publish a mechanical drawing for this one. Modelled on the
-      double-width Grove footprint (40 x 40 mm) with the standard 2 x 2 mm Grove
-      mounting holes. MEASURE ME -- this board is a hub, so wherever it lands,
-      nine cables converge on it; the cable_clearance around it matters more
-      than its own footprint.
+      NOT a 40 x 40 double-Grove square, which is what we had: it is a long
+      narrow strip, about 90 x 20 mm, with the eight channel ports in a single
+      row along one long edge and the upstream port on the short end.
+      Seeed publishes no mechanical drawing and no dimensions anywhere -- the
+      wiki, the shop page and the DigiKey datasheet all omit them -- so these
+      numbers are scaled off the board photos in the DigiKey datasheet
+      (vendor/datasheets/grove-tca9548a.pdf) using the 11.9 mm Grove connector
+      body as the ruler. The SHAPE is right; the millimetres are estimates and
+      the port pitch is the weakest of them. MEASURE ME -- you own this board.
+      Layout, left to right: upstream I2C port on the -X end (silkscreen
+      "0x70 I2C"), then the TCA9548A and its address jumpers, then I2C0..I2C7
+      along the +Y edge. All nine cables leave towards +Y or -X, which is what
+      makes this board's clearance matter more than its footprint.
     src:
       confidence: estimated
-      url: https://wiki.seeedstudio.com/Grove-8-Channel-I2C-Multiplexer-I2C-Hub-TCA9548A/
+      url: https://media.digikey.com/pdf/Data%20Sheets/Seeed%20Technology/103020293_Web.pdf
 
     outline:
       type: rect
-      size: [40.0, 40.0]
+      size: [90.0, 20.0]
       corner_radius: 2.0
       origin: min
     pcb_thickness: 1.6
 
     holes:
-      - {name: h1, at: [2.0, 2.0], diameter: 2.0, screw: M2, src: {confidence: estimated}}
-      - {name: h2, at: [38.0, 38.0], diameter: 2.0, screw: M2, src: {confidence: estimated}}
+      - {name: h1, at: [4.0, 10.0], diameter: 2.0, screw: M2, src: {confidence: estimated}}
+      - {name: h2, at: [45.0, 17.0], diameter: 2.0, screw: M2, src: {confidence: estimated}}
+      - {name: h3, at: [45.0, 3.0], diameter: 2.0, screw: M2, src: {confidence: estimated}}
+      - {name: h4, at: [86.0, 10.0], diameter: 2.0, screw: M2, src: {confidence: estimated}}
 
     volumes:
-      - name: components
+      - name: grove_sockets
         kind: body
-        at: [20.0, 20.0]
-        size: [40.0, 40.0]
-        z: [1.6, 12.0]
-        src: {confidence: estimated, note: "Grove sockets dominate the height"}
+        at: [58.0, 13.0]
+        size: [64.0, 12.0]
+        z: [1.6, 7.2]
+        src: {confidence: estimated, note: "the row of eight, 5.6 mm tall"}
+      - name: input_and_mux
+        kind: body
+        at: [13.0, 10.0]
+        size: [26.0, 18.0]
+        z: [1.6, 7.2]
+        src: {confidence: estimated, note: "upstream port, TCA9548A, address jumpers"}
       - name: underside
         kind: body
-        at: [20.0, 20.0]
-        size: [40.0, 40.0]
+        at: [45.0, 10.0]
+        size: [90.0, 20.0]
         z: [-2.0, 0.0]
         src: {confidence: estimated}
 
     connectors:
-      - {name: up, type: grove, face: -y, at: [20.0, 0.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
-      - {name: ch0, type: grove, face: +y, at: [7.0, 40.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
-      - {name: ch1, type: grove, face: +y, at: [20.0, 40.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
-      - {name: ch2, type: grove, face: +y, at: [33.0, 40.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
-      - {name: ch3, type: grove, face: +x, at: [40.0, 10.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
-      - {name: ch4, type: grove, face: +x, at: [40.0, 26.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
-      - {name: ch5, type: grove, face: -x, at: [0.0, 10.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
-      - {name: ch6, type: grove, face: -x, at: [0.0, 26.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
-      - {name: ch7, type: grove, face: -y, at: [33.0, 0.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: up, type: grove, face: -x, at: [0.0, 10.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated, note: "silkscreen 0x70 I2C"}}
+      - {name: i2c0, type: grove, face: +y, at: [29.0, 20.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: i2c1, type: grove, face: +y, at: [37.6, 20.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: i2c2, type: grove, face: +y, at: [46.2, 20.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: i2c3, type: grove, face: +y, at: [54.8, 20.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: i2c4, type: grove, face: +y, at: [63.4, 20.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: i2c5, type: grove, face: +y, at: [72.0, 20.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: i2c6, type: grove, face: +y, at: [80.6, 20.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+      - {name: i2c7, type: grove, face: +y, at: [89.2, 20.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}

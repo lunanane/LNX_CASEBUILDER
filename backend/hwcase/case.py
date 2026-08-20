@@ -118,27 +118,36 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
     """outer shape minus whatever occupies this slab."""
     notes: list[str] = []
     cuts: list[Polygon] = []
+    under_panel = {p.id for p in res.scene.placements if p.under_panel}
 
     for s in res.solids:
         if z_overlap(s.z, slab) <= 0:
             continue
-        if role == "floor" and s.kind is VolumeKind.body:
-            # the floor stays solid; hardware sitting on it is fine
+        if s.kind is VolumeKind.body and role in ("floor", "lid"):
+            # the floor stays solid under the hardware, and only things the
+            # user must see or touch pierce the lid
             continue
-        if role == "lid" and s.kind is VolumeKind.body:
-            # only things the user must reach pierce the lid
-            continue
-        cuts.append(s.poly.buffer(spec.part_clearance, join_style=2))
         if s.kind in (VolumeKind.display, VolumeKind.actuator):
+            if s.placement in under_panel:
+                continue          # the faceplate runs over this one unbroken
             notes.append(f"opening for {s.ref}")
+        cuts.append(s.poly.buffer(spec.part_clearance, join_style=2))
 
     for wc in res.connectors:
-        if not wc.conn.external:
+        if not wc.cuts_the_wall:
             continue
         if z_overlap(wc.corridor_z, slab) <= 0:
             continue
         cuts.append(wc.corridor_poly.buffer(spec.part_clearance, join_style=2))
         notes.append(f"cutout for {wc.ref} ({wc.conn.type})")
+
+    # a side the user asked to leave open: everything beyond that edge goes,
+    # from the floor up to just above the cable
+    for so in res.side_openings:
+        if z_overlap(so.z, slab) <= 0:
+            continue
+        cuts.append(so.poly)
+        notes.append(so.reason)
 
     geom: Polygon | MultiPolygon = outer
     if cuts:
