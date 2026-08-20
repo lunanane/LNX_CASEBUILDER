@@ -551,6 +551,7 @@ async function doResolve() {
     if ($('chk-render').checked) applyRenderMode();
     if (!drag) buildGizmo();
     renderIssues(resolved.issues);
+    renderCaseSize();
     renderMaterials();
     renderPlacements();
     renderSelection();
@@ -676,6 +677,57 @@ function renderMaterials() {
     list.appendChild(row);
   });
   if (!mats.length) list.innerHTML = '<div class="note">no materials in this scene</div>';
+}
+
+/** Auto, or pinned where it is.
+ *
+ *  While the outline is derived from the hardware's bounding box, pushing a
+ *  board outward pushes the wall out with it, so a connector can never be
+ *  brought flush with the outside. Freeze it and the wall stops moving. */
+function renderCaseSize() {
+  const box = $('case-size');
+  const c = state.scene?.case;
+  if (!c) { box.innerHTML = ''; return; }
+  const fixed = !!c.outline;
+  box.innerHTML = `
+    <div class="field"><label>size</label>
+      <select id="f-casemode">
+        <option value="auto" ${fixed ? '' : 'selected'}>auto (fits the parts)</option>
+        <option value="fixed" ${fixed ? 'selected' : ''}>fixed</option>
+      </select></div>
+    ${fixed ? `<div class="field"><label>w &times; h</label>
+      <input id="f-casew" type="number" step="1" value="${c.outline.size[0]}">
+      <input id="f-caseh" type="number" step="1" value="${c.outline.size[1]}"></div>
+      <div class="note">the wall stays put &mdash; move a board and it moves
+        relative to the case</div>` : `<div class="note">the wall follows the
+        hardware, so a board can never reach the outside edge</div>`}
+  `;
+
+  $('f-casemode').onchange = async () => {
+    edit();
+    if ($('f-casemode').value === 'auto') {
+      c.outline = null;
+    } else {
+      try {
+        const r = await api('/api/case/freeze', {
+          method: 'POST', body: JSON.stringify(state.scene) });
+        c.outline = r.outline;
+      } catch (err) { status(err.message, 'err'); return; }
+    }
+    renderCaseSize();
+    scheduleResolve(0);
+  };
+  const size = (id, i) => {
+    const el = $(id);
+    if (el) el.onchange = () => {
+      edit();
+      c.outline.size[i] = parseFloat(el.value) || c.outline.size[i];
+      refreshCase();
+      scheduleResolve(0);
+    };
+  };
+  size('f-casew', 0);
+  size('f-caseh', 1);
 }
 
 function renderIssues(issues) {

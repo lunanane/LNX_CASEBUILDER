@@ -119,6 +119,10 @@ label.port .ptype { color: var(--dim); margin-left: auto; font-size: 10px; }
 .side .field label { width: 34px; }
 .side .field input { width: 52px; }
 
+#case-size .field label { width: 42px; }
+#case-size .field input { width: 62px; }
+#case-size select { flex: 1; min-width: 0; }
+
 .matrow { display: flex; gap: 4px; align-items: center; margin-bottom: 4px; }
 .matrow input[type=color] {
   width: 26px; height: 22px; padding: 0; border: 1px solid var(--line);

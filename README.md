@@ -279,6 +279,26 @@ name and thickness live.
 Schematic mode keeps the grid, gizmo, guides and diagnostic overlays; render
 mode drops them, because they are for laying out rather than looking at.
 
+## Case size: auto or pinned
+
+By default the case outline is derived from the bounding box of the hardware
+plus the wall. That is right while you are laying out, and wrong the moment you
+want a connector flush with the outside — push a board outward and the wall
+moves out with it, so the gap never closes.
+
+The **case size** control in the inspector switches it to `fixed`: the current
+derived outline is frozen in place, and from then on moving a board moves it
+*relative to a stationary wall*. Combine it with `open_to_edge` or `open_side`
+on that side and the ports come right out through the surface.
+
+## A note on anchors
+
+`anchor` re-centres the whole scene on one placement every solve. That makes
+world coordinates readable, but it also means **the anchored placement cannot be
+moved** — dragging it just slides everything else the other way. The checker now
+warns when a scene anchors something that is not locked. The demo scene no
+longer uses one.
+
 ## Coordinate conventions
 
 Part-local: X and Y in the board plane, +Z out of the component side, **z = 0 at

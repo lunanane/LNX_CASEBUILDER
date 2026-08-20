@@ -24,6 +24,26 @@ def demo(lib):
     return resolve(load_scene(SCENE), lib)
 
 
+def lab(**case_kw):
+    """A small scene built here rather than read from disk.
+
+    The demo scene is a real working document -- it gets dragged around and
+    saved from the editor -- so any test that asserts exact geometry has to
+    bring its own, or it fails the moment someone moves a board.
+    """
+    from hwcase.schema import CaseSpec, Placement, Scene
+
+    return Scene(
+        name="lab",
+        placements=[
+            Placement(id="pi", part="rpi-3b", pos=(0.0, 0.0, 0.0), mount="manual"),
+            Placement(id="hub", part="seeed-grove-tca9548a",
+                      pos=(140.0, 0.0, 0.0), mount="manual"),
+        ],
+        case=CaseSpec(**case_kw) if case_kw else CaseSpec(),
+    )
+
+
 # --------------------------------------------------------------------------
 # library
 # --------------------------------------------------------------------------
@@ -184,11 +204,13 @@ def test_overlapping_parts_collide(lib):
 
 
 def test_blocking_a_port_is_an_error(lib):
-    scene = load_scene(SCENE)
-    # park the hub right in front of the Pi's HDMI plug run
-    next(p for p in scene.placements if p.id == "mux").pos = (-40.0, 20.0, 0.0)
+    scene = lab()
+    hdmi = next(c for c in lib["rpi-3b"].connectors if c.name == "hdmi")
+    hub = next(p for p in scene.placements if p.id == "hub")
+    # park the hub squarely in the HDMI plug's run, which leaves the board at -Y
+    hub.pos = (hdmi.at[0] - 45.0, -25.0, 0.0)
     issues = check(resolve(scene, lib), lib)
-    assert any(i.code == "connector_blocked" and "hdmi" in i.message for i in issues)
+    assert any(i.code == "connector_blocked" and "hdmi" in i.message for i in issues),         [i.message for i in issues]
 
 
 def test_burying_a_display_is_an_error(lib):
@@ -687,28 +709,31 @@ def test_screen_window_is_offset_towards_the_header(lib):
 def test_boards_may_pass_over_each_other(lib):
     """A flat board sliding under another one is allowed -- it is only a
     collision when they actually share space."""
-    scene = load_scene(SCENE)
-    oled = next(p for p in scene.placements if p.id == "oled")
-    mux = next(p for p in scene.placements if p.id == "mux")
-    oled.on_panel = None
-    oled.mount = mux.mount = "manual"
-    mux.pos = (oled.pos[0], oled.pos[1], 0.0)
-    oled.pos = (mux.pos[0], mux.pos[1], 40.0)     # well clear above
+    from hwcase.schema import Placement
+
+    scene = lab()
+    scene.placements = [p for p in scene.placements if p.id == "hub"]
+    hub = scene.placements[0]
+    hub.pos = (0.0, 0.0, 0.0)
+    scene.placements.append(Placement(
+        id="over", part="adafruit-4741-oled-1v5", mount="manual",
+        pos=(10.0, 0.0, 40.0)))                   # well clear above the hub
     issues = check(resolve(scene, lib), lib)
     assert not any(i.code == "collision" for i in issues)
     assert not any(i.code == "tight_overlap" for i in issues)
 
 
 def test_passing_too_close_over_is_reported(lib):
-    scene = load_scene(SCENE)
-    oled = next(p for p in scene.placements if p.id == "oled")
-    mux = next(p for p in scene.placements if p.id == "mux")
-    oled.on_panel = None
-    oled.mount = mux.mount = "manual"
-    mux.pos = (oled.pos[0], oled.pos[1], 0.0)
-    mux_top = max(s.z[1] for s in resolve(scene, lib).solids if s.placement == "mux")
-    oled_bottom = min(v.z_min() for v in lib["adafruit-4741-oled-1v5"].volumes)
-    oled.pos = (mux.pos[0], mux.pos[1], mux_top - oled_bottom + 0.4)   # 0.4 mm gap
+    from hwcase.schema import Placement
+
+    scene = lab()
+    scene.placements = [p for p in scene.placements if p.id == "hub"]
+    scene.placements[0].pos = (0.0, 0.0, 0.0)
+    hub_top = max(s.z[1] for s in resolve(scene, lib).solids)
+    low = min(v.z_min() for v in lib["adafruit-4741-oled-1v5"].volumes)
+    scene.placements.append(Placement(
+        id="over", part="adafruit-4741-oled-1v5", mount="manual",
+        pos=(10.0, 0.0, hub_top - low + 0.4)))    # 0.4 mm of clearance
     issues = check(resolve(scene, lib), lib)
     assert any(i.code == "tight_overlap" for i in issues), \
         "0.4 mm of clearance should be called out"
@@ -734,9 +759,13 @@ def _built(demo, mode, **kw):
 
 
 def test_pocketed_is_still_the_default(demo):
-    from hwcase.schema import Interior
-    assert demo.scene.case.interior is Interior.pocketed
-    a = [l.geom.area for l in _mid_layers(build(demo))]
+    """The *schema* default, not whatever the demo scene happens to be set to --
+    that file is edited from the editor and its interior is the user's choice."""
+    from hwcase.schema import CaseSpec, Interior
+    assert CaseSpec().interior is Interior.pocketed
+
+    spec = demo.scene.case.model_copy(update={"interior": Interior.pocketed})
+    a = [l.geom.area for l in _mid_layers(build(demo, spec))]
     b = [l.geom.area for l in _mid_layers(_built(demo, "pocketed"))]
     assert a == pytest.approx(b)
 
@@ -896,10 +925,49 @@ def test_locked_placements_are_never_moved(lib):
     from hwcase.scene import Mount, mount_of
 
     scene = load_scene(SCENE)
+    mux = next(p for p in scene.placements if p.id == "mux")
+    mux.locked = True
+    mux.pos = (mux.pos[0], mux.pos[1], 7.25)
+    assert mount_of(scene, lib, mux) is Mount.manual
+    assert resolve(scene, lib).frames["mux"].pos[2] == pytest.approx(7.25)
+
+
+def test_a_mated_board_takes_its_height_from_the_mate(lib):
+    """Not from a panel -- otherwise the screen that *defines* the panel would
+    also be fitted to it, and the solve would eat its own tail."""
+    from hwcase.scene import Mount, mount_of
+
+    scene = load_scene(SCENE)
+    screen = next(p for p in scene.placements if p.id == "screen")
+    assert mount_of(scene, lib, screen) is Mount.manual
+    assert not any(i.code == "panel_cycle" for i in resolve(scene, lib).issues)
+
+
+def test_the_pi_can_be_moved(lib):
+    """It used to be the scene anchor, which pinned it to the origin, and locked
+    on top of that. Neither now: only its height is fixed, because the panel is
+    derived from the screen mated to it."""
+    scene = load_scene(SCENE)
     pi = next(p for p in scene.placements if p.id == "pi")
-    assert pi.locked
-    assert mount_of(scene, lib, pi) is Mount.manual
-    assert resolve(scene, lib).frames["pi"].pos[2] == pytest.approx(pi.pos[2])
+    assert not pi.locked
+    assert scene.anchor is None
+
+    before = resolve(scene, lib)
+    pi.pos = (pi.pos[0] - 30.0, pi.pos[1] + 12.0, pi.pos[2])
+    after = resolve(scene, lib)
+    # the Pi moved...
+    assert after.frames["pi"].pos[0] == pytest.approx(before.frames["pi"].pos[0] - 30.0)
+    assert after.frames["screen"].pos[1] == pytest.approx(before.frames["screen"].pos[1] + 12.0)
+    # ...and nothing else did
+    for pid in ("trellis_a", "encoders", "mux", "amy"):
+        assert after.frames[pid].pos[0] == pytest.approx(before.frames[pid].pos[0]), pid
+
+
+def test_an_anchored_placement_is_flagged_as_pinned(lib):
+    scene = load_scene(SCENE)
+    scene.anchor = "mux"
+    issues = check(resolve(scene, lib), lib)
+    assert any(i.code == "anchor_pinned" for i in issues)
 
 
 def test_manual_keeps_the_z_you_typed(lib):
@@ -999,3 +1067,60 @@ def test_the_floor_keeps_its_clearance(demo):
     model = build(demo)
     deepest = min(s.z[0] for s in demo.solids)
     assert deepest - model.z0 >= demo.scene.case.floor_gap - 1e-6
+
+
+# --------------------------------------------------------------------------
+# a case size that stops chasing the hardware
+# --------------------------------------------------------------------------
+
+def test_freezing_the_outline_pins_the_wall(lib):
+    """Derived, the outline grows with the hardware, so a connector can never
+    be brought flush with the outside -- the wall runs away as you push. Frozen,
+    moving a board moves it relative to the case."""
+    from hwcase.case import outer_shape
+    from hwcase.schema import RectOutline
+
+    scene = lab()
+    res = resolve(scene, lib)
+    derived = outer_shape(res, scene.case)
+    x0, y0, x1, y1 = derived.bounds
+
+    scene.case.outline = RectOutline(
+        size=(x1 - x0, y1 - y0), corner_radius=scene.case.corner_radius,
+        origin="custom", origin_offset=(-x0, -y0))
+
+    frozen = outer_shape(resolve(scene, lib), scene.case)
+    assert frozen.bounds == pytest.approx(derived.bounds, abs=1e-6), \
+        "freezing must not move the wall"
+
+    # now push a board outward: the wall must stay put
+    pi = next(p for p in scene.placements if p.id == "pi")
+    pi.pos = (pi.pos[0] - 25.0, pi.pos[1], pi.pos[2])
+    after = outer_shape(resolve(scene, lib), scene.case)
+    assert after.bounds == pytest.approx(derived.bounds, abs=1e-6)
+
+
+def test_a_derived_outline_does_chase_the_hardware(lib):
+    """The behaviour freezing exists to escape."""
+    from hwcase.case import outer_shape
+
+    scene = lab()
+    before = outer_shape(resolve(scene, lib), scene.case).bounds
+    pi = next(p for p in scene.placements if p.id == "pi")
+    pi.pos = (pi.pos[0] - 25.0, pi.pos[1], pi.pos[2])
+    after = outer_shape(resolve(scene, lib), scene.case).bounds
+    assert after[0] == pytest.approx(before[0] - 25.0)
+
+
+def test_a_frozen_outline_survives_a_save(tmp_path, lib):
+    from hwcase import scenefile
+    from hwcase.schema import RectOutline
+
+    path = tmp_path / "s.yaml"
+    scene = lab()
+    scene.case.outline = RectOutline(size=(300.0, 200.0), origin="custom",
+                                     origin_offset=(-10.0, -20.0))
+    scenefile.save(scene, path)
+    back = load_scene(path)
+    assert back.case.outline.size == (300.0, 200.0)
+    assert back.case.outline.origin_offset == (-10.0, -20.0)

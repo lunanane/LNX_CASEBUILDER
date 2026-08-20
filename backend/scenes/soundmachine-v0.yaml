@@ -1,8 +1,12 @@
 # First pass at the machine: Pi + square touchscreen as the fixed centre,
 # everything else hung around it.
 #
-# The Pi is the anchor, so world (0,0,0) is the bottom-left corner of the Pi
-# PCB, bottom face. The HyperPixel is *mated* rather than positioned: it snaps
+# The Pi used to be the scene anchor, which pinned it to the origin on every
+# solve -- dragging it just slid everything else the other way. It is free now.
+# Its HEIGHT is still fixed (mount: manual), because the panel plane is derived
+# from the screen mated on top of it: that height is the cause, so it cannot
+# also be the effect. Its XY is yours to move.
+# The HyperPixel is *mated* rather than positioned: it snaps
 # onto the 40-way header, and mate_gap models the header stack (8.5 mm for the
 # plain socket, 17.0 mm with the bundled booster header, which is what you need
 # to clear the 16 mm tall USB/Ethernet block).
@@ -12,7 +16,6 @@
 # if the header stack under the screen changes, the whole front follows.
 
 name: soundmachine-v0
-anchor: pi
 
 panels:
 - name: main
@@ -32,6 +35,7 @@ case:
   cable_clearance: 5.0
   corner_radius: 8.0
 
+  interior: grown
 placements:
 - id: pi
   part: rpi-3b
@@ -41,7 +45,7 @@ placements:
     # right put 45 mm of plug run straight through the button block -- the
     # checker caught it, and rotating the anchor is the cheap fix.
   rot_z: 180.0
-  locked: true
+  mount: manual
 
 - id: screen
   part: hyperpixel4-square-touch
@@ -85,17 +89,18 @@ placements:
   rot_z: 90.6731402402412
 - id: oled
   part: adafruit-4741-oled-1v5
-  pos: [56.001, -6.2, 0.0]
+  pos: [-8.280000000000001, 56.022099087389535, 0.0]
   on_panel: main
   panel_ref: active_area
 
   # --- I2C hub, buried inside where nobody has to see it ---
 - id: mux
   part: seeed-grove-tca9548a
-  pos: [53.2, 54.2, 0.0]
+  pos: [62.8, -53.929451680867544, 0.0]
+  rot_z: 90.0
 - id: amy
   part: shorepine-amyboard
-  pos: [-81.2, 103.1, 0.0]
+  pos: [-77.79999999999998, 104.69995559548877, 0.0]
   on_panel: main
-  panel_ref: panel_face
+  panel_ref: jack_threads
   rot_z: 270.0759810900971

@@ -161,6 +161,33 @@ def post_dxf(scene: Scene = Body(...)):
                         media_type="application/dxf")
 
 
+@app.post("/api/case/freeze")
+def post_freeze(scene: Scene = Body(...)):
+    """Turn the auto-derived case outline into a fixed one.
+
+    While the outline is derived from the bounding box of the hardware, moving
+    a board outward moves the wall out with it -- so you can never bring a
+    connector flush with the outside. Freezing pins the wall where it is; after
+    that, moving a board moves it *relative to the case*.
+    """
+    lib = library()
+    try:
+        res = resolve(scene, lib)
+        shape = case_mod.outer_shape(res, scene.case)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    x0, y0, x1, y1 = shape.bounds
+    return {"outline": {
+        "type": "rect",
+        "size": [round(x1 - x0, 3), round(y1 - y0, 3)],
+        "corner_radius": scene.case.corner_radius,
+        "origin": "custom",
+        # `custom` places the rect's min corner at -origin_offset, so this pins
+        # the frozen outline exactly where the derived one was
+        "origin_offset": [round(-x0, 3), round(-y0, 3)],
+    }}
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True, "parts": len(library()), "version": app.version}

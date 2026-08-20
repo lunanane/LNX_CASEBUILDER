@@ -238,6 +238,8 @@ def effective_mount(pl: Placement, part: Part,
     nothing facing up -- its buttons belong to the silicone pad glued to it --
     so judging the board alone would send the whole keypad to the floor.
     """
+    if pl.parent:
+        return Mount.manual                 # a mated board's height is the mate's
     if pl.locked:
         return Mount.manual                 # locked means locked
     if pl.mount is not Mount.auto:
@@ -312,10 +314,13 @@ def _resolve_panels(scene: Scene, lib: PartLibrary, frames: dict[str, Frame],
                 issues.append(Issue("error", "panel_ref",
                                     f"panel {panel.name}: no placement {ref!r}", [panel.name]))
                 continue
-            if pl.on_panel:
-                issues.append(Issue("error", "panel_cycle",
-                                    f"panel {panel.name} is defined by {ref}, which is itself "
-                                    f"fitted to a panel", [panel.name, ref]))
+            if mount_of(scene, lib, pl) is Mount.panel:
+                issues.append(Issue(
+                    "error", "panel_cycle",
+                    f"panel {panel.name} is defined by {ref}, but {ref} is itself "
+                    f"fitted to a panel -- its height cannot be both the cause "
+                    f"and the effect. Set {ref}'s height to manual.",
+                    [panel.name, ref]))
                 continue
             top = _volume_top(lib[pl.part], frames[ref], vol) if vol else None
             if top is None:
@@ -637,6 +642,19 @@ def check(res: Resolved, lib: PartLibrary) -> list[Issue]:
                     "error", "obstructed",
                     f"{s.ref} ({s.kind.value}) is covered by {o.ref}",
                     [s.ref, o.ref]))
+
+    # 5. the anchor re-centres the scene on itself every solve, so dragging it
+    # only slides everything else the other way. Worth saying out loud rather
+    # than letting someone wonder why a board will not move.
+    if res.scene.anchor:
+        anchored = next((p for p in res.scene.placements
+                         if p.id == res.scene.anchor), None)
+        if anchored is not None and not anchored.locked:
+            issues.append(Issue(
+                "warning", "anchor_pinned",
+                f"{anchored.id} is the scene anchor, so it is always at the origin "
+                f"-- moving it just shifts everything else. Clear `anchor` to move it.",
+                [anchored.id]))
 
     # 5a. a board told to hide under the faceplate that does not actually fit
     if res.panels:
