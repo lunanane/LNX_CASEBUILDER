@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { snapDelta, snapLines } from './snap.js';
+import { FINISHES, finishFor } from './finishes.js';
 
 // ---------------------------------------------------------------------------
 // state
@@ -39,6 +41,10 @@ const DEFAULT_HINT = $('hint').innerHTML;
 const viewport = $('viewport');
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
 viewport.appendChild(renderer.domElement);
 
 const view = new THREE.Scene();
@@ -52,13 +58,59 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.12;
 
-view.add(new THREE.AmbientLight(0xffffff, 0.55));
-const keyLight = new THREE.DirectionalLight(0xffffff, 1.6);
-keyLight.position.set(180, -240, 400);
-view.add(keyLight);
-const fillLight = new THREE.DirectionalLight(0x88aaff, 0.5);
+// --- lighting ------------------------------------------------------------
+// A single sun you can steer, plus an image-based ambient generated from
+// RoomEnvironment so metal and gloss have something to reflect. No HDR file to
+// download: it is built from geometry at startup.
+const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+view.add(ambient);
+
+const sun = new THREE.DirectionalLight(0xffffff, 2.6);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.bias = -0.0008;
+sun.shadow.normalBias = 0.6;
+view.add(sun, sun.target);
+
+const fillLight = new THREE.DirectionalLight(0x88aaff, 0.35);
 fillLight.position.set(-250, 200, 150);
 view.add(fillLight);
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+const envTexture = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+/** Steer the sun in spherical terms, and frame its shadow camera on the scene
+ *  so a 300 mm machine gets a 300 mm shadow map rather than a default 10 mm one. */
+function placeSun() {
+  const az = THREE.MathUtils.degToRad(Number($('sun-az').value));
+  const el = THREE.MathUtils.degToRad(Number($('sun-el').value));
+  const e = state.resolved?.extent;
+  const cx = e ? (e.min[0] + e.max[0]) / 2 : 0;
+  const cy = e ? (e.min[1] + e.max[1]) / 2 : 0;
+  const span = e ? Math.max(e.max[0] - e.min[0], e.max[1] - e.min[1], 100) : 200;
+  const dist = span * 2.2;
+
+  sun.position.set(
+    cx + Math.cos(el) * Math.cos(az) * dist,
+    cy + Math.cos(el) * Math.sin(az) * dist,
+    Math.sin(el) * dist + 20);
+  sun.target.position.set(cx, cy, 0);
+  sun.target.updateMatrixWorld();
+
+  const c = sun.shadow.camera;
+  c.left = -span; c.right = span; c.top = span; c.bottom = -span;
+  c.near = 1; c.far = dist * 3;
+  c.updateProjectionMatrix();
+  sun.intensity = Number($('sun-power').value);
+}
+
+// something for the shadows to land on
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(4000, 4000),
+  new THREE.ShadowMaterial({ opacity: 0.32 }));
+ground.receiveShadow = true;
+ground.visible = false;
+view.add(ground);
 
 const grid = new THREE.GridHelper(1000, 100, 0x3a4150, 0x24282f);
 grid.rotation.x = Math.PI / 2;
@@ -140,9 +192,11 @@ function buildSolids(resolved) {
       depth, bevelEnabled: false, curveSegments: 8,
     });
     const style = KIND_STYLE[s.kind] || KIND_STYLE.body;
-    const mesh = new THREE.Mesh(geom, new THREE.MeshLambertMaterial({
+    const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
       color: style.color, transparent: true, opacity: style.opacity,
+      roughness: 0.55, metalness: 0.12,
     }));
+    mesh.castShadow = mesh.receiveShadow = true;
     mesh.position.z = z0;
     mesh.userData = { placement: s.placement, name: s.name, kind: s.kind };
 
@@ -240,15 +294,72 @@ function buildSideOpenings(resolved) {
   }
 }
 
+/** Rings come back flat, exterior and holes mixed together. Largest-first and
+ *  containment testing puts the holes back inside their own outline, which is
+ *  what an extruded slab needs. */
+function shapesFromRings(rings) {
+  const loops = rings
+    .filter((r) => r.length > 2)
+    .map((r) => ({ pts: r, shape: shapeFromOutline(r), area: Math.abs(ringArea(r)) }))
+    .sort((a, b) => b.area - a.area);
+
+  const shapes = [];
+  for (const loop of loops) {
+    const parent = shapes.find((s) => pointInRing(loop.pts[0], s.pts));
+    if (parent) parent.shape.holes.push(new THREE.Path(loop.shape.getPoints()));
+    else shapes.push(loop);
+  }
+  return shapes.map((s) => s.shape);
+}
+
+function ringArea(r) {
+  let a = 0;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    a += (r[j][0] + r[i][0]) * (r[j][1] - r[i][1]);
+  }
+  return a / 2;
+}
+
+function pointInRing([px, py], ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 function buildCase(caseModel) {
   caseGroup.clear();
   if (!caseModel || !$('chk-case').checked) return;
-  const mat = new THREE.LineBasicMaterial({ color: 0xc8a165, transparent: true, opacity: 0.5 });
+  const solid = $('chk-render').checked;
+
   for (const layer of caseModel.layers) {
-    for (const ring of layer.rings) {
-      const pts = ring.map(([x, y]) => new THREE.Vector3(x, y, layer.z0));
-      caseGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+    const finish = finishFor(layer.material);
+    if (!solid) {
+      const mat = new THREE.LineBasicMaterial({
+        color: finish.color, transparent: true, opacity: 0.5 });
+      for (const ring of layer.rings) {
+        const pts = ring.map(([x, y]) => new THREE.Vector3(x, y, layer.z0));
+        caseGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+      }
+      continue;
     }
+    const shapes = shapesFromRings(layer.rings);
+    if (!shapes.length) continue;
+    const depth = Math.max(layer.z1 - layer.z0 - 0.05, 0.05);
+    const geom = new THREE.ExtrudeGeometry(shapes, {
+      depth, bevelEnabled: false, curveSegments: 6 });
+    const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
+      color: finish.color, roughness: finish.roughness, metalness: finish.metalness,
+      transparent: finish.opacity < 1, opacity: finish.opacity,
+      side: THREE.DoubleSide,
+    }));
+    mesh.position.z = layer.z0 + 0.025;
+    mesh.castShadow = mesh.receiveShadow = true;
+    caseGroup.add(mesh);
   }
 }
 
@@ -411,8 +522,10 @@ async function doResolve() {
     buildCorridors(resolved);
     buildPanels(resolved);
     buildSideOpenings(resolved);
+    if ($('chk-render').checked) applyRenderMode();
     if (!drag) buildGizmo();
     renderIssues(resolved.issues);
+    renderMaterials();
     renderPlacements();
     renderSelection();
 
@@ -504,6 +617,34 @@ function renderPlacements() {
 }
 
 let issuesSig = null;
+
+/** The case's material stack, bottom sheet first. Colour is what the preview
+ *  paints with; the preset behind the name decides how it catches the light. */
+function renderMaterials() {
+  const list = $('material-list');
+  list.innerHTML = '';
+  const mats = state.scene?.case?.materials || [];
+  mats.forEach((m, i) => {
+    const f = finishFor(m);
+    const hex = '#' + f.color.toString(16).padStart(6, '0');
+    const row = document.createElement('div');
+    row.className = 'matrow';
+    row.innerHTML =
+      `<input type="color" value="${hex}" title="colour">` +
+      `<input type="text" value="${m.name}" title="name -- decides the finish preset">` +
+      `<input type="number" step="0.1" value="${m.thickness}" title="thickness, mm">` +
+      `<span class="preset">${f.preset || 'plain'}</span>`;
+    const [colour, name, thick] = row.querySelectorAll('input');
+    colour.onchange = () => { m.color = colour.value; buildCase(state.caseModel); };
+    name.onchange = () => { m.name = name.value; renderMaterials(); buildCase(state.caseModel); };
+    thick.onchange = () => {
+      m.thickness = parseFloat(thick.value) || m.thickness;
+      refreshCase();
+    };
+    list.appendChild(row);
+  });
+  if (!mats.length) list.innerHTML = '<div class="note">no materials in this scene</div>';
+}
 
 function renderIssues(issues) {
   const list = $('issue-list');
@@ -1163,8 +1304,39 @@ $('sel-interior').onchange = () => {
 };
 $('chk-corridors').onchange = () => buildCorridors(state.resolved);
 $('chk-panels').onchange = () => buildPanels(state.resolved);
+
+/** Schematic mode is for laying out; render mode is for looking at. The gizmo,
+ *  guides and diagnostic overlays only make sense in the former. */
+function applyRenderMode() {
+  const on = $('chk-render').checked;
+  view.background = new THREE.Color(on ? 0x0d0f12 : 0x14161a);
+  view.environment = on ? envTexture : null;
+  ground.visible = on;
+  grid.visible = axes.visible = !on && $('chk-grid').checked;
+  sun.visible = on;
+  ambient.intensity = on ? 0.35 : 0.55;
+  fillLight.intensity = on ? 0.35 : 0.5;
+  for (const [, entry] of groupsByPlacement) {
+    for (const { mesh } of entry.meshes) {
+      mesh.castShadow = mesh.receiveShadow = on;
+    }
+  }
+  if (on) {
+    const e = state.resolved?.extent;
+    ground.position.z = e ? e.min[2] - 0.6 : -8;
+    placeSun();
+  }
+  buildCase(state.caseModel);
+  document.body.classList.toggle('rendering', on);
+}
+$('chk-render').onchange = () => { applyRenderMode(); if ($('chk-render').checked && !state.caseModel) refreshCase(); };
+for (const id of ['sun-az', 'sun-el', 'sun-power']) {
+  $(id).oninput = () => { if ($('chk-render').checked) placeSun(); };
+}
 $('chk-openings').onchange = () => buildSideOpenings(state.resolved);
-$('chk-grid').onchange = () => { grid.visible = axes.visible = $('chk-grid').checked; };
+$('chk-grid').onchange = () => {
+  grid.visible = axes.visible = $('chk-grid').checked && !$('chk-render').checked;
+};
 $('scene-select').onchange = (ev) => loadScene(ev.target.value);
 
 // ---------------------------------------------------------------------------

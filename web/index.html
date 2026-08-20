@@ -9,7 +9,8 @@
 {
   "imports": {
     "three": "./vendor/three.module.js",
-    "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js"
+    "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js",
+    "three/addons/environments/RoomEnvironment.js": "./vendor/RoomEnvironment.js"
   }
 }
 </script>
@@ -40,6 +41,13 @@
   <label><input type="checkbox" id="chk-openings" checked> open sides</label>
   <label><input type="checkbox" id="chk-snap" checked title="snap board edges together while dragging (hold alt to bypass)"> snap</label>
   <label><input type="checkbox" id="chk-grid" checked> grid</label>
+  <span class="sep"></span>
+  <label><input type="checkbox" id="chk-render"> render</label>
+  <span class="sunctl">
+    <input type="range" id="sun-az" min="0" max="360" value="235" title="sun azimuth">
+    <input type="range" id="sun-el" min="5" max="89" value="52" title="sun elevation">
+    <input type="range" id="sun-power" min="0" max="6" step="0.1" value="2.6" title="sun strength">
+  </span>
   <span class="spacer"></span>
   <span id="status">…</span>
 </header>
@@ -57,6 +65,9 @@
     <div id="placement-list"></div>
     <h2>selection</h2>
     <div id="selection"></div>
+    <h2>case materials</h2>
+    <div id="material-list"></div>
+
     <h2 id="issues-heading">issues</h2>
     <div id="issue-list"></div>
   </aside>

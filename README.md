@@ -257,6 +257,28 @@ ribbed layer touches the wall, and another asserting no rib sits on a board.
 The floor and the lid are structural faces and keep their own rules whatever the
 interior is set to.
 
+## Rendering it
+
+The `render` toggle in the header swaps the schematic view for a physically
+based one: standard materials, ACES tone mapping, a shadow-casting sun you steer
+with the three sliders (azimuth, elevation, strength), and image-based ambient
+light generated at startup from `RoomEnvironment` — geometry, not a downloaded
+HDR, so it still works offline. The case stops being wireframe outlines and
+becomes real extruded slabs with their holes punched through, sitting on a
+shadow-catching ground plane.
+
+Material appearance comes from the material's **name**: `plywood-3mm` is matte
+and pale, `acrylic-clear-3mm` is glossy and see-through, `aluminium-2mm` is
+metallic. Presets live in [web/finishes.js](web/finishes.js) and are matched by
+precedence rather than by length, so `acrylic-smoked-3mm` resolves to *smoked* —
+the qualifier — and not to *acrylic*, even though it is the shorter word. A
+`color` declared in the scene always overrides the preset's colour while keeping
+its feel, and the **case materials** panel in the inspector lets you set colour,
+name and thickness live.
+
+Schematic mode keeps the grid, gizmo, guides and diagnostic overlays; render
+mode drops them, because they are for laying out rather than looking at.
+
 ## Coordinate conventions
 
 Part-local: X and Y in the board plane, +Z out of the component side, **z = 0 at

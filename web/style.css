@@ -119,6 +119,23 @@ label.port .ptype { color: var(--dim); margin-left: auto; font-size: 10px; }
 .side .field label { width: 34px; }
 .side .field input { width: 52px; }
 
+.matrow { display: flex; gap: 4px; align-items: center; margin-bottom: 4px; }
+.matrow input[type=color] {
+  width: 26px; height: 22px; padding: 0; border: 1px solid var(--line);
+  border-radius: 3px; background: none; cursor: pointer;
+}
+.matrow input[type=text] { flex: 1; min-width: 0; }
+.matrow input[type=number] { width: 46px; }
+.matrow input[type=text], .matrow input[type=number] {
+  background: var(--panel-2); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 3px; padding: 2px 4px; font: inherit;
+}
+.matrow .preset { color: var(--dim); font-size: 10px; min-width: 42px; }
+
+.sunctl { display: flex; gap: 4px; align-items: center; }
+.sunctl input[type=range] { width: 54px; accent-color: var(--accent); }
+body:not(.rendering) .sunctl { opacity: .35; }
+
 #status.busy { color: var(--warn); }
 #status.err  { color: var(--err); }
 #status.ok   { color: var(--ok); }
