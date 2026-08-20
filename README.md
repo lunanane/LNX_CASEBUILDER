@@ -311,6 +311,34 @@ moved** — dragging it just slides everything else the other way. The checker n
 warns when a scene anchors something that is not locked. The demo scene no
 longer uses one.
 
+## Carrying a board by its screw holes
+
+Per placement, `support` decides whether the case holds the board on its own
+mounting holes — and which way round:
+
+| `support` | what the case grows |
+|---|---|
+| `none` | nothing (the default) |
+| `from_floor` | a column of material from the bottom plate up to the board's underside, with a clearance hole through it, and a **countersink in the bottom plate** so a screw head finishes flush with the outside |
+| `from_lid` | a clearance hole down through the faceplate so the board can be screwed up against its underside, plus posts across any gap |
+
+The hole positions are the real ones, read out of the vendor STEP files by
+`tools/extract_holes.py` — eight M2.5 on a NeoTrellis, not the four corners we
+originally guessed.
+
+Two details that matter and are tested:
+
+- Bosses are added **after** the interior is carved out and after the board's
+  own pocket is cut, or the void would eat the very post holding the board up.
+  They survive `hollow`, `ribs` and `grown` alike.
+- `from_lid` uses a *reach* test rather than an overlap test, because a board
+  flush with the faceplate has its top exactly at the lid's top — an overlap
+  measures zero and the lid never gets drilled, which is precisely the board you
+  most want to screw down from above.
+
+`support_boss`, `screw_clearance` and `screw_head` on the case spec set the post
+diameter, the slop on the through hole and the countersink.
+
 ## Coordinate conventions
 
 Part-local: X and Y in the board plane, +Z out of the component side, **z = 0 at

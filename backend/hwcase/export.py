@@ -158,6 +158,11 @@ def scene_to_json(res: Resolved, lib: PartLibrary, issues: Iterable = ()) -> dic
         } for c in res.connectors],
         # clipped to the case outline: the raw region reaches 1000 mm out so
         # that any outline is guaranteed to be cut, which is useless to draw
+        "supports": [{
+            "ref": s.ref, "placement": s.placement, "mode": s.mode.value,
+            "at": list(s.at), "screw_d": s.screw_d, "screw": s.screw,
+            "board_bottom": s.board_bottom, "board_top": s.board_top,
+        } for s in res.supports],
         "side_openings": [{
             "ref": o.ref, "placement": o.placement, "side": o.side.value,
             "z": list(o.z), "reason": o.reason,

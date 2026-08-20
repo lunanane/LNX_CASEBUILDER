@@ -22,10 +22,11 @@ from typing import Literal, Optional
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import unary_union
 
+from shapely.geometry import Point
 from shapely.geometry import box as shapely_box
 
 from .geom import outline_polygon, rounded_rect, z_overlap
-from .schema import CaseSpec, Interior, Material, VolumeKind
+from .schema import CaseSpec, Interior, Material, Support, VolumeKind
 from .scene import Resolved
 
 Role = Literal["floor", "body", "lid"]
@@ -138,7 +139,8 @@ def build(res: Resolved, spec: Optional[CaseSpec] = None) -> CaseModel:
     for i, mat in enumerate(materials):
         top = cursor + mat.thickness
         role: Role = "floor" if i == 0 else ("lid" if i == len(materials) - 1 else "body")
-        geom, notes = _layer_geometry(res, spec, outer, (cursor, top), role)
+        geom, notes = _layer_geometry(res, spec, outer, (cursor, top), role,
+                                      (z0, z1))
         layers.append(Layer(i, cursor, top, role, mat, geom, notes))
         cursor = top
 
@@ -198,8 +200,52 @@ def _ribs(outer: Polygon, void: Polygon, spec: CaseSpec,
     return unary_union(keep) if keep else grid.difference(grid)
 
 
+def _support_features(res: Resolved, spec: CaseSpec, slab: tuple[float, float],
+                      role: Role, zspan: tuple[float, float]):
+    """Material to keep, and holes to punch, for the boards the case carries.
+
+    A `from_floor` board gets a column of material from the bottom plate up to
+    its underside -- that column has to be added back *after* the interior has
+    been hollowed out, or the void would eat the very post that holds the board.
+    The plate at the far end gets the bigger countersink so a screw head
+    finishes flush with the outside.
+    """
+    bosses: list[Polygon] = []
+    holes: list[Polygon] = []
+    notes: list[str] = []
+    case_z0, case_z1 = zspan
+
+    for sp in res.supports:
+        # Reach rather than overlap. A board flush with the faceplate has its
+        # top exactly at the lid's top, so an overlap test measures zero and the
+        # lid never gets drilled -- which is precisely the board you most want
+        # to screw down from above.
+        if sp.mode == Support.from_floor:
+            involved = slab[0] < sp.board_bottom - 1e-6 and slab[1] > case_z0 - 1e-6
+            countersunk = role == "floor"
+        elif sp.mode == Support.from_lid:
+            involved = slab[1] > sp.board_top - 1e-6 and slab[0] < case_z1 + 1e-6
+            countersunk = role == "lid"
+        else:
+            continue
+        if not involved:
+            continue
+
+        centre = Point(sp.at)
+        if countersunk:
+            holes.append(centre.buffer(spec.screw_head / 2.0, quad_segs=24))
+            notes.append(f"countersink for {sp.ref}")
+        else:
+            bosses.append(centre.buffer(spec.support_boss / 2.0, quad_segs=24))
+            holes.append(centre.buffer(
+                (sp.screw_d + spec.screw_clearance) / 2.0, quad_segs=24))
+            notes.append(f"boss for {sp.ref}")
+    return bosses, holes, notes
+
+
 def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
-                    slab: tuple[float, float], role: Role):
+                    slab: tuple[float, float], role: Role,
+                    zspan: tuple[float, float]):
     """outer shape minus whatever occupies this slab."""
     notes: list[str] = []
     cuts: list[Polygon] = []
@@ -257,6 +303,18 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
     geom: Polygon | MultiPolygon = outer
     if cuts:
         geom = outer.difference(unary_union(cuts))
+
+    # Bosses go on last but one: after the pockets and the hollowing, because
+    # both would otherwise remove the post, and before the screw holes, which
+    # have to be drilled through it.
+    bosses, screw_holes, support_notes = _support_features(
+        res, spec, slab, role, zspan)
+    if bosses:
+        geom = geom.union(unary_union(bosses).intersection(outer))
+    if screw_holes:
+        geom = geom.difference(unary_union(screw_holes))
+    notes += support_notes
+
     if geom.is_empty:
         notes.append("nothing left of this layer -- it is pure air")
     return geom, notes

@@ -1358,3 +1358,148 @@ def test_a_square_connector_still_cuts_a_square(lib):
     wc = next(c for c in res.connectors if c.ref == "amy.i2c_accessories")
     p = wc.corridor_poly
     assert 4 * math.pi * p.area / (p.length ** 2) < 0.95
+
+
+# --------------------------------------------------------------------------
+# carrying a board on its own mounting holes
+# --------------------------------------------------------------------------
+
+def _supported(scene, mode, *ids):
+    from hwcase.schema import Support
+    for pid in ids:
+        next(p for p in scene.placements if p.id == pid).support = Support(mode)
+    return scene
+
+
+def _notes(model, prefix):
+    return [n for l in model.layers for n in l.notes if n.startswith(prefix)]
+
+
+def test_no_support_by_default(demo):
+    assert demo.supports == []
+    assert _notes(build(demo), "boss") == []
+    assert _notes(build(demo), "countersink") == []
+
+
+def test_from_floor_posts_up_to_the_board(lib):
+    scene = _supported(load_scene(SCENE), "from_floor", "trellis_a")
+    res = resolve(scene, lib)
+    model = build(res)
+    holes = lib["adafruit-3954-neotrellis"].holes
+    assert len(res.supports) == len(holes) == 8
+
+    board_bottom = min(s.z[0] for s in res.solids if s.placement == "trellis_a")
+    for layer in model.layers:
+        bosses = [n for n in layer.notes if n.startswith("boss")]
+        if layer.z0 >= board_bottom:
+            assert not bosses, f"layer {layer.index} posts past the board"
+        elif layer.role != "floor":
+            assert len(bosses) == 8, f"layer {layer.index} is missing bosses"
+
+
+def test_the_bottom_plate_is_countersunk_not_bossed(lib):
+    scene = _supported(load_scene(SCENE), "from_floor", "trellis_a")
+    model = build(resolve(scene, lib))
+    floor = model.layers[0]
+    assert len([n for n in floor.notes if n.startswith("countersink")]) == 8
+    assert not [n for n in floor.notes if n.startswith("boss")]
+
+
+def test_the_countersink_is_wider_than_the_screw(lib):
+    """So a head finishes flush with the outside instead of standing proud."""
+    from shapely.geometry import Polygon
+
+    scene = _supported(load_scene(SCENE), "from_floor", "trellis_a")
+    spec = scene.case
+    res = resolve(scene, lib)
+    model = build(res)
+
+    def hole_areas(layer):
+        polys = [layer.geom] if not hasattr(layer.geom, "geoms") else list(layer.geom.geoms)
+        return sorted(Polygon(r).area for p in polys for r in p.interiors)
+
+    screw = res.supports[0].screw_d + spec.screw_clearance
+    assert spec.screw_head > screw
+    import math
+    want_csk = math.pi * (spec.screw_head / 2) ** 2
+    assert any(a == pytest.approx(want_csk, rel=0.02) for a in hole_areas(model.layers[0])), \
+        "the floor should carry screw-head sized holes"
+
+
+def test_from_lid_drills_a_board_that_is_flush_with_it(lib):
+    """The overlap test used to measure zero for a board whose top *is* the
+    faceplate -- exactly the board you want to screw down from above."""
+    scene = _supported(load_scene(SCENE), "from_lid", "oled")
+    res = resolve(scene, lib)
+    model = build(res)
+    lid = model.layers[-1]
+    assert len([n for n in lid.notes if n.startswith("countersink")]) == 4
+
+
+def test_from_lid_does_not_post_below_the_board(lib):
+    scene = _supported(load_scene(SCENE), "from_lid", "trellis_a")
+    res = resolve(scene, lib)
+    model = build(res)
+    board_top = max(s.z[1] for s in res.solids if s.placement == "trellis_a")
+    for layer in model.layers:
+        if [n for n in layer.notes if n.startswith("boss")]:
+            assert layer.z1 > board_top - 1e-6, \
+                f"layer {layer.index} posts down past the board"
+
+
+def test_bosses_survive_hollowing(lib):
+    """The whole point of adding them after the interior is carved out: a post
+    that gets eaten by the void is not holding anything up."""
+    from hwcase.schema import Interior
+
+    scene = _supported(load_scene(SCENE), "from_floor", "trellis_a")
+    res = resolve(scene, lib)
+    spec = scene.case.model_copy(update={"interior": Interior.hollow})
+    model = build(res, spec)
+
+    board_bottom = min(s.z[0] for s in res.solids if s.placement == "trellis_a")
+    mid = next(l for l in model.layers
+               if l.role == "body" and l.z1 < board_bottom)
+    for sp in res.supports:
+        ring = mid.geom.intersection(
+            __import__("shapely.geometry", fromlist=["Point"]).Point(sp.at)
+            .buffer(spec.support_boss / 2.0))
+        assert ring.area > 1.0, f"the boss at {sp.ref} was hollowed away"
+
+
+def test_bosses_survive_the_board_pocket(lib):
+    """A boss sits under the board, inside the very pocket cut for it."""
+    from shapely.geometry import Point
+
+    scene = _supported(load_scene(SCENE), "from_floor", "trellis_a")
+    res = resolve(scene, lib)
+    model = build(res)
+    board_bottom = min(s.z[0] for s in res.solids if s.placement == "trellis_a")
+    mid = next(l for l in model.layers if l.role == "body" and l.z1 < board_bottom)
+    for sp in res.supports:
+        disc = Point(sp.at).buffer(scene.case.support_boss / 2.0)
+        assert mid.geom.intersection(disc).area > 1.0, f"pocket ate {sp.ref}"
+
+
+def test_a_board_with_no_holes_says_so(lib):
+    scene = _supported(load_scene(SCENE), "from_floor", "screen")
+    codes = [i.code for i in resolve(scene, lib).issues]
+    assert "no_mounting_holes" in codes
+
+
+def test_a_board_on_edge_cannot_be_posted_to(lib):
+    scene = _supported(load_scene(SCENE), "from_floor", "mux")
+    next(p for p in scene.placements if p.id == "mux").tilt = 90
+    codes = [i.code for i in resolve(scene, lib).issues]
+    assert "support_on_edge" in codes
+
+
+def test_support_uses_the_real_hole_positions(lib):
+    """Read out of the vendor STEP, not guessed -- eight on the Trellis."""
+    scene = _supported(load_scene(SCENE), "from_floor", "trellis_a")
+    res = resolve(scene, lib)
+    frame = res.frames["trellis_a"]
+    for h in lib["adafruit-3954-neotrellis"].holes:
+        want = frame.point((h.at[0], h.at[1], 0.0))
+        assert any(sp.at[0] == pytest.approx(want[0])
+                   and sp.at[1] == pytest.approx(want[1]) for sp in res.supports)

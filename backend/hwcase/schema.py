@@ -330,6 +330,21 @@ class SidePolicy(Strict):
     span: Literal["full", "board"] = "full"
 
 
+class Support(str, Enum):
+    """How the case holds a board by its own mounting holes."""
+
+    #: ignore this board's holes entirely -- it is held some other way, or not
+    #: at all yet
+    none = "none"
+    #: build a column of material up from the bottom plate to the board's
+    #: underside, with a clearance hole through it, and countersink the bottom
+    #: plate so a screw head sits flush with the outside
+    from_floor = "from_floor"
+    #: run a clearance hole down through the faceplate so the board can be
+    #: screwed up against its underside
+    from_lid = "from_lid"
+
+
 class Mount(str, Enum):
     """How a board's height is decided.
 
@@ -392,6 +407,8 @@ class Placement(Strict):
     mate: Optional[str] = None
     mate_gap: float = 0.0
 
+    #: whether the case carries this board on its own mounting holes
+    support: Support = Support.none
     #: how the case treats each side of this board. Sides not listed use
     #: `per_connector`, which is what the case did before this existed.
     sides: list[SidePolicy] = Field(default_factory=list)
@@ -458,6 +475,12 @@ class CaseSpec(Strict):
     ceiling_gap: float = 2.0
     part_clearance: float = 0.6       # slop around each part pocket
     cable_clearance: float = 5.0      # min gap between parts for wiring
+    #: diameter of the material column left standing around a mounting hole
+    support_boss: float = 9.0
+    #: added to a hole's own diameter to get the through hole in the case
+    screw_clearance: float = 0.4
+    #: countersink in the outermost plate, so a screw head finishes flush
+    screw_head: float = 6.5
     #: vertical room wanted where one board passes over another
     overlap_clearance: float = 1.5
     corner_radius: float = 6.0

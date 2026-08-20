@@ -146,8 +146,9 @@ const panelGroup = new THREE.Group();
 const gizmoGroup = new THREE.Group();
 const openingGroup = new THREE.Group();
 const snapGroup = new THREE.Group();
+const supportGroup = new THREE.Group();
 view.add(solidsGroup, caseGroup, corridorGroup, panelGroup, gizmoGroup,
-         openingGroup, snapGroup);
+         openingGroup, snapGroup, supportGroup);
 
 const groupsByPlacement = new Map();   // id -> { group, meshes: [{mesh, style}] }
 
@@ -357,6 +358,27 @@ function pointInRing([px, py], ring) {
   return inside;
 }
 
+/** The mounting holes the case is carrying, drawn as a post from the plate to
+ *  the board so you can see which way round it is being held. */
+function buildSupports(resolved) {
+  supportGroup.clear();
+  if (!$('chk-supports').checked) return;
+  for (const s of resolved.supports || []) {
+    const [x, y] = s.at;
+    const down = s.mode === 'from_floor';
+    const from = down ? (resolved.extent?.min[2] ?? 0) : s.board_top;
+    const to = down ? s.board_bottom : (resolved.extent?.max[2] ?? 0);
+    const colour = down ? 0x6bd68a : 0x57c7ff;
+    const g = new THREE.CylinderGeometry(s.screw_d / 2, s.screw_d / 2,
+                                         Math.max(Math.abs(to - from), 0.5), 12);
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+      color: colour, transparent: true, opacity: 0.75 }));
+    m.rotation.x = Math.PI / 2;
+    m.position.set(x, y, (from + to) / 2);
+    supportGroup.add(m);
+  }
+}
+
 function buildCase(caseModel) {
   caseGroup.clear();
   if (!caseModel || !$('chk-case').checked) return;
@@ -548,6 +570,7 @@ async function doResolve() {
     buildCorridors(resolved);
     buildPanels(resolved);
     buildSideOpenings(resolved);
+    buildSupports(resolved);
     if ($('chk-render').checked) applyRenderMode();
     if (!drag) buildGizmo();
     renderIssues(resolved.issues);
@@ -771,7 +794,7 @@ function renderSelection(force = false) {
     return;
   }
   const key = [pl.id, pl.parent ? 1 : 0, pl.on_panel || '', pl.mount || 'auto',
-    pl.tilt || 0,
+    pl.tilt || 0, pl.support || 'none',
     pl.under_panel ? 1 : 0,
     JSON.stringify(pl.sides || [])].join('|');
   if (force || shellFor !== key) { buildSelectionShell(pl); shellFor = key; }
@@ -927,6 +950,11 @@ function buildSelectionShell(pl) {
       ${attached ? 'disabled' : ''}></div>
     <div class="field"><label>z</label><input id="f-z" type="number" step="0.5"
       ${solvedZ ? 'disabled' : ''}></div>
+    <div class="field"><label>screws</label><select id="f-support">
+      <option value="none">not mounted</option>
+      <option value="from_floor">post up from the bottom plate</option>
+      <option value="from_lid">screw down through the faceplate</option>
+    </select></div>
     <div class="field"><label>stand</label><select id="f-tilt">
       <option value="0">flat</option>
       <option value="90">on edge (front)</option>
@@ -982,6 +1010,7 @@ function buildSelectionShell(pl) {
       scheduleResolve(0);
     };
   };
+  sel('f-support', (v) => (pl.support = v));
   sel('f-tilt', (v) => { pl.tilt = parseInt(v, 10); pl.flip = false; });
   sel('f-mount', (v) => (pl.mount = v));
   sel('f-panel', (v) => (pl.on_panel = v || null));
@@ -1017,6 +1046,7 @@ function updateSelectionValues(pl) {
   set('f-r', pl.rot_z || 0);
   set('f-g', pl.mate_gap || 0);
   set('f-panelofs', pl.panel_offset || 0);
+  const su = $('f-support'); if (su) su.value = pl.support || 'none';
   const ti = $('f-tilt');
   if (ti) ti.value = String(pl.tilt || (pl.flip ? 180 : 0));
   const mo = $('f-mount'); if (mo) mo.value = pl.mount || 'auto';
@@ -1052,7 +1082,8 @@ function addPlacement(partId) {
     pos: e ? [e.max[0] + 20, e.min[1], 0] : [0, 0, 0],
     rot_z: 0, flip: false, locked: false,
     parent: null, parent_mate: null, mate: null, mate_gap: 0,
-    tilt: 0, mount: 'auto', on_panel: null, panel_ref: 'auto', panel_offset: 0,
+    tilt: 0, support: 'none', mount: 'auto',
+    on_panel: null, panel_ref: 'auto', panel_offset: 0,
   });
   select(state.scene.placements.at(-1).id);
   scheduleResolve(0);
@@ -1493,6 +1524,7 @@ for (const id of ['sun-az', 'sun-el', 'sun-power']) {
   $(id).oninput = () => { if ($('chk-render').checked) placeSun(); };
 }
 $('chk-openings').onchange = () => buildSideOpenings(state.resolved);
+$('chk-supports').onchange = () => buildSupports(state.resolved);
 $('chk-grid').onchange = () => {
   grid.visible = axes.visible = $('chk-grid').checked && !$('chk-render').checked;
 };

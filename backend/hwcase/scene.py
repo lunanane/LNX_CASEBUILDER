@@ -17,8 +17,8 @@ from shapely.ops import unary_union
 from .geom import Frame, box_polygon, corridor, outline_polygon, z_overlap
 from .library import PartLibrary
 from .schema import (Box, Confidence, Connector, CutoutPolicy, Face, Mount,
-                     Panel, Part, Placement, Scene, SidePolicy, Source, Vec2,
-                     VolumeKind)
+                     Panel, Part, Placement, Scene, SidePolicy, Source,
+                     Support, Vec2, VolumeKind)
 
 #: how far a slot or an open side reaches outwards before the case outline
 #: clips it. Bigger than any case we would ever cut.
@@ -65,6 +65,29 @@ class WorldConnector:
     def cuts_the_wall(self) -> bool:
         return self.included and self.policy in (
             CutoutPolicy.per_connector, CutoutPolicy.open_to_edge)
+
+
+@dataclass
+class SupportPoint:
+    """One mounting hole the case is asked to carry, in world coordinates.
+
+    The z extent is left to the case builder: how far a boss has to reach
+    depends on where the floor and the lid end up, and that is not known until
+    the sheet stack is laid out.
+    """
+
+    placement: str
+    hole: str
+    at: Vec2               # world XY
+    mode: Support
+    screw_d: float         # the hole in the board
+    board_bottom: float    # world z of the board's underside
+    board_top: float       # world z of its top face
+    screw: Optional[str] = None
+
+    @property
+    def ref(self) -> str:
+        return f"{self.placement}.{self.hole}"
 
 
 @dataclass
@@ -117,6 +140,7 @@ class Resolved:
     connectors: list[WorldConnector]
     side_openings: list[SideOpening]
     wall_targets: list[WallTarget]
+    supports: list[SupportPoint]
     parents: dict[str, Optional[str]]
     panels: dict[str, float] = field(default_factory=dict)
     floor: Optional[float] = None
@@ -447,6 +471,7 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
     connectors: list[WorldConnector] = []
     side_openings: list[SideOpening] = []
     wall_targets: list[WallTarget] = []
+    supports: list[SupportPoint] = []
 
     ordered = _order(list(scene.placements))
     by_id = {p.id: p for p in scene.placements}
@@ -493,6 +518,28 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
             for inst_name, inst_at in v.instances():
                 poly, zi = frame.place(box_polygon(v, inst_at), (v.z_min(), v.z_max()))
                 solids.append(Solid(pl.id, part.id, inst_name, v.kind, poly, zi, v.src))
+
+        if pl.support != Support.none:
+            if not part.holes:
+                issues.append(Issue(
+                    "warning", "no_mounting_holes",
+                    f"{pl.id}: asked to be supported by its mounting holes, but "
+                    f"{part.id} has none in the library",
+                    [pl.id]))
+            elif frame.tilt % 180 != 0:
+                issues.append(Issue(
+                    "warning", "support_on_edge",
+                    f"{pl.id}: its holes face sideways once the board is on edge, "
+                    f"so the case cannot post up to them",
+                    [pl.id]))
+            else:
+                bottom = _part_bottom(part, frame)
+                top = _part_top(part, frame) or bottom
+                for h in part.holes:
+                    at = frame.point((h.at[0], h.at[1], 0.0))
+                    supports.append(SupportPoint(
+                        pl.id, h.name, (at[0], at[1]), pl.support,
+                        h.diameter, bottom, top, h.screw))
 
         by_side: dict[Face, SidePolicy] = {sp.side: sp for sp in pl.sides}
 
@@ -590,8 +637,8 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
 
     return Resolved(scene=scene, frames=frames, solids=solids,
                     connectors=connectors, side_openings=side_openings,
-                    wall_targets=wall_targets, parents=parents, panels=panels,
-                    floor=floor_z, issues=issues)
+                    wall_targets=wall_targets, supports=supports,
+                    parents=parents, panels=panels, floor=floor_z, issues=issues)
 
 
 # --------------------------------------------------------------------------
