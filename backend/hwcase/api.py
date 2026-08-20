@@ -10,6 +10,7 @@ part is and what "this layout is wrong" means.
 from __future__ import annotations
 
 import io
+import re
 from pathlib import Path
 
 from . import scenefile
@@ -83,6 +84,54 @@ def get_part(part_id: str):
 # scenes on disk
 # --------------------------------------------------------------------------
 
+#: A scene name becomes a filename, so it is checked rather than trusted.
+#: Without this, "../../something" would write wherever it liked.
+SCENE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
+
+STARTER = """# A new scene.
+#
+# Add boards from the palette on the left. Heights are worked out for you:
+# anything with a screen, a knob, a button or an upward-facing socket goes to
+# the faceplate, and anything else rests on the inside floor.
+#
+# A panel is the surface you touch. Derive it from the part that fixes the
+# height -- usually a screen -- rather than typing a number:
+#
+#   panels:
+#     - name: main
+#       from_ref: <placement>.<volume>
+
+name: {name}
+placements: []
+case:
+  style: layered
+  materials:
+    - {{name: plywood-3mm, thickness: 3.0, kerf: 0.15, sheet: [600.0, 400.0], color: "#c8a165"}}
+  wall: 8.0
+  floor_gap: 4.0
+  ceiling_gap: 1.0
+  part_clearance: 0.6
+  cable_clearance: 5.0
+  corner_radius: 8.0
+"""
+
+
+def _scene_path(name: str, must_exist: bool = False,
+                must_not_exist: bool = False) -> Path:
+    if not SCENE_NAME.match(name or ""):
+        raise HTTPException(
+            400, f"{name!r} is not a usable scene name -- letters, digits, "
+                 f"spaces, dot, dash and underscore only")
+    path = (SCENES_DIR / f"{name}.yaml").resolve()
+    if path.parent != SCENES_DIR.resolve():
+        raise HTTPException(400, "scene names cannot contain a path")
+    if must_exist and not path.exists():
+        raise HTTPException(404, f"no scene {name}")
+    if must_not_exist and path.exists():
+        raise HTTPException(409, f"{name} already exists")
+    return path
+
+
 @app.get("/api/scenes")
 def list_scenes():
     SCENES_DIR.mkdir(parents=True, exist_ok=True)
@@ -91,10 +140,41 @@ def list_scenes():
 
 @app.get("/api/scenes/{name}")
 def get_scene(name: str):
-    path = SCENES_DIR / f"{name}.yaml"
-    if not path.exists():
-        raise HTTPException(404, f"no scene {name}")
-    return load_scene(path).model_dump(mode="json")
+    return load_scene(_scene_path(name, must_exist=True)).model_dump(mode="json")
+
+
+@app.post("/api/scenes")
+def create_scene(payload: dict = Body(...)):
+    """Start a new scene, optionally as a copy of an existing one.
+
+    Copying takes the file itself rather than a re-serialised model, so the
+    reasoning written into its comments comes along with the geometry.
+    """
+    SCENES_DIR.mkdir(parents=True, exist_ok=True)
+    name = payload.get("name", "")
+    path = _scene_path(name, must_not_exist=True)
+    source = payload.get("copy_from")
+    if source:
+        src = _scene_path(source, must_exist=True)
+        path.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    else:
+        path.write_text(STARTER.format(name=name), encoding="utf-8")
+    return {"created": name, "copied_from": source}
+
+
+@app.post("/api/scenes/{name}/rename")
+def rename_scene(name: str, payload: dict = Body(...)):
+    src = _scene_path(name, must_exist=True)
+    dst = _scene_path(payload.get("to", ""), must_not_exist=True)
+    scene = load_scene(src)
+    scene.name = dst.stem
+    dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    scenefile.save(scene, dst)          # keeps the comments, fixes the `name`
+    src.unlink()
+    bak = src.with_suffix(".yaml.bak")
+    if bak.exists():
+        bak.unlink()
+    return {"renamed": name, "to": dst.stem}
 
 
 @app.put("/api/scenes/{name}")
@@ -107,7 +187,7 @@ def put_scene(name: str, scene: Scene = Body(...)):
     not reuse the previous file.
     """
     SCENES_DIR.mkdir(parents=True, exist_ok=True)
-    path = SCENES_DIR / f"{name}.yaml"
+    path = _scene_path(name)
     scene.name = name
     merged = scenefile.save(scene, path)
     return {"saved": str(path), "placements": len(scene.placements),

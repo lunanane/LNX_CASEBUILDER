@@ -1442,7 +1442,7 @@ window.addEventListener('keydown', async (ev) => {
 
 async function loadScene(name) {
   state.sceneName = name;
-  state.scene = await api(`/api/scenes/${name}`);
+  state.scene = await api(`/api/scenes/${encodeURIComponent(name)}`);
   history.clear();
   $('sel-interior').value = state.scene.case?.interior || 'pocketed';
   state.selection = null;
@@ -1461,10 +1461,77 @@ function frameCamera() {
   controls.update();
 }
 
+/** Refresh the picker and select `pick`. */
+async function refreshScenes(pick) {
+  const { scenes } = await api('/api/scenes');
+  $('scene-select').innerHTML = scenes.map(
+    (s) => `<option${s === pick ? ' selected' : ''}>${s}</option>`).join('');
+  return scenes;
+}
+
+function askName(what, suggested) {
+  const name = window.prompt(what, suggested);
+  if (name == null) return null;
+  const clean = name.trim();
+  if (!clean) { status('a scene needs a name', 'err'); return null; }
+  return clean;
+}
+
+/** Write the current in-memory scene under a new name and switch to it.
+ *  `seed` copies the source file first, so its comments come along. */
+async function writeAs(name, seed) {
+  try {
+    await api('/api/scenes', {
+      method: 'POST',
+      body: JSON.stringify({ name, copy_from: seed ? state.sceneName : null }),
+    });
+    await api(`/api/scenes/${encodeURIComponent(name)}`, {
+      method: 'PUT', body: JSON.stringify(state.scene),
+    });
+    await refreshScenes(name);
+    await loadScene(name);
+    status(`now editing ${name}`, 'ok');
+  } catch (err) { status(err.message, 'err'); }
+}
+
+$('btn-new').onclick = async () => {
+  const name = askName('Name for the new scene', 'untitled');
+  if (!name) return;
+  try {
+    await api('/api/scenes', { method: 'POST', body: JSON.stringify({ name }) });
+    await refreshScenes(name);
+    await loadScene(name);
+    status(`started ${name}`, 'ok');
+  } catch (err) { status(err.message, 'err'); }
+};
+
+$('btn-dup').onclick = () => {
+  const name = askName('Copy this scene to', `${state.sceneName}-v2`);
+  if (name) writeAs(name, true);
+};
+
+$('btn-saveas').onclick = () => {
+  const name = askName('Save this scene as', `${state.sceneName}-v2`);
+  if (name) writeAs(name, true);
+};
+
+$('btn-rename').onclick = async () => {
+  const name = askName('Rename this scene to', state.sceneName);
+  if (!name || name === state.sceneName) return;
+  try {
+    await api(`/api/scenes/${encodeURIComponent(state.sceneName)}/rename`, {
+      method: 'POST', body: JSON.stringify({ to: name }),
+    });
+    await refreshScenes(name);
+    await loadScene(name);
+    status(`renamed to ${name}`, 'ok');
+  } catch (err) { status(err.message, 'err'); }
+};
+
 $('btn-reload').onclick = () => loadScene(state.sceneName);
 $('btn-save').onclick = async () => {
   try {
-    const r = await api(`/api/scenes/${state.sceneName}`, {
+    const r = await api(`/api/scenes/${encodeURIComponent(state.sceneName)}`, {
       method: 'PUT', body: JSON.stringify(state.scene),
     });
     status(`saved ${r.placements} placements${r.backup ? ` (backup ${r.backup})` : ''}`, 'ok');
@@ -1556,10 +1623,9 @@ $('scene-select').onchange = (ev) => loadScene(ev.target.value);
     state.partsById = new Map(parts.map((p) => [p.id, p]));
     renderParts();
 
-    const { scenes } = await api('/api/scenes');
-    $('scene-select').innerHTML = scenes.map((s) => `<option>${s}</option>`).join('');
+    const scenes = await refreshScenes();
     if (scenes.length) await loadScene(scenes[0]);
-    else status('no scenes in backend/scenes/', 'err');
+    else status('no scenes yet — press "new" to start one', 'err');
   } catch (err) {
     status(err.message, 'err');
     console.error(err);

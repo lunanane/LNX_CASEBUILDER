@@ -104,6 +104,19 @@ The `90°` buttons snap to an **absolute** multiple of 90 rather than adding a
 quarter turn to whatever the free-rotate ring left behind: free-rotate to 37°,
 press it and you land on 90° or 0°, never 127°.
 
+### Variations
+
+`new` starts an empty scene, `duplicate` copies the current one under a new name
+and switches to it, `save as` does the same with your unsaved changes included,
+and `rename` moves it. Duplicating and renaming copy the **file**, not a
+re-serialised model, so the reasoning written into a scene's comments comes
+along with its geometry.
+
+Scene names become filenames, so they are validated rather than trusted: letters,
+digits, spaces, dot, dash and underscore, and nothing that could climb out of
+`backend/scenes/`. Creating or renaming onto an existing name is refused rather
+than silently overwriting.
+
 Every move re-posts the scene to the backend, so the issue list is always the
 engine's opinion, never the browser's guess. `save` writes back to
 `backend/scenes/<name>.yaml` and **keeps the file's comments** — it merges the

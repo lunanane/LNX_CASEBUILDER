@@ -1763,3 +1763,127 @@ def test_side_policies_leave_nothing_loose(lib, policy):
         for piece in _all_pieces(layer.geom):
             assert piece.intersects(edge), \
                 f"{policy} left an island in layer {layer.index}"
+
+
+# --------------------------------------------------------------------------
+# scene files: new, duplicate, rename
+# --------------------------------------------------------------------------
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    from hwcase import api
+
+    scenes = tmp_path / "scenes"
+    scenes.mkdir()
+    (scenes / "base.yaml").write_text(SCENE.read_text(encoding="utf-8"),
+                                      encoding="utf-8")
+    monkeypatch.setattr(api, "SCENES_DIR", scenes)
+    return TestClient(api.app), scenes
+
+
+def test_a_new_scene_is_empty_but_valid(client):
+    c, scenes = client
+    assert c.post("/api/scenes", json={"name": "fresh"}).status_code == 200
+    assert (scenes / "fresh.yaml").exists()
+    body = c.get("/api/scenes/fresh").json()
+    assert body["name"] == "fresh"
+    assert body["placements"] == []
+    assert c.post("/api/resolve", json=body).status_code == 200
+
+
+def test_a_duplicate_keeps_the_comments(client):
+    c, scenes = client
+    before = (scenes / "base.yaml").read_text(encoding="utf-8")
+    assert before.count("#") > 5
+
+    r = c.post("/api/scenes", json={"name": "variant", "copy_from": "base"})
+    assert r.status_code == 200
+    after = (scenes / "variant.yaml").read_text(encoding="utf-8")
+    for line in before.splitlines():
+        if line.strip().startswith("#"):
+            assert line.strip() in after, f"lost: {line.strip()}"
+
+
+def test_a_duplicate_is_independent(client):
+    c, scenes = client
+    c.post("/api/scenes", json={"name": "variant", "copy_from": "base"})
+    variant = c.get("/api/scenes/variant").json()
+    variant["placements"][0]["pos"] = [111.0, 222.0, 0.0]
+    c.put("/api/scenes/variant", json=variant)
+
+    assert c.get("/api/scenes/base").json()["placements"][0]["pos"] != [111.0, 222.0, 0.0]
+    assert c.get("/api/scenes/variant").json()["placements"][0]["pos"] == [111.0, 222.0, 0.0]
+
+
+def test_rename_moves_the_file_and_the_name_inside_it(client):
+    c, scenes = client
+    assert c.post("/api/scenes/base/rename", json={"to": "renamed"}).status_code == 200
+    assert not (scenes / "base.yaml").exists()
+    assert (scenes / "renamed.yaml").exists()
+    assert c.get("/api/scenes/renamed").json()["name"] == "renamed"
+    assert c.get("/api/scenes/base").status_code == 404
+
+
+def test_rename_keeps_the_comments(client):
+    c, scenes = client
+    before = (scenes / "base.yaml").read_text(encoding="utf-8")
+    c.post("/api/scenes/base/rename", json={"to": "renamed"})
+    after = (scenes / "renamed.yaml").read_text(encoding="utf-8")
+    for line in before.splitlines():
+        if line.strip().startswith("#"):
+            assert line.strip() in after
+
+
+def test_you_cannot_overwrite_by_accident(client):
+    c, _ = client
+    c.post("/api/scenes", json={"name": "taken"})
+    assert c.post("/api/scenes", json={"name": "taken"}).status_code == 409
+    assert c.post("/api/scenes/base/rename", json={"to": "taken"}).status_code == 409
+
+
+BAD_NAMES = ("../evil", "..\evil", "/etc/passwd", "a/b", "", ".", "..",
+             "con.yaml", "x" * 200)
+
+
+def test_scene_names_cannot_escape_the_directory(client, tmp_path):
+    """A scene name becomes a filename, so it is checked rather than trusted."""
+    c, _ = client
+    for bad in BAD_NAMES:
+        if bad in ("con.yaml",):
+            continue                    # legal characters; only odd on Windows
+        assert c.post("/api/scenes", json={"name": bad}).status_code == 400, bad
+        assert c.post("/api/scenes/base/rename",
+                      json={"to": bad}).status_code == 400, bad
+    assert not (tmp_path / "evil.yaml").exists()
+    assert not (tmp_path.parent / "evil.yaml").exists()
+
+
+def test_the_name_validator_itself_rejects_traversal(monkeypatch, tmp_path):
+    """Checked at the source rather than only through the router, which
+    normalises `.` and `..` away before a request ever reaches us."""
+    from fastapi import HTTPException
+    from hwcase import api
+
+    monkeypatch.setattr(api, "SCENES_DIR", tmp_path)
+    for bad in BAD_NAMES:
+        if bad == "con.yaml":
+            continue
+        with pytest.raises(HTTPException) as caught:
+            api._scene_path(bad)
+        assert caught.value.status_code == 400, bad
+
+    ok = api._scene_path("good name-1.2")
+    assert ok.parent == tmp_path.resolve()
+
+
+def test_ordinary_names_are_accepted(client):
+    c, _ = client
+    for good in ("v2", "sound machine", "rev_3", "a.b", "MK-II"):
+        assert c.post("/api/scenes", json={"name": good}).status_code == 200, good
+
+
+def test_the_listing_shows_new_scenes(client):
+    c, _ = client
+    c.post("/api/scenes", json={"name": "another"})
+    assert set(c.get("/api/scenes").json()["scenes"]) == {"base", "another"}
