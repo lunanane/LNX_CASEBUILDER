@@ -106,6 +106,20 @@ def to_dxf(case: CaseModel, path: Path, apply_kerf: bool = True) -> Path:
     return path
 
 
+def _clipped_outline(poly: Polygon, res: Resolved) -> list[list[float]]:
+    """Trim a region to the case outline so the browser can draw it."""
+    from .case import outer_shape
+
+    try:
+        clipped = poly.intersection(outer_shape(res, res.scene.case))
+    except Exception:
+        clipped = poly
+    if clipped.is_empty:
+        return []
+    biggest = max(_polys(clipped), key=lambda p: p.area, default=None)
+    return [list(c) for c in biggest.exterior.coords] if biggest else []
+
+
 def scene_to_json(res: Resolved, lib: PartLibrary, issues: Iterable = ()) -> dict:
     """What the browser needs to draw the scene: boxes, frames, issues."""
     out_solids = []
@@ -140,10 +154,12 @@ def scene_to_json(res: Resolved, lib: PartLibrary, issues: Iterable = ()) -> dic
             # how far a plug + its cable bend must stay clear, along `normal`
             "reach": c.conn.plug_depth + (c.conn.bend_radius if c.conn.external else 0.0),
         } for c in res.connectors],
+        # clipped to the case outline: the raw region reaches 1000 mm out so
+        # that any outline is guaranteed to be cut, which is useless to draw
         "side_openings": [{
             "ref": o.ref, "placement": o.placement, "side": o.side.value,
             "z": list(o.z), "reason": o.reason,
-            "outline": [list(c) for c in o.poly.exterior.coords],
+            "outline": _clipped_outline(o.poly, res),
         } for o in res.side_openings],
         "issues": [{"level": i.level, "code": i.code, "message": i.message,
                     "refs": i.refs} for i in issues],

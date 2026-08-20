@@ -70,7 +70,8 @@ const caseGroup = new THREE.Group();
 const corridorGroup = new THREE.Group();
 const panelGroup = new THREE.Group();
 const gizmoGroup = new THREE.Group();
-view.add(solidsGroup, caseGroup, corridorGroup, panelGroup, gizmoGroup);
+const openingGroup = new THREE.Group();
+view.add(solidsGroup, caseGroup, corridorGroup, panelGroup, gizmoGroup, openingGroup);
 
 const groupsByPlacement = new Map();   // id -> { group, meshes: [{mesh, style}] }
 
@@ -213,6 +214,26 @@ function buildPanels(resolved) {
     panelGroup.add(new THREE.Line(
       new THREE.BufferGeometry().setFromPoints(corners),
       new THREE.LineBasicMaterial({ color: 0x57c7ff, transparent: true, opacity: 0.45 })));
+  }
+}
+
+function buildSideOpenings(resolved) {
+  openingGroup.clear();
+  if (!$('chk-openings').checked) return;
+  for (const o of resolved.side_openings || []) {
+    if (!o.outline || o.outline.length < 3) continue;
+    const shape = shapeFromOutline(o.outline);
+    const top = o.z[1];
+    const face = new THREE.Mesh(
+      new THREE.ShapeGeometry(shape),
+      new THREE.MeshBasicMaterial({ color: 0xff9a4b, transparent: true, opacity: 0.16,
+                                    side: THREE.DoubleSide, depthWrite: false }));
+    face.position.z = top;
+    openingGroup.add(face);
+    const pts = o.outline.map(([x, y]) => new THREE.Vector3(x, y, top));
+    openingGroup.add(new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color: 0xff9a4b, transparent: true, opacity: 0.7 })));
   }
 }
 
@@ -386,6 +407,7 @@ async function doResolve() {
     buildSolids(resolved);
     buildCorridors(resolved);
     buildPanels(resolved);
+    buildSideOpenings(resolved);
     if (!drag) buildGizmo();
     renderIssues(resolved.issues);
     renderPlacements();
@@ -520,9 +542,116 @@ function renderSelection(force = false) {
     if (shellFor !== null || force) { box.innerHTML = '<div class="note">nothing selected</div>'; shellFor = null; }
     return;
   }
-  const key = `${pl.id}|${pl.parent ? 1 : 0}|${pl.on_panel || ''}`;
+  const key = [pl.id, pl.parent ? 1 : 0, pl.on_panel || '', pl.under_panel ? 1 : 0,
+    JSON.stringify(pl.sides || [])].join('|');
   if (force || shellFor !== key) { buildSelectionShell(pl); shellFor = key; }
   updateSelectionValues(pl);
+}
+
+const SIDES = ['+x', '-x', '+y', '-y'];
+const SIDE_LABEL = { '+x': 'right (+x)', '-x': 'left (-x)',
+                     '+y': 'back (+y)', '-y': 'front (-y)' };
+const POLICIES = ['per_connector', 'open_to_edge', 'open_side', 'none'];
+
+function connectorsOn(placementId, side) {
+  return (state.resolved?.connectors || [])
+    .filter((c) => c.placement === placementId && c.face === side);
+}
+
+/** The SidePolicy entry for one side, created on demand.
+ *  Field names must match hwcase.schema.SidePolicy exactly -- the Scene model
+ *  forbids extra keys, so a stray property would fail the whole save. */
+function sideEntry(pl, side, create = false) {
+  if (!Array.isArray(pl.sides)) pl.sides = [];
+  let e = pl.sides.find((s) => s.side === side);
+  if (!e && create) {
+    e = { side, cutout: 'per_connector', include: null, headroom: 2.0, span: 'full' };
+    pl.sides.push(e);
+  }
+  return e || null;
+}
+
+/** Tick/untick one port. The include list starts as null meaning "the external
+ *  ones", so the first tick has to materialise the current state before
+ *  changing it -- otherwise unticking one port would silently include every
+ *  internal header on that side. */
+function toggleConnector(pl, side, name, on) {
+  const e = sideEntry(pl, side, true);
+  if (e.include == null) {
+    e.include = connectorsOn(pl.id, side).filter((c) => c.included).map((c) => c.name);
+  }
+  const i = e.include.indexOf(name);
+  if (on && i < 0) e.include.push(name);
+  if (!on && i >= 0) e.include.splice(i, 1);
+}
+
+function sidesSection(pl) {
+  const rows = SIDES.map((side) => {
+    const conns = connectorsOn(pl.id, side);
+    if (!conns.length) return '';
+    const e = sideEntry(pl, side);
+    const policy = e ? e.cutout : 'per_connector';
+    const opts = POLICIES.map((p) =>
+      `<option value="${p}" ${policy === p ? 'selected' : ''}>${p}</option>`).join('');
+    const ports = conns.map((c) => `
+      <label class="port" title="${c.type}${c.external ? ', external' : ', internal wiring'}">
+        <input type="checkbox" data-side="${side}" data-conn="${c.name}"
+               ${c.included ? 'checked' : ''}>
+        <span class="${c.included ? '' : 'off'}">${c.name}</span>
+        <span class="ptype">${c.type}</span>
+      </label>`).join('');
+    const extra = policy === 'open_side' ? `
+      <div class="field"><label>head</label>
+        <input type="number" step="0.5" data-headroom="${side}"
+               value="${e ? e.headroom : 2.0}">
+        <select data-span="${side}">
+          <option value="full" ${e && e.span === 'full' ? 'selected' : ''}>full</option>
+          <option value="board" ${e && e.span === 'board' ? 'selected' : ''}>board</option>
+        </select></div>` : '';
+    return `<div class="side">
+      <div class="side-head"><span>${SIDE_LABEL[side]}</span>
+        <select data-policy="${side}">${opts}</select></div>
+      ${extra}<div class="ports">${ports}</div>
+    </div>`;
+  }).join('');
+  if (!rows) return '';
+  return `<h2>ports &amp; sides</h2>
+    <label class="port"><input type="checkbox" id="f-underpanel"
+      ${pl.under_panel ? 'checked' : ''}>
+      <span>under the faceplate (no window cut)</span></label>
+    ${rows}`;
+}
+
+function wireSides(pl) {
+  const box = $('selection');
+  box.querySelectorAll('[data-policy]').forEach((el) => {
+    el.onchange = () => {
+      sideEntry(pl, el.dataset.policy, true).cutout = el.value;
+      renderSelection(true);
+      scheduleResolve(0);
+    };
+  });
+  box.querySelectorAll('[data-conn]').forEach((el) => {
+    el.onchange = () => {
+      toggleConnector(pl, el.dataset.side, el.dataset.conn, el.checked);
+      renderSelection(true);
+      scheduleResolve(0);
+    };
+  });
+  box.querySelectorAll('[data-headroom]').forEach((el) => {
+    el.onchange = () => {
+      sideEntry(pl, el.dataset.headroom, true).headroom = parseFloat(el.value) || 0;
+      scheduleResolve(0);
+    };
+  });
+  box.querySelectorAll('[data-span]').forEach((el) => {
+    el.onchange = () => {
+      sideEntry(pl, el.dataset.span, true).span = el.value;
+      scheduleResolve(0);
+    };
+  });
+  const up = $('f-underpanel');
+  if (up) up.onchange = () => { pl.under_panel = up.checked; scheduleResolve(0); };
 }
 
 function buildSelectionShell(pl) {
@@ -563,6 +692,7 @@ function buildSelectionShell(pl) {
       <div class="field"><label>offset</label><input id="f-panelofs" type="number" step="0.5"></div>` : ''}`}
     <div class="note">${pl.locked ? 'locked &mdash; unlock it in the YAML to move it'
       : (attached ? `height comes from the mate &mdash; dragging moves <b>${movableRoot(pl.id) ? movableRoot(pl.id).id : pl.parent}</b> and everything mated to it` : '')}</div>
+    ${sidesSection(pl)}
   `;
 
   const num = (id, set) => {
@@ -592,6 +722,8 @@ function buildSelectionShell(pl) {
   };
   turn('b-ccw', 1);
   turn('b-cw', -1);
+
+  wireSides(pl);
 }
 
 function updateSelectionValues(pl) {
@@ -957,6 +1089,7 @@ $('btn-cw').onclick = () => turnSelection(-1);
 $('chk-case').onchange = () => ($('chk-case').checked ? refreshCase() : caseGroup.clear());
 $('chk-corridors').onchange = () => buildCorridors(state.resolved);
 $('chk-panels').onchange = () => buildPanels(state.resolved);
+$('chk-openings').onchange = () => buildSideOpenings(state.resolved);
 $('chk-grid').onchange = () => { grid.visible = axes.visible = $('chk-grid').checked; };
 $('scene-select').onchange = (ev) => loadScene(ev.target.value);
 

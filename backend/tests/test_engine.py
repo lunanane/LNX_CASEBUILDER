@@ -528,3 +528,47 @@ def test_under_panel_that_does_not_fit_is_an_error(lib):
     oled.under_panel = True            # but it is still flush with the panel
     issues = check(resolve(scene, lib), lib)
     assert any(i.code == "under_panel_collision" for i in issues)
+
+
+def test_side_policies_survive_a_save(tmp_path, lib):
+    """The editor writes SidePolicy objects straight into the scene; the model
+    forbids extra keys, so a stray field would fail the whole save."""
+    from hwcase import scenefile
+    from hwcase.schema import CutoutPolicy, Face, SidePolicy
+
+    path = tmp_path / "s.yaml"
+    path.write_text(SCENE.read_text(encoding="utf-8"), encoding="utf-8")
+    scene = load_scene(path)
+    pi = next(p for p in scene.placements if p.id == "pi")
+    pi.sides = [
+        SidePolicy(side=Face.ny, cutout=CutoutPolicy.open_side, headroom=3.0, span="board"),
+        SidePolicy(side=Face.px, cutout=CutoutPolicy.per_connector, include=["usb1"]),
+    ]
+    pi.under_panel = False
+    scenefile.save(scene, path)
+
+    back = next(p for p in load_scene(path).placements if p.id == "pi")
+    assert len(back.sides) == 2
+    ny = next(s for s in back.sides if s.side is Face.ny)
+    assert ny.cutout is CutoutPolicy.open_side
+    assert ny.headroom == pytest.approx(3.0)
+    assert ny.span == "board"
+    px = next(s for s in back.sides if s.side is Face.px)
+    assert px.include == ["usb1"]
+    resolve(load_scene(path), lib)      # and it still resolves
+
+
+def test_side_opening_outline_is_clipped_for_the_browser(lib):
+    """The raw region reaches 1000 mm out so it is guaranteed to cut any
+    outline; what the browser gets must be trimmed to the case."""
+    from hwcase.schema import CutoutPolicy, Face, SidePolicy
+
+    scene = load_scene(SCENE)
+    next(p for p in scene.placements if p.id == "pi").sides = [
+        SidePolicy(side=Face.ny, cutout=CutoutPolicy.open_side)]
+    res = resolve(scene, lib)
+    payload = scene_to_json(res, lib, [])
+    assert payload["side_openings"], "the opening should be reported"
+    xs = [p[0] for p in payload["side_openings"][0]["outline"]]
+    ys = [p[1] for p in payload["side_openings"][0]["outline"]]
+    assert max(xs) - min(xs) < 500 and max(ys) - min(ys) < 500
