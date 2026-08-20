@@ -505,6 +505,13 @@ class CaseSpec(Strict):
     #: material -- a ring floating in a hollow layer is an offcut, not a post
     support_rib: float = 4.0
 
+    #: Every internal lead has to be able to get from its board to the next
+    #: one. Whatever the interior strategy carves, the empty space around the
+    #: internal connectors is checked for connectivity, and a channel this wide
+    #: is cut wherever a board would otherwise be walled in on its own.
+    link_cables: bool = True
+    cable_channel: float = 6.0
+
     #: Material narrower than this snaps. Two cutouts that pass close to each
     #: other leave a sliver of plywood between them that will not survive being
     #: handled, let alone glued up -- so anything thinner is opened out and the

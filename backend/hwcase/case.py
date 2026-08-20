@@ -202,6 +202,13 @@ def _ribs(outer: Polygon, void: Polygon, spec: CaseSpec,
     return unary_union(keep) if keep else grid.difference(grid)
 
 
+def _pieces(geom) -> list[Polygon]:
+    """The separate polygons of a geometry, ignoring empties."""
+    if geom is None or geom.is_empty:
+        return []
+    return list(geom.geoms) if hasattr(geom, "geoms") else [geom]
+
+
 def _tie_loose_pieces(geom, outer: Polygon, spec: CaseSpec, notes: list[str],
                       must_keep: list[Polygon] | None = None):
     """Nothing may come off the cutting bed as a separate part.
@@ -219,7 +226,7 @@ def _tie_loose_pieces(geom, outer: Polygon, spec: CaseSpec, notes: list[str],
     it back would run a strip of plywood straight across the hardware, which is
     worse than losing a fragment of stiffener.
     """
-    pieces = list(geom.geoms) if hasattr(geom, "geoms") else ([geom] if not geom.is_empty else [])
+    pieces = _pieces(geom)
     if len(pieces) <= 1:
         return geom
 
@@ -301,6 +308,67 @@ def _case_screws(spec: CaseSpec, outer: Polygon, role: Role):
         holes.append(p.buffer(d / 2.0, quad_segs=24))
         notes.append(f"case bolt at ({cx:.1f}, {cy:.1f})")
     return holes, notes
+
+
+def _link_cable_void(res: Resolved, spec: CaseSpec, outer: Polygon, geom,
+                     slab: tuple[float, float], notes: list[str]):
+    """Make sure every internal lead can reach every other one.
+
+    The mirror image of `_tie_loose_pieces`. That one guarantees the MATERIAL
+    is all one piece so nothing falls off the cutting bed; this guarantees the
+    EMPTY SPACE is all one piece so no board ends up walled into its own pocket
+    with an I2C lead and nowhere to run it.
+
+    Which matters because the interior strategies disagree about this by
+    nature: `hollow` connects everything trivially, while `pocketed` cuts each
+    board its own recess and would happily leave them isolated. Rather than
+    special-casing each strategy, the void is checked after the fact and a
+    channel is cut wherever it is broken.
+    """
+    if not spec.link_cables or spec.cable_channel <= 0:
+        return geom
+
+    mouths = [(c.ref, Point(c.at[0], c.at[1])) for c in res.connectors
+              if not c.conn.external and c.included is not None
+              and z_overlap(c.corridor_z, slab) > 0]
+    # one board's worth of leads cannot be isolated from itself
+    if len({ref.split(".")[0] for ref, _ in mouths}) < 2:
+        return geom
+
+    void = outer.difference(geom)
+    parts = _pieces(void)
+    if not parts:
+        parts = []
+
+    reachable = None
+    channels: list[Polygon] = []
+    linked: list[str] = []
+    for ref, pt in mouths:
+        here = next((p for p in parts if p.intersects(pt.buffer(0.05))), None)
+        if here is None:
+            # The mouth is buried in solid material -- which happens whenever a
+            # strategy only opens up for external ports. Inventing a region to
+            # route from is not enough: it has to be cut as well, or the lead
+            # still has nowhere to emerge.
+            here = pt.buffer(spec.cable_channel / 2.0, quad_segs=16)
+            channels.append(here)
+            linked.append(ref)
+        if reachable is None:
+            reachable = here
+            continue
+        if here.intersects(reachable):
+            reachable = unary_union([reachable, here])
+            continue
+        a, b = nearest_points(here, reachable)
+        run = LineString([a, b]).buffer(spec.cable_channel / 2.0, cap_style=1)
+        channels.append(run)
+        reachable = unary_union([reachable, here, run])
+        linked.append(ref)
+
+    if not channels:
+        return geom
+    notes.append(f"cable channel to reach {', '.join(sorted(set(linked)))}")
+    return geom.difference(unary_union(channels))
 
 
 def _open_out_slivers(geom, spec: CaseSpec, notes: list[str]):
@@ -460,6 +528,9 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
         geom = geom.difference(unary_union(bolt_holes))
         notes += bolt_notes
 
+    # Cable routes are carved before the material check, so anything the
+    # carving strands can still be tied back.
+    geom = _link_cable_void(res, spec, outer, geom, slab, notes)
     geom = _tie_loose_pieces(geom, outer, spec, notes, boss_discs)
 
     if geom.is_empty:

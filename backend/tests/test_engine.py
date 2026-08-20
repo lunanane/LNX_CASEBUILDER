@@ -1984,13 +1984,22 @@ def test_every_case_bolt_lands_in_the_wall(demo):
 def test_opening_never_adds_material(demo):
     """Dilating back after eroding rounds off the inner end of a narrow slot,
     which was filling the tip of a 5 mm connector pocket with plywood. An
-    opening has to be a subset of what it started from."""
+    opening has to be a subset of what it started from.
+
+    Checked on the operation itself rather than by diffing two whole builds:
+    changing min_segment also changes where the cable channels get routed, so
+    two builds legitimately differ in ways this has nothing to do with.
+    """
+    from hwcase.case import _open_out_slivers
+
+    spec = demo.scene.case.model_copy(update={"min_segment": 4.0})
     raw = build(demo, demo.scene.case.model_copy(update={"min_segment": 0.0}))
-    cut = build(demo, demo.scene.case.model_copy(update={"min_segment": 4.0}))
-    for a, b in zip(raw.layers, cut.layers):
-        assert b.geom.area <= a.geom.area + 1e-6, f"layer {a.index} gained material"
-        assert b.geom.difference(a.geom).area < 1e-6, \
-            f"layer {a.index} put material somewhere new"
+    for layer in raw.layers:
+        opened = _open_out_slivers(layer.geom, spec, [])
+        assert opened.area <= layer.geom.area + 1e-6, \
+            f"layer {layer.index} gained material"
+        assert opened.difference(layer.geom).area < 1e-6, \
+            f"layer {layer.index} put material somewhere new"
 
 
 def test_opening_keeps_out_of_the_connector_pockets(demo):
@@ -2025,3 +2034,92 @@ def test_a_severed_stiffener_is_dropped_not_bridged(lib):
                 continue
             assert layer.geom.intersection(s.poly).area < s.poly.area * 0.02, \
                 f"layer {layer.index} has material sitting on {s.ref}"
+
+
+# --------------------------------------------------------------------------
+# no board may be walled in with its leads
+# --------------------------------------------------------------------------
+
+def _isolated_layers(model, res):
+    """Layers where the internal leads cannot all reach each other."""
+    from shapely.geometry import Point
+    from hwcase.geom import z_overlap
+
+    bad = []
+    for layer in model.layers:
+        slab = (layer.z0, layer.z1)
+        mouths = [(c.ref, Point(c.at[0], c.at[1])) for c in res.connectors
+                  if not c.conn.external and z_overlap(c.corridor_z, slab) > 0]
+        if len({r.split(".")[0] for r, _ in mouths}) < 2:
+            continue
+        void = model.outer.difference(layer.geom)
+        parts = _all_pieces(void)
+        where = {ref: next((i for i, p in enumerate(parts)
+                            if p.intersects(pt.buffer(0.05))), None)
+                 for ref, pt in mouths}
+        if len(set(where.values())) > 1:
+            bad.append(layer.index)
+    return bad
+
+
+@pytest.mark.parametrize("interior", ["pocketed", "hollow", "ribs", "grown"])
+def test_no_board_is_walled_in_with_its_leads(demo, interior):
+    """Every interior strategy has to leave the internal wiring connected. They
+    disagree about this by nature -- `hollow` connects everything for free while
+    `pocketed` cuts each board its own recess -- so the void is checked after
+    the fact rather than each strategy being special-cased."""
+    spec = demo.scene.case.model_copy(
+        update={"interior": interior, "link_cables": True})
+    assert _isolated_layers(build(demo, spec), demo) == []
+
+
+def test_pocketed_really_would_isolate_them(demo):
+    """The behaviour the linking exists to fix -- otherwise the test above
+    could be passing for the wrong reason."""
+    spec = demo.scene.case.model_copy(
+        update={"interior": "pocketed", "link_cables": False})
+    assert _isolated_layers(build(demo, spec), demo), \
+        "expected pocketed to strand some leads with linking off"
+
+
+def test_a_buried_mouth_is_cut_open(demo):
+    """A strategy that only opens up for external ports leaves an internal
+    socket embedded in solid plywood. Routing a channel *to* it is not enough;
+    the mouth itself has to be cut."""
+    from shapely.geometry import Point
+    from hwcase.geom import z_overlap
+
+    spec = demo.scene.case.model_copy(
+        update={"interior": "pocketed", "link_cables": True})
+    model = build(demo, spec)
+    checked = 0
+    for layer in model.layers:
+        slab = (layer.z0, layer.z1)
+        mouths = [c for c in demo.connectors
+                  if not c.conn.external and z_overlap(c.corridor_z, slab) > 0]
+        # Linking only has something to do where two boards meet. A layer
+        # holding one board's leads has nothing to connect them to, so it is
+        # left alone rather than having surprise holes punched in it.
+        if len({c.placement for c in mouths}) < 2:
+            continue
+        for c in mouths:
+            checked += 1
+            assert not layer.geom.contains(Point(c.at[0], c.at[1])), \
+                f"{c.ref} is buried in layer {layer.index}"
+    assert checked, "no layer had leads from two boards to check"
+
+
+def test_the_channel_is_as_wide_as_asked(demo):
+    def area(w):
+        spec = demo.scene.case.model_copy(
+            update={"interior": "pocketed", "link_cables": True, "cable_channel": w})
+        return sum(l.geom.area for l in build(demo, spec).layers)
+
+    assert area(12.0) < area(4.0), "a wider channel should remove more"
+
+
+def test_linking_can_be_turned_off(demo):
+    on = demo.scene.case.model_copy(update={"link_cables": True})
+    off = demo.scene.case.model_copy(update={"link_cables": False})
+    assert (sum(l.geom.area for l in build(demo, off).layers) >
+            sum(l.geom.area for l in build(demo, on).layers))

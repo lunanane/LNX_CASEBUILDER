@@ -353,6 +353,42 @@ Two details that matter and are tested:
 `support_boss`, `screw_clearance` and `screw_head` on the case spec set the post
 diameter, the slop on the through hole and the countersink.
 
+## Two connectivity guarantees
+
+Whatever the interior strategy carves, two things have to hold, and both are
+settled after the fact on the finished layer rather than being special-cased
+into each strategy.
+
+**The material is one piece.** Nothing may come off the cutting bed as a
+separate part. An island holding a board up — a boss — is tied back with a rib;
+anything else is a severed stiffener or boolean debris and is dropped, because
+bridging it would run a strip of plywood straight across the hardware.
+
+**The empty space is one piece.** Every internal lead must be able to reach
+every other one. The strategies disagree about this by nature: `hollow`
+connects everything for free, while `pocketed` gives each board its own recess
+and would happily wall it in with an I²C cable and nowhere to run it. So the
+void around the internal connectors is checked, and a `cable_channel`-wide
+groove is cut wherever it is broken — including cutting open a socket that
+ended up buried in solid material. `link_cables: false` turns it off.
+
+Measured on the demo scene, layers where the leads could not all reach each
+other:
+
+| interior | without linking | with |
+|---|---|---|
+| `pocketed` | 8 | **0** |
+| `hollow` | 1 | **0** |
+| `ribs` | 2 | **0** |
+| `grown` | 2 | **0** |
+
+## Material that would snap
+
+`min_segment` (4 mm by default, 0 to disable) opens out anything narrower than
+itself — two cutouts passing close together leave a thread of plywood that will
+not survive being handled, and merging them into one opening is both stronger
+and easier to cut.
+
 ## Coordinate conventions
 
 Part-local: X and Y in the board plane, +Z out of the component side, **z = 0 at
