@@ -32,7 +32,7 @@ import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 __all__ = ["CatalogEntry", "Catalog", "search"]
 

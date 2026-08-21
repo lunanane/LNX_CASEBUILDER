@@ -558,9 +558,12 @@ class Pattern(str, Enum):
     rule = "rule"
     #: a filled border following the region's edge
     frame = "frame"
+    #: lettering, in a single-stroke font -- see hwcase.hershey
+    text = "text"
 
 
 PATTERN_HELP = {
+    "text": "lettering, in a single-stroke font a laser can follow in one pass",
     "fins": "parallel fins -- the amplifier front-panel look",
     "slots": "rounded slots in rows, like a speaker grill",
     "rings": "concentric rings, for a speaker or a big knob",
@@ -593,8 +596,17 @@ class Engraving(Strict):
     #: because it changes whether the part still holds together.
     through: bool = False
 
-    #: text, when the pattern is a label
+    #: What a label says. Newlines start a new line.
     text: Optional[str] = None
+    #: Cap height in millimetres -- the dimension you measure on a finished
+    #: panel. Em size would make a "6 mm" label come out about 4 mm tall.
+    text_size: float = Field(6.0, gt=0.0, le=200.0)
+    #: which vendored stroke font: light or medium
+    font: str = "light"
+    text_align: str = "center"
+    line_spacing: float = Field(1.45, gt=0.0, le=6.0)
+    #: extra space between characters, mm; negative tightens
+    tracking: float = 0.0
 
     @property
     def bounds(self) -> tuple[float, float, float, float]:

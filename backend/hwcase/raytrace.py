@@ -37,12 +37,12 @@ is not much use.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
 import numpy as np
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import Polygon
 from shapely.ops import triangulate
 
 from .case import CaseModel, Layer

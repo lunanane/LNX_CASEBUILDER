@@ -1,0 +1,5 @@
+# Vendor data is not ours to reformat. The Hershey fonts are a fixed-width
+# text format and the CAD files are somebody else's exports; git rewriting
+# their line endings would be a silent modification of an upstream artefact.
+vendor/** -text
+web/vendor/** -text

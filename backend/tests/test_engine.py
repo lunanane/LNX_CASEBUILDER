@@ -2674,8 +2674,8 @@ def _engraved(*engravings):
 
 
 def test_every_pattern_draws_something():
-    """Six patterns, all of which have to produce marks inside their own box.
-    A pattern that silently produces nothing is worse than no pattern."""
+    """A pattern that silently produces nothing is worse than no pattern, so
+    every one of them has to mark the plate."""
     from shapely.geometry import box as shbox
 
     from hwcase.engrave import build_engraving
@@ -2684,15 +2684,36 @@ def test_every_pattern_draws_something():
     clip = shbox(-100, -60, 100, 60)
     for pattern in Pattern:
         e = Engraving(name=pattern.value, pattern=pattern,
-                      at=(0.0, 0.0), size=(80.0, 40.0), stroke=1.2, pitch=3.0)
+                      at=(0.0, 0.0), size=(80.0, 40.0), stroke=1.2, pitch=3.0,
+                      # the only pattern that needs to be told what to draw
+                      text="LABEL" if pattern is Pattern.text else None)
         g = build_engraving(e, clip)
         assert not g.is_empty, f"{pattern.value} drew nothing"
         assert g.area > 1.0
-        x0, y0, x1, y1 = g.bounds
-        # `size` has to mean what it says, or two engravings side by side
-        # silently overlap
-        assert x0 >= -40.001 and x1 <= 40.001
-        assert y0 >= -20.001 and y1 <= 20.001
+
+
+def test_a_pattern_stays_inside_the_box_it_was_given():
+    """`size` has to mean what it says, or two engravings placed side by side
+    silently overlap.
+
+    Text is the exception, and deliberately so: its size comes from text_size
+    in real millimetres, the box is only where it sits, and cropping a label
+    to a box somebody dragged would hide the problem rather than show it.
+    """
+    from shapely.geometry import box as shbox
+
+    from hwcase.engrave import build_engraving
+    from hwcase.schema import Engraving, Pattern
+
+    clip = shbox(-100, -60, 100, 60)
+    for pattern in Pattern:
+        if pattern is Pattern.text:
+            continue
+        e = Engraving(name=pattern.value, pattern=pattern,
+                      at=(0.0, 0.0), size=(80.0, 40.0), stroke=1.2, pitch=3.0)
+        x0, y0, x1, y1 = build_engraving(e, clip).bounds
+        assert x0 >= -40.001 and x1 <= 40.001, pattern.value
+        assert y0 >= -20.001 and y1 <= 20.001, pattern.value
 
 
 def test_an_engraving_is_clipped_to_the_plate():
@@ -3013,3 +3034,190 @@ def test_the_audit_catches_a_part_that_lies(lib, tmp_path):
     result = audit_part(part)
     assert result.checked
     assert any(f.kind == "outline" for f in result.findings)
+
+
+# ---------------------------------------------------------------------------
+# single-stroke lettering
+# ---------------------------------------------------------------------------
+
+def test_both_fonts_carry_a_full_ascii_set():
+    """A label that silently drops a character is engraved wrong, permanently."""
+    from hwcase.hershey import FONTS, load_font
+
+    for name in FONTS:
+        f = load_font(name)
+        for ch in ("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                   "abcdefghijklmnopqrstuvwxyz"
+                   "0123456789 .,:-+/()%#"):
+            assert ch in f.glyphs, f"{name} has no {ch!r}"
+
+
+def test_size_means_cap_height():
+    """Cap height is what you measure on a finished panel. Em size would make
+    a '6 mm' label come out about 4 mm tall, which is a lie about the one
+    dimension anyone checks."""
+    from hwcase.hershey import measure_text
+
+    for size in (3.0, 6.0, 12.0):
+        _w, h = measure_text("HEIGHT", size)
+        assert h == pytest.approx(size, abs=0.01)
+
+
+def test_a_label_is_centred_on_the_origin():
+    """`at` has to mean the middle of the label whatever it says.
+
+    The cap band in these fonts runs -9..+12, not symmetrically about zero, so
+    centring on the origin the glyph data happens to use put every label low.
+    """
+    from hwcase.hershey import text_polylines
+
+    for text in ("AB", "VOLUME", "8"):
+        pts = [p for stroke in text_polylines(text, 6.0) for p in stroke]
+        xs = [x for x, _ in pts]
+        ys = [y for _, y in pts]
+        assert (min(xs) + max(xs)) / 2 == pytest.approx(0.0, abs=0.01)
+        assert (min(ys) + max(ys)) / 2 == pytest.approx(0.0, abs=0.01)
+
+
+def test_the_cap_band_is_measured_not_assumed():
+    """Off letters that are flat top and bottom -- O and S overshoot by design
+    and would make every label sit slightly low."""
+    from hwcase.hershey import load_font
+
+    f = load_font("light")
+    assert f.cap_height == pytest.approx(21.0, abs=0.01)
+    h = f.glyph("H")
+    ys = [y for stroke in h.strokes for _, y in stroke]
+    assert max(ys) == pytest.approx(f.cap_top, abs=0.01)
+    assert min(ys) == pytest.approx(f.baseline, abs=0.01)
+
+
+def test_newlines_stack_and_stay_centred():
+    from hwcase.hershey import measure_text, text_polylines
+
+    _w1, h1 = measure_text("CH", 6.0)
+    _w2, h2 = measure_text("CH\nGAIN", 6.0)
+    assert h2 > h1 * 1.5, "a second line has to make it taller"
+
+    ys = [y for s in text_polylines("CH\nGAIN", 6.0) for _, y in s]
+    assert (min(ys) + max(ys)) / 2 == pytest.approx(0.0, abs=0.2)
+
+
+def test_an_unknown_character_does_not_take_the_label_with_it():
+    from hwcase.hershey import text_polylines
+
+    assert text_polylines("A中B", 6.0)      # still draws the A and the B
+    assert text_polylines("", 6.0) == []
+
+
+def test_alignment_moves_the_lines_not_the_block():
+    """Ragged-left and ragged-right have to differ, and neither may drift the
+    block off `at`."""
+    from hwcase.hershey import text_polylines
+
+    def spread(align):
+        pts = text_polylines("I\nWIDE", 6.0, align=align)
+        return [min(x for x, _ in s) for s in pts]
+
+    assert spread("left") != spread("right")
+    for align in ("left", "right", "center"):
+        xs = [x for s in text_polylines("I\nWIDE", 6.0, align=align) for x, _ in s]
+        assert (min(xs) + max(xs)) / 2 == pytest.approx(0.0, abs=0.6)
+
+
+def test_text_engraves_as_strokes():
+    from shapely.geometry import box as shbox
+
+    from hwcase.engrave import build_engraving
+    from hwcase.schema import Engraving
+
+    clip = shbox(-200, -100, 200, 100)
+    e = Engraving(name="label", pattern="text", text="VOLUME",
+                  text_size=6.0, stroke=0.8, at=(0.0, 0.0), size=(60.0, 20.0))
+    g = build_engraving(e, clip)
+    assert not g.is_empty
+
+    x0, y0, x1, y1 = g.bounds
+    # the stroke adds half its width all round the letters
+    assert y1 - y0 == pytest.approx(6.0 + 0.8, abs=0.05)
+    assert (x0 + x1) / 2 == pytest.approx(0.0, abs=0.05)
+
+
+def test_the_heavier_weight_is_heavier():
+    from shapely.geometry import box as shbox
+
+    from hwcase.engrave import build_engraving
+    from hwcase.schema import Engraving
+
+    clip = shbox(-200, -100, 200, 100)
+    common = dict(pattern="text", text="VOLUME", text_size=6.0, stroke=0.8,
+                  at=(0.0, 0.0), size=(60.0, 20.0))
+    light = build_engraving(Engraving(name="l", font="light", **common), clip)
+    medium = build_engraving(Engraving(name="m", font="medium", **common), clip)
+    assert medium.area > light.area
+
+
+def test_a_label_is_not_squashed_to_fit_its_box():
+    """Silently shrinking a 6 mm label because someone dragged a small box
+    would make the height -- the one number you measure -- untrue."""
+    from shapely.geometry import box as shbox
+
+    from hwcase.engrave import build_engraving
+    from hwcase.schema import Engraving
+
+    clip = shbox(-500, -500, 500, 500)
+    e = Engraving(name="big", pattern="text", text="MASTER VOLUME",
+                  text_size=9.0, stroke=0.8, at=(0.0, 0.0), size=(20.0, 8.0))
+    g = build_engraving(e, clip)
+    x0, _y0, x1, y1 = g.bounds
+    assert x1 - x0 > 20.0, "the label kept its real size"
+    assert y1 - _y0 == pytest.approx(9.0 + 0.8, abs=0.05)
+
+
+def test_a_label_that_outgrew_its_box_is_reported(lib):
+    """It will be trimmed by the edge of the plate instead, which is worth
+    hearing about before the cut rather than after."""
+    from hwcase.schema import Engraving
+
+    scene = load_scene(SCENE)
+    scene.engravings = [Engraving(
+        name="too big", pattern="text", text="MASTER VOLUME", text_size=9.0,
+        at=(0.0, -30.0), size=(30.0, 12.0))]
+    model = build(resolve(scene, lib))
+    assert any("bigger than" in n for n in model.layers[-1].notes)
+
+
+def test_text_reaches_the_exporter_as_an_engrave_pass(lib):
+    """Lettering is a mark, not a cut -- same as every other pattern."""
+    from hwcase.schema import Engraving
+
+    scene = load_scene(SCENE)
+    # (0, 45) is solid lid on the fixture; the middle of the plate is mostly
+    # the HyperPixel window, and a label there is clipped away to nothing
+    scene.engravings = [Engraving(name="lbl", pattern="text", text="HI",
+                                  text_size=5.0, at=(0.0, 45.0),
+                                  size=(30.0, 10.0))]
+    plain = build(resolve(load_scene(SCENE), lib))
+    marked = build(resolve(scene, lib))
+
+    assert marked.layers[-1].geom.area == pytest.approx(
+        plain.layers[-1].geom.area, abs=1e-6)
+    svg = to_svg(marked)
+    assert 'data-role="engrave"' in svg
+
+
+def test_a_blank_label_and_a_misplaced_one_read_differently(lib):
+    """Telling somebody their label is off the edge of the plate when it is
+    actually empty sends them to look in the wrong place."""
+    from hwcase.schema import Engraving
+
+    scene = load_scene(SCENE)
+    scene.engravings = [
+        Engraving(name="blank", pattern="text", text="",
+                  at=(0.0, 45.0), size=(30.0, 10.0)),
+        Engraving(name="away", pattern="rule",
+                  at=(9000.0, 9000.0), size=(30.0, 10.0)),
+    ]
+    notes = build(resolve(scene, lib)).layers[-1].notes
+    assert any("'blank' has no text in it" in n for n in notes)
+    assert any("'away' falls outside the lid" in n for n in notes)

@@ -32,6 +32,7 @@ backend/
     scene.py      mate solver + the checks (collision, access, exposure, clearance)
     case.py       scene -> stack of slabs
     engrave.py    front-panel decoration, as a pass the cutter keeps separate
+    hershey.py    single-stroke lettering for those decorations
     measure.py    read geometry out of vendor CAD -- the one place that does
     catalog.py    search Adafruit's live product feed
     ingest.py     turn a catalogue hit into a measured draft part
@@ -53,6 +54,7 @@ tools/
   measure_cad.py  read exact dimensions + z profiles out of those meshes
 vendor/           downloaded datasheets and CAD (not authored here)
 web/vendor/hdri/  three CC0 environments from Poly Haven (CREDITS.json)
+vendor/fonts/     the Hershey stroke fonts (public domain, 1967)
 ```
 
 ## Run the editor
@@ -445,11 +447,40 @@ Mixing them up is how a panel ends up with a speaker grill sawn clean out of it,
 so engraving lives in its own group in the SVG (blue, titled *do not cut*) and
 its own `_ENGRAVE` layer in the DXF, never merged with the outline.
 
-Six patterns, from the **look** pane: `fins` (the amplifier front-panel look),
-`slots` (a speaker grill, offset row to row — a square grid looks like a
-spreadsheet), `rings`, `hex`, `rule` for separating groups of controls, and
-`frame`. Each carries a preset that looks right without fiddling, and switching
-pattern brings its preset with it, so a hex mesh does not inherit fin spacing.
+Seven patterns, from the **look** pane: `text` for labelling, `fins` (the
+amplifier front-panel look), `slots` (a speaker grill, offset row to row — a
+square grid looks like a spreadsheet), `rings`, `hex`, `rule` for separating
+groups of controls, and `frame`. Each carries a preset that looks right without
+fiddling, and switching pattern brings its preset with it, so a hex mesh does
+not inherit fin spacing.
+
+### Labels
+
+`text` uses a **stroke** font, not an outline one. A normal font describes the
+edge of a letter, which a laser then has to fill — slow, and at label size the
+fill closes up into a blob. A stroke font describes the path down the middle of
+each letter, which is exactly what an engraving head wants: one fast pass, and a
+3 mm character that is still legible.
+
+The Hershey fonts have been the answer to this since 1967. They are public
+domain, they were drawn for plotters, and two weights are vendored in
+`vendor/fonts/`: `futural` (light) for small labels and `futuram` (medium) for
+anything read across a room.
+
+Two things about the sizing are deliberate:
+
+- **`height` is cap height in millimetres**, not em size. It is the dimension
+  you actually measure on a finished panel; em size would make a "6 mm" label
+  come out about 4 mm tall.
+- **a label is never scaled to fit its box.** The box is where it sits, not how
+  big it is. Squashing a 6 mm label because someone dragged a small box would
+  make the one number anyone checks untrue — so it overhangs instead, and says
+  by how much.
+
+Newlines start a new line, alignment is on the margins, and the block is centred
+on its *ink* rather than on its advance width, so `at` means the middle of what
+you can see. A character the font does not have is skipped rather than replaced
+with a box: a tofu glyph engraved into a faceplate is permanent.
 
 Marks are clipped to the lid: a grill that runs off the edge of the plate is not
 a grill, it is a row of nicks in the outline, and one that misses the plate
@@ -597,13 +628,9 @@ Next:
    the same slab stack.
 5. **Cable routing** — currently a keepout distance; wants actual routes with
    fixed STEMMA QT cable lengths (50/100/200 mm) as a constraint.
-6. **Text engraving** — the pattern set has no labels in it yet, which is the
-   one decoration every panel actually needs. Wants a vectorised font so a
-   label is polygons like everything else, rather than a font dependency at
-   cut time.
-7. **More vendors in the catalogue** — Adafruit publish a product feed and a
+6. **More vendors in the catalogue** — Adafruit publish a product feed and a
    CAD repository, which is why they went first. Pimoroni, SparkFun and Seeed
    would each need their own adapter behind the same search box.
-8. **Identifying what an imported volume is.** An import knows a box is there
+7. **Identifying what an imported volume is.** An import knows a box is there
    and not that it is a STEMMA QT socket. Matching against a library of known
    connector footprints would turn most drafts into finished parts.

@@ -23,7 +23,7 @@ import math
 from typing import Optional
 
 from shapely.affinity import rotate, translate
-from shapely.geometry import LineString, MultiPolygon, Point, Polygon, box
+from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import unary_union
 
 from .schema import Engraving, Pattern
@@ -127,6 +127,35 @@ def _rule(w: float, h: float, e: Engraving) -> list[Polygon]:
     return [_cap(line, e.stroke, e.round_ends)]
 
 
+def _text(w: float, h: float, e: Engraving) -> list[Polygon]:
+    """Lettering, stroked to the engraving width.
+
+    A stroke font, not an outline one: the laser follows the centre line of
+    each letter in a single pass. An outline font would have to be filled, and
+    at label size the fill closes up into a blob.
+
+    The label is NOT scaled to fit the region -- `text_size` is a real cap
+    height in millimetres, and silently shrinking a 6 mm label to 4 mm because
+    the box was drawn small would make the one dimension anyone measures a lie.
+    A label wider than its box is clipped, and says so.
+    """
+    from .hershey import text_polylines
+
+    if not e.text:
+        return []
+
+    strokes = text_polylines(e.text, size=e.text_size, font=e.font,
+                             tracking=e.tracking,
+                             line_spacing=e.line_spacing,
+                             align=e.text_align)
+    out = []
+    for stroke in strokes:
+        if len(stroke) < 2:
+            continue
+        out.append(_cap(LineString(stroke), e.stroke, True))
+    return out
+
+
 def _frame(w: float, h: float, e: Engraving) -> list[Polygon]:
     rect = box(-w / 2, -h / 2, w / 2, h / 2)
     return [_cap(LineString(rect.exterior), e.stroke, False)]
@@ -139,6 +168,7 @@ _BUILDERS = {
     Pattern.hex: _hex,
     Pattern.rule: _rule,
     Pattern.frame: _frame,
+    Pattern.text: _text,
 }
 
 
@@ -162,8 +192,12 @@ def build_engraving(e: Engraving, clip: Optional[Polygon] = None):
         return Polygon()
 
     geom = unary_union(marks)
-    # keep the pattern inside its own box, so `size` means what it says
-    geom = geom.intersection(box(-w / 2, -h / 2, w / 2, h / 2))
+    if Pattern(e.pattern) is not Pattern.text:
+        # Keep a pattern inside its own box, so `size` means what it says. Not
+        # text: its size comes from `text_size`, the box is just where it sits,
+        # and cropping a label to a box somebody dragged would hide the problem
+        # instead of showing it.
+        geom = geom.intersection(box(-w / 2, -h / 2, w / 2, h / 2))
 
     if e.rotation:
         geom = rotate(geom, e.rotation, origin=(0, 0), use_radians=False)

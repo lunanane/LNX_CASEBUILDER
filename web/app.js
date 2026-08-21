@@ -647,6 +647,8 @@ async function refreshCase() {
     });
     buildCase(state.caseModel);
     renderCaseScrews();
+    // the build is the only thing that knows a label outgrew its box
+    renderEngravePanel();
   } catch (err) {
     console.warn('case build failed', err);
   }
@@ -2121,12 +2123,18 @@ Anything thinner is opened out, because a 1 mm thread of plywood snaps the
 first time it is handled.</p>
 
 <h3>decorating the panel</h3>
-<p>The <b>look</b> pane engraves the lid: fins, grills, rings, hex mesh, rules
-and frames. Engraving is a <i>separate pass</i> &mdash; blue in the SVG, its own
+<p>The <b>look</b> pane engraves the lid: labels, fins, grills, rings, hex
+mesh, rules and frames. Engraving is a <i>separate pass</i> &mdash; blue in the SVG, its own
 DXF layer, titled &ldquo;do not cut&rdquo; &mdash; because a laser that runs a
 grill as a cut hands you a faceplate with the middle missing. If you actually
 want it cut through there is a switch for that, and you are on your own for
 whether the panel still holds together.</p>
+<p>Labels use a single-stroke font, so the laser follows the centre line of
+each letter in one pass instead of filling an outline &mdash; which at label
+size closes up into a blob. The <b>height</b> you set is cap height in real
+millimetres, the dimension you measure on the finished panel, and a label is
+never squashed to fit the box it sits in: it overhangs and tells you by how
+much, because shrinking it would make that number untrue.</p>
 <p>The same pane lights the preview and, if Mitsuba is installed, traces a
 finished photograph using the same environment, so the picture looks like the
 thing you were designing.</p>
@@ -2411,6 +2419,7 @@ async function shootPhotograph() {
 // with a warning on it rather than a subtle difference in a dropdown.
 
 const PATTERNS = {
+  text: 'lettering, in a single-stroke font a laser follows in one pass',
   fins: 'parallel fins — the amplifier front-panel look',
   slots: 'rounded slots in rows, like a speaker grill',
   rings: 'concentric rings, for a speaker or a big knob',
@@ -2423,6 +2432,7 @@ const PATTERNS = {
 // need three adjustments before it stops looking like a test pattern is a
 // grill nobody uses.
 const ENGRAVE_PRESETS = {
+  text: { stroke: 0.8, pitch: 3.0, size: [60, 12], round_ends: true },
   fins: { stroke: 1.2, pitch: 3.0, size: [70, 34], round_ends: true },
   slots: { stroke: 1.6, pitch: 2.2, size: [64, 28], round_ends: true },
   rings: { stroke: 0.8, pitch: 2.4, size: [40, 40], round_ends: true },
@@ -2453,6 +2463,18 @@ function addEngraving(pattern = 'fins') {
 function renderEngravePanel() {
   const box = $('engrave-panel');
   if (!box) return;
+
+  // A rebuild triggered by something else -- dragging a board, say -- must not
+  // wipe out a label somebody is halfway through typing, because free text
+  // only commits on blur. Selects and number fields have already committed by
+  // the time they fire, so those redraw normally: skipping them would swallow
+  // the very warning the change was supposed to produce.
+  const focused = document.activeElement;
+  const typing = focused && box.contains(focused) &&
+    (focused.tagName === 'TEXTAREA' ||
+     (focused.tagName === 'INPUT' && focused.type === 'text'));
+  if (typing) return;
+
   const list = engravings();
 
   box.innerHTML = `
@@ -2492,20 +2514,45 @@ function renderEngravePanel() {
       <div class="field"><label>centre</label>
         <input type="number" class="eng-x" step="1" value="${e.at[0]}">
         <input type="number" class="eng-y" step="1" value="${e.at[1]}"></div>
-      <div class="field"><label>size</label>
+      <div class="field"><label title="${e.pattern === 'text'
+          ? 'where the label sits. A label is NOT scaled to fit this -- its height is set below, in real millimetres'
+          : 'the area the pattern fills'}">${e.pattern === 'text' ? 'box' : 'size'}</label>
         <input type="number" class="eng-w" step="1" min="1" value="${e.size[0]}">
         <input type="number" class="eng-h" step="1" min="1" value="${e.size[1]}"></div>
+      ${e.pattern === 'text' ? `
+      <div class="field"><label title="what the label says; enter starts a new line">says</label>
+        <textarea class="eng-text" rows="2"
+          placeholder="VOLUME">${escapeHtml(e.text ?? '')}</textarea></div>
+      <div class="field"><label title="cap height -- the dimension you measure on the finished panel">height</label>
+        <input type="number" class="eng-size" step="0.5" min="1" value="${e.text_size ?? 6}"><span class="unit">mm</span></div>
+      <div class="field"><label>weight</label>
+        <select class="eng-font">
+          <option value="light"${(e.font ?? 'light') === 'light' ? ' selected' : ''}>light</option>
+          <option value="medium"${e.font === 'medium' ? ' selected' : ''}>medium</option>
+        </select>
+        <select class="eng-align">
+          <option value="center"${(e.text_align ?? 'center') === 'center' ? ' selected' : ''}>centred</option>
+          <option value="left"${e.text_align === 'left' ? ' selected' : ''}>left</option>
+          <option value="right"${e.text_align === 'right' ? ' selected' : ''}>right</option>
+        </select></div>
+      <div class="field"><label title="width of the stroke the laser follows">stroke</label>
+        <input type="number" class="eng-stroke" step="0.1" min="0.1" value="${e.stroke}">
+        <label title="extra space between letters; negative tightens">track</label>
+        <input type="number" class="eng-track" step="0.1" value="${e.tracking ?? 0}"></div>
+      ` : `
       <div class="field"><label title="width of one mark">stroke</label>
         <input type="number" class="eng-stroke" step="0.1" min="0.1" value="${e.stroke}">
         <label title="gap between marks">pitch</label>
         <input type="number" class="eng-pitch" step="0.1" min="0.1" value="${e.pitch}"></div>
+      `}
       <div class="field"><label>angle</label>
         <input type="number" class="eng-rot" step="15" value="${e.rotation}"><span class="unit">deg</span></div>
-      <label class="check"><input type="checkbox" class="eng-round"${e.round_ends ? ' checked' : ''}> rounded ends</label>
+      ${e.pattern === 'text' ? '' : `<label class="check"><input type="checkbox" class="eng-round"${e.round_ends ? ' checked' : ''}> rounded ends</label>`}
       <label class="check danger"><input type="checkbox" class="eng-through"${e.through ? ' checked' : ''}>
         cut right through</label>
       ${e.through ? `<p class="note warn">This one is cut, not engraved — it
         comes out of the plate. Check the panel still holds together.</p>` : ''}
+      ${engraveWarning(e)}
     `;
 
     const num = (sel) => parseFloat(el.querySelector(sel).value);
@@ -2533,15 +2580,51 @@ function renderEngravePanel() {
     el.querySelector('.eng-w').onchange = () => set(() => { e.size = [num('.eng-w'), e.size[1]]; });
     el.querySelector('.eng-h').onchange = () => set(() => { e.size = [e.size[0], num('.eng-h')]; });
     el.querySelector('.eng-stroke').onchange = () => set(() => { e.stroke = num('.eng-stroke'); });
-    el.querySelector('.eng-pitch').onchange = () => set(() => { e.pitch = num('.eng-pitch'); });
+    el.querySelector('.eng-pitch')?.addEventListener('change',
+      () => set(() => { e.pitch = num('.eng-pitch'); }));
+
+    // Text: retyping a label on every keystroke would re-solve the whole case
+    // per character, so it commits on blur.
+    el.querySelector('.eng-text')?.addEventListener('change', (ev) => {
+      set(() => { e.text = ev.target.value; });
+    });
+    el.querySelector('.eng-size')?.addEventListener('change',
+      () => set(() => { e.text_size = num('.eng-size'); }));
+    el.querySelector('.eng-font')?.addEventListener('change', (ev) => {
+      set(() => { e.font = ev.target.value; });
+    });
+    el.querySelector('.eng-align')?.addEventListener('change', (ev) => {
+      set(() => { e.text_align = ev.target.value; });
+    });
+    el.querySelector('.eng-track')?.addEventListener('change',
+      () => set(() => { e.tracking = num('.eng-track'); }));
     el.querySelector('.eng-rot').onchange = () => set(() => { e.rotation = num('.eng-rot'); });
-    el.querySelector('.eng-round').onchange = (ev) => set(() => { e.round_ends = ev.target.checked; });
+    el.querySelector('.eng-round')?.addEventListener('change',
+      (ev) => set(() => { e.round_ends = ev.target.checked; }));
     el.querySelector('.eng-through').onchange = (ev) => {
       set(() => { e.through = ev.target.checked; });
       renderEngravePanel();
     };
     holder.appendChild(el);
   });
+}
+
+/** Anything the build said about this engraving that is worth repeating.
+ *
+ *  A label is not scaled to fit its box -- the height you set is a real cap
+ *  height in millimetres -- so it can outgrow the box and get trimmed by the
+ *  edge of the plate instead. The build notices; this is where you see it.
+ */
+function engraveWarning(e) {
+  for (const layer of state.caseModel?.layers ?? []) {
+    for (const n of layer.notes ?? []) {
+      if (n.includes(`'${e.name}'`) &&
+          (n.includes('bigger than') || n.includes('falls outside'))) {
+        return `<p class="note warn">${escapeHtml(n)}</p>`;
+      }
+    }
+  }
+  return '';
 }
 
 /** Draw the marks on the lid, so you can see them without exporting. */

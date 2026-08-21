@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Iterable
 
 from shapely.affinity import translate
-from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry import Polygon
 
 from .case import CaseModel, Layer, kerf_compensated
 from .library import PartLibrary

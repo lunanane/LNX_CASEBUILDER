@@ -27,8 +27,8 @@ from shapely.geometry import box as shapely_box
 from shapely.ops import nearest_points
 
 from .geom import outline_polygon, rounded_rect, z_overlap
-from .schema import (CaseScrews, CaseSpec, Interior, Material, Support,
-                     VolumeKind)
+from .schema import (CaseScrews, CaseSpec, Interior, Material, Pattern,
+                     Support, VolumeKind)
 from .scene import Resolved
 
 Role = Literal["floor", "body", "lid"]
@@ -175,12 +175,31 @@ def _apply_engravings(res: Resolved, layers: list[Layer]) -> None:
     for e in engravings:
         g = build_engraving(e, clip=lid.geom)
         if g.is_empty:
-            lid.notes.append(f"engraving {e.name!r} falls outside the lid")
+            # Two different problems, and telling somebody their label is off
+            # the edge of the plate when it is actually blank sends them to
+            # look in the wrong place.
+            if e.pattern == Pattern.text and not (e.text or "").strip():
+                lid.notes.append(f"engraving {e.name!r} has no text in it")
+            else:
+                lid.notes.append(f"engraving {e.name!r} falls outside the lid")
             continue
         (cuts if e.through else marks).append(g)
         lid.notes.append(
             f"{'cut-through' if e.through else 'engraved'} {e.pattern.value}"
             f" {e.name!r}")
+
+        # Lettering is not cropped to the box it sits in -- text_size is a real
+        # cap height, and shrinking a 6 mm label because someone dragged a
+        # small box would make the one dimension anyone measures a lie. So the
+        # label can overhang, and when it does that is worth saying: it is
+        # about to be trimmed by the edge of the plate instead.
+        x0, y0, x1, y1 = e.bounds
+        gx0, gy0, gx1, gy1 = g.bounds
+        over = max(x0 - gx0, gx1 - x1, y0 - gy0, gy1 - y1)
+        if over > 0.5:
+            lid.notes.append(
+                f"{e.name!r} is {over:.1f} mm bigger than the "
+                f"{e.size[0]:.0f} x {e.size[1]:.0f} mm box it sits in")
 
     if marks:
         lid.engrave = unary_union(marks)

@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from .catalog import CAD_REPO, USER_AGENT, Catalog, CatalogEntry, shared
+from .catalog import CAD_REPO, USER_AGENT, CatalogEntry
 from .measure import Body, HoleGroup, bodies, step_holes
 
 __all__ = ["CadFile", "Draft", "cad_files", "download_cad", "draft_part",

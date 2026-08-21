@@ -321,3 +321,11 @@ body:not(.rendering) .sunctl { opacity: .35; }
   flex: 1; background: var(--panel-2); color: var(--fg);
   border: 1px solid var(--line); border-radius: 3px; padding: 2px 5px; font: inherit;
 }
+
+
+#engrave-panel textarea {
+  flex: 1; min-width: 0; resize: vertical; font: inherit;
+  background: var(--panel-2); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 3px; padding: 2px 5px;
+}
+#engrave-panel .eng-font, #engrave-panel .eng-align { width: auto; flex: 1; }

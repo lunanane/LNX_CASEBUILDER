@@ -8,3 +8,6 @@ node_modules/
 
 # derived caches: rebuilt from the vendor APIs on demand
 vendor/catalog/
+
+# session state, not source: a lock naming a PID belongs to one machine
+.claude/scheduled_tasks.lock
