@@ -1,118 +1,127 @@
 #!/usr/bin/env python3
-"""Read exact dimensions out of vendor CAD meshes.
+"""Read exact dimensions out of vendor CAD.
 
-Vendor STL/STEP files are the closest thing we have to calipers without owning
-the part. This reads a mesh, normalises it into our part frame (origin at the
-outline's min corner, z = 0 at the PCB bottom face), and prints:
+A thin front end onto `hwcase.measure`, which is where the actual work lives --
+so a part measured at this prompt and a part imported through the editor's
+search box go through identical code, and neither can quietly drift from the
+other.
 
-  * the overall bounding box
-  * a z profile: how wide the part is at each height, which is exactly the
-    question a layered case asks
-  * a first-cut `volumes:` block you can paste into a part YAML
+    python tools/measure_cad.py "vendor/cad/adafruit/4741/*.stl"
+    python tools/measure_cad.py --bands vendor/cad/adafruit/3954/*.stl
+    python tools/measure_cad.py --yaml vendor/cad/adafruit/5752/*.stl
 
-    python tools/measure_cad.py vendor/cad/adafruit/3954/*.stl
-    python tools/measure_cad.py --band 0.5 vendor/cad/adafruit/5752/*.stl
+By default it lists the model's **bodies**: the connected shells it is made of.
+That is almost always the question you actually have -- "what objects are on
+this board and where" -- and it is the one thing z-band slicing gets wrong,
+because a band's bounding box merges everything at that height. Two connectors
+on opposite edges of the 1.5" OLED came back as one 34 mm strip across the
+middle of the display, and a display was then modelled to fit it.
 
-STEP is read only if `cadquery`/`build123d` (OCP) is installed; STL always
-works via trimesh, and for a bounding-box-and-profile job STL is plenty.
+`--bands` keeps the old vertical profile, which is still the right tool for
+"how tall is this thing at each height".
 """
 
 from __future__ import annotations
 
 import argparse
+import glob
 import sys
 from pathlib import Path
 
-import numpy as np
-import trimesh
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "backend"))
+
+from hwcase.measure import (bodies, feature_stack, load_points,  # noqa: E402
+                            measure, to_yaml_block, z_bands)
 
 
-def load(path: Path):
-    if path.suffix.lower() in (".step", ".stp"):
-        try:
-            import cadquery as cq  # noqa: F401
-        except ImportError:
-            raise SystemExit(
-                f"{path.name}: reading STEP needs `pip install cadquery`; "
-                f"use the .stl next to it instead")
-        import cadquery as cq
-        shape = cq.importers.importStep(str(path))
-        verts = np.array([v.toTuple() for v in shape.vertices().vals()])
-        return trimesh.PointCloud(verts)
-    mesh = trimesh.load_mesh(str(path))
-    if isinstance(mesh, trimesh.Scene):
-        mesh = trimesh.util.concatenate(list(mesh.geometry.values()))
-    return mesh
-
-
-def z_profile(mesh, band: float) -> list[tuple[float, float, float, float, int]]:
-    """Per z band: (z0, z1, x extent, y extent, vertex count)."""
-    v = np.asarray(mesh.vertices)
-    z0, z1 = v[:, 2].min(), v[:, 2].max()
-    out = []
-    z = z0
-    while z < z1 - 1e-9:
-        top = min(z + band, z1)
-        sel = v[(v[:, 2] >= z - 1e-9) & (v[:, 2] <= top + 1e-9)]
-        if len(sel):
-            out.append((z, top,
-                        float(sel[:, 0].max() - sel[:, 0].min()),
-                        float(sel[:, 1].max() - sel[:, 1].min()),
-                        len(sel)))
-        else:
-            out.append((z, top, 0.0, 0.0, 0))
-        z = top
-    return out
-
-
-def report(path: Path, band: float, pcb_thickness: float | None) -> None:
-    mesh = load(path)
-    v = np.asarray(mesh.vertices)
-    lo, hi = v.min(axis=0), v.max(axis=0)
-    size = hi - lo
-
+def report_bodies(path: Path, limit: int, min_footprint: float) -> None:
+    found = bodies(path, min_footprint=min_footprint)
     print(f"\n=== {path.name}")
-    print(f"  raw bbox   x {lo[0]:8.3f}..{hi[0]:8.3f}   "
-          f"y {lo[1]:8.3f}..{hi[1]:8.3f}   z {lo[2]:8.3f}..{hi[2]:8.3f}")
-    print(f"  size       {size[0]:.3f} x {size[1]:.3f} x {size[2]:.3f} mm")
-    print(f"  vertices   {len(v)}")
+    if not found:
+        print("  no geometry")
+        return
 
-    prof = z_profile(mesh, band)
-    print(f"\n  z profile (band {band} mm, z relative to the model's own zero):")
+    pcb = found[0]
+    print(f"  {len(found)} connected bodies; largest is "
+          f"{pcb.size[0]:.2f} x {pcb.size[1]:.2f} x {pcb.size[2]:.2f} mm")
+    print(f"  {'footprint':>10} {'size (mm)':>26}  {'z (mm)':>16}   position")
+    for b in found[:limit]:
+        w, d, h = b.size
+        print(f"  {b.footprint:10.1f} {w:8.2f} x{d:7.2f} x{h:6.2f}  "
+              f"{b.z0:7.2f}..{b.z1:7.2f}   "
+              f"x {b.x0:7.2f}..{b.x1:7.2f}  y {b.y0:7.2f}..{b.y1:7.2f}")
+    if len(found) > limit:
+        rest = found[limit:]
+        tallest = max(r.size[2] for r in rest)
+        print(f"  ... and {len(rest)} smaller bodies, tallest {tallest:.2f} mm "
+              f"(--limit to see more)")
+
+
+def report_bands(path: Path, band: float) -> None:
+    pts = load_points(path)
+    print(f"\n=== {path.name}  (z bands of {band} mm)")
     print(f"  {'z0':>8} {'z1':>8} {'x ext':>8} {'y ext':>8}  {'verts':>7}")
-    for z0, z1, xe, ye, n in prof:
-        bar = "#" * min(40, int(max(xe, ye) / 2))
-        print(f"  {z0:8.2f} {z1:8.2f} {xe:8.2f} {ye:8.2f}  {n:7d}  {bar}")
+    for b in z_bands(pts, band):
+        bar = "#" * min(40, int(max(b.width, b.depth) / 2))
+        print(f"  {b.z0:8.2f} {b.z1:8.2f} {b.width:8.2f} {b.depth:8.2f}  "
+              f"{b.count:7d}  {bar}")
 
-    # widest band = the board itself; use it as the outline
-    widest = max(prof, key=lambda p: p[2] * p[3])
-    print(f"\n  widest band  z {widest[0]:.2f}..{widest[1]:.2f}  "
-          f"{widest[2]:.2f} x {widest[3]:.2f} mm  <- likely the PCB outline")
+    print("\n  steps (bands merged where the footprint stops moving):")
+    for s in feature_stack(pts, band=band):
+        w, d, h = s.size
+        print(f"  z {s.z0:7.2f}..{s.z1:7.2f}  {w:7.2f} x {d:7.2f} x {h:6.2f}")
 
-    print("\n  suggested YAML (origin: min, z=0 at the model's zero):")
+
+def report_yaml(path: Path) -> None:
+    m = measure(path)
+    print(f"\n=== {path.name}")
+    print(f"    # {len(m.bodies)} bodies, board {m.pcb_thickness} mm thick")
     print(f"    outline:")
     print(f"      type: rect")
-    print(f"      size: [{size[0]:.2f}, {size[1]:.2f}]")
+    print(f"      size: [{m.size[0]:.2f}, {m.size[1]:.2f}]")
     print(f"      origin: min")
-    if pcb_thickness:
-        print(f"    pcb_thickness: {pcb_thickness}")
-    print(f"    volumes:")
-    print(f"      - name: envelope")
-    print(f"        kind: body")
-    print(f"        at: [{size[0] / 2:.2f}, {size[1] / 2:.2f}]")
-    print(f"        size: [{size[0]:.2f}, {size[1]:.2f}]")
-    print(f"        z: [{0.0:.2f}, {size[2]:.2f}]")
-    print(f"        src: {{confidence: datasheet, note: \"from {path.name}\"}}")
+    if m.pcb_thickness:
+        print(f"    pcb_thickness: {m.pcb_thickness}")
+    print(to_yaml_block(m))
+    for note in m.notes:
+        print(f"    # {note}")
+    for g in m.holes:
+        print(f"    # holes: {len(g.centres)} x {g.diameter:.2f} mm "
+              f"({g.screw or 'unknown thread'})")
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("files", nargs="+")
-    ap.add_argument("--band", type=float, default=1.0, help="z band height, mm")
-    ap.add_argument("--pcb", type=float, default=None, help="PCB thickness, mm")
+    ap.add_argument("--bands", action="store_true",
+                    help="the old vertical profile instead of the body list")
+    ap.add_argument("--yaml", action="store_true",
+                    help="print a part YAML fragment ready to paste")
+    ap.add_argument("--band", type=float, default=0.5, help="z band height, mm")
+    ap.add_argument("--limit", type=int, default=12,
+                    help="how many bodies to list")
+    ap.add_argument("--min-footprint", type=float, default=0.0,
+                    help="mm2; hide bodies smaller than this")
     args = ap.parse_args(argv)
-    for f in args.files:
-        report(Path(f), args.band, args.pcb)
+
+    paths: list[Path] = []
+    for pattern in args.files:
+        paths += [Path(p) for p in sorted(glob.glob(pattern))]
+    if not paths:
+        print("no files matched", file=sys.stderr)
+        return 1
+
+    for path in paths:
+        try:
+            if args.yaml:
+                report_yaml(path)
+            elif args.bands:
+                report_bands(path, args.band)
+            else:
+                report_bodies(path, args.limit, args.min_footprint)
+        except Exception as exc:
+            print(f"\n=== {path.name}\n  {type(exc).__name__}: {exc}")
     return 0
 
 

@@ -267,3 +267,57 @@ body:not(.rendering) .sunctl { opacity: .35; }
   background: none; border: none; padding: 0; color: var(--accent);
   text-decoration: underline; cursor: pointer; font: inherit;
 }
+
+
+/* --------------------------------------------------------------------------
+   engraving
+   --------------------------------------------------------------------------
+   A cut changes the shape of the part and an engrave does not, so "cut right
+   through" is styled as the deliberate, slightly alarming choice it is. */
+
+#engrave-panel .field { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+#engrave-panel .field label { width: 52px; color: var(--dim); }
+#engrave-panel input[type=number], #engrave-panel input[type=text],
+#engrave-panel select {
+  width: 62px; background: var(--panel-2); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 3px; padding: 2px 5px; font: inherit;
+}
+#engrave-panel select, #engrave-panel .eng-name { width: 100%; }
+#engrave-panel .unit { color: var(--dim); font-size: 11px; }
+#engrave-panel .check { display: block; color: var(--dim); margin: 3px 0; cursor: pointer; }
+#engrave-panel .check input { margin-right: 5px; }
+#engrave-panel .check.danger { color: var(--warn); }
+#engrave-panel .note { color: var(--dim); font-size: 11px; margin: 6px 0; }
+#engrave-panel .note.warn { color: var(--warn); }
+
+.engrow {
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 6px 8px; margin: 8px 0; background: var(--panel-2);
+}
+.engrow.through { border-color: var(--warn); }
+.engrow-head { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.eng-del {
+  flex: 0 0 auto; padding: 0 6px; line-height: 1.4;
+  border: 1px solid var(--line); background: none; color: var(--dim);
+}
+.eng-del:hover { color: var(--err); border-color: var(--err); }
+
+
+#render-panel .field { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+#render-panel .field label { width: 62px; color: var(--dim); }
+#render-panel select { width: 120px; }
+#render-panel input[type=range] { flex: 1; }
+#render-panel .check { display: block; color: var(--dim); margin: 3px 0; cursor: pointer; }
+#render-panel .check input { margin-right: 5px; }
+#render-panel .note { color: var(--dim); font-size: 11px; margin: 6px 0; }
+#render-panel .note.warn { color: var(--warn); }
+#render-panel h2 { margin-top: 16px; }
+#btn-shoot { width: 100%; margin-top: 4px; }
+
+
+#material-list .field { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+#material-list .field label { width: 62px; color: var(--dim); }
+#material-list #stock-all {
+  flex: 1; background: var(--panel-2); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 3px; padding: 2px 5px; font: inherit;
+}

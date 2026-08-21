@@ -31,9 +31,16 @@ backend/
     library.py    YAML part loader
     scene.py      mate solver + the checks (collision, access, exposure, clearance)
     case.py       scene -> stack of slabs
+    engrave.py    front-panel decoration, as a pass the cutter keeps separate
+    measure.py    read geometry out of vendor CAD -- the one place that does
+    catalog.py    search Adafruit's live product feed
+    ingest.py     turn a catalogue hit into a measured draft part
+    audit.py      check the library against the models it claims to come from
+    raytrace.py   the final photograph (optional: needs Mitsuba)
     export.py     SVG / DXF for the cutter, JSON for the browser
-    cli.py        hwcase parts | check | build
-    api.py        FastAPI: /api/parts, /api/resolve, /api/build, /api/export/*
+    cli.py        hwcase parts | check | build | audit
+    api.py        FastAPI: /api/parts, /api/resolve, /api/build, /api/export/*,
+                  /api/catalog/*, /api/render
   parts/          the part library -- data, not code
   scenes/         layouts
   tests/          pytest suite over the engine
@@ -45,6 +52,7 @@ tools/
   fetch_cad.py    mirror vendor STEP/STL into vendor/cad/
   measure_cad.py  read exact dimensions + z profiles out of those meshes
 vendor/           downloaded datasheets and CAD (not authored here)
+web/vendor/hdri/  three CC0 environments from Poly Haven (CREDITS.json)
 ```
 
 ## Run the editor
@@ -63,9 +71,30 @@ and the browser. Ctrl+C stops it.
 
 ### In the editor
 
-Left: the part library, click to drop one into the scene. Middle: the 3D view.
-Right: placements, the selected part's numbers, and the live issue list — click
-an issue to select the part it blames.
+Across the top: **file**, **edit**, **view** and **help** menus, then the scene
+picker, and the controls you reach for constantly — the case toggle, the
+interior mode and the render switch. Anything used once a session is in a menu;
+anything toggled while working stays on the bar. (It used to be fourteen buttons
+in a row, and the last four were off the edge of the screen, which is the same
+as not existing.)
+
+Left: the part library, click to drop one into the scene, with the catalogue
+search underneath. Middle: the 3D view. Right: four panes —
+
+- **layout** — placements and the selected part's numbers
+- **case** — size, the bolts that hold the stack together, minimum web,
+  and the materials with their colours
+- **look** — lighting, contact shading, engraving, and the final render
+- **issues** — the live list, badged so a problem is visible from any pane
+
+The case settings used to live below everything about the selected board, so
+you only met them by scrolling past a screenful of something else.
+
+**help → how this works** is the manual; **keyboard & mouse** is the shortcut
+list that used to be a permanent strip along the bottom; **about** says which
+version computed the geometry. <kbd>F1</kbd> opens the manual.
+
+Click an issue to select the part it blames.
 
 Selecting a part puts a gizmo on it: an amber **move pivot** on its centre with
 the two axes it slides along, and a blue **rotate ring** further out with one
@@ -156,6 +185,71 @@ python tools/measure_cad.py --band 0.8 "vendor/cad/adafruit/5752/*.stl"
 
 That is how we found out the 5752 quad encoder is a 76.2 × 21.6 mm strip and
 not the 25.6 mm square every shop page claims. See [docs/measurements.md](docs/measurements.md).
+
+## Where a part comes from
+
+The palette lists parts somebody has measured and vouched for. The **find a
+part** box under it searches Adafruit's live catalogue — about 5,500 products —
+and imports one on demand. Around 470 of them have a vendor CAD model, and the
+search says which: a product with a model can be measured, one without would
+have to be entered by hand.
+
+Both feeds are cached on disk and refreshed daily, so a self-hosted instance
+picks up new products the week they ship, and a search still works with the
+network unplugged. If Adafruit is down you get yesterday's catalogue and a note
+saying so, which is more useful than an empty box.
+
+### What an import actually gives you
+
+Real: the outline, the board thickness, the volumes that stand proud of it, and
+the mounting holes (out of the STEP — an STL of a board is a slab with the
+drilling gone).
+
+Guessed, and labelled as such in the generated file:
+
+- **which way up.** Nothing in a mesh says "this face is the front". Two rules
+  decide it: one large flat body alone on a face is a display module and that
+  face goes up; otherwise the face the model stands furthest proud of goes up,
+  because knobs and sockets are tall and a solder side is flat.
+- **what the volumes are.** We know a 4.95 × 6.00 × 2.96 box sits at the left
+  edge. We do not know it is a STEMMA QT socket, and the case treats a socket
+  differently from a capacitor.
+- **connectors — there are none.** A mesh cannot say where a cable plugs in, so
+  a freshly imported board asks the case for *no cable room whatsoever* until
+  you add them. This is the one to remember.
+
+Imports land in `backend/parts/imported.yaml`, on their own, so a machine never
+rewrites a hand-written file and a bad import is one file to delete.
+
+### Bodies, not bands
+
+`measure.py` splits a mesh into connected shells rather than slicing it into
+horizontal bands. Band slicing was wrong twice over: an STL of a flat plate has
+vertices only on its two faces, so a 1.6 mm PCB reads as two paper-thin slivers
+with a void between them; and a band's bounding box merges everything at that
+height, so the 1.5" OLED's two STEMMA QT connectors — on opposite edges —
+became one imaginary 34 mm "strip across the display". A display was then fitted
+to that fiction, which is why its window was two planes crossing each other.
+
+Splitting on connectivity asks the model what objects it contains instead of
+inferring them.
+
+### Checking the library against itself
+
+```
+python -m hwcase.cli audit
+python -m hwcase.cli audit --tolerance 0.5 --strict
+```
+
+Re-measures every part that names a `cad:` file and reports where the file and
+the model disagree — outline, board thickness, and how far anything stands
+proud. It understands that a part may be modelled upside down relative to how
+we use it, and that a `cad:` pointing at a PDF is provenance rather than a
+failed measurement.
+
+Worth running periodically: vendors revise boards and quietly replace models,
+and our own extraction changes. The OLED was wrong for weeks, and this would
+have shown it on the day it was written.
 
 ## Panels: the surface you touch
 
@@ -287,11 +381,23 @@ interior is set to.
 
 The `render` toggle in the header swaps the schematic view for a physically
 based one: standard materials, ACES tone mapping, a shadow-casting sun you steer
-with the three sliders (azimuth, elevation, strength), and image-based ambient
-light generated at startup from `RoomEnvironment` — geometry, not a downloaded
-HDR, so it still works offline. The case stops being wireframe outlines and
-becomes real extruded slabs with their holes punched through, sitting on a
-shadow-catching ground plane.
+with the three sliders (azimuth, elevation, strength). The case stops being
+wireframe outlines and becomes real extruded slabs with their holes punched
+through, sitting on a shadow-catching ground plane.
+
+**Light** comes from the **look** pane. `room` is the synthetic box generated at
+startup — instant, offline, and lit from nowhere in particular. The other three
+are real captured environments (Poly Haven, CC0, credits in
+`web/vendor/hdri/CREDITS.json`), vendored at 1k because a PMREM cares far more
+about the light in an environment than its resolution. They load on demand and
+are cached, so nobody pays five megabytes for a schematic view they never leave.
+
+**Contact** darkens the walls of each slab where it meets the ones above and
+below. A stack of flat sheets has almost nothing concave in it, so a
+screen-space AO pass finds very little to darken and costs a whole
+postprocessing chain to run; what actually reads as *separate pieces of
+plywood* is the shadow line in the seam, and that is a function of position
+within the slab, so it is simply baked in.
 
 Material appearance comes from the material's **name**: `plywood-3mm` is matte
 and pale, `acrylic-clear-3mm` is glossy and see-through, `aluminium-2mm` is
@@ -304,6 +410,55 @@ name and thickness live.
 
 Schematic mode keeps the grid, gizmo, guides and diagnostic overlays; render
 mode drops them, because they are for laying out rather than looking at.
+
+### The final photograph
+
+**render a photograph** in the look pane traces the scene properly on the
+server, using the same environment the preview is lit by — a final image that
+looks nothing like what you designed under is not much use. Minutes, not
+milliseconds, and synchronous on purpose: a request that takes two minutes is a
+clearer signal than a job id to poll.
+
+This needs **Mitsuba**, which is an optional install:
+
+```
+pip install mitsuba
+```
+
+Everything else works without it, and the button says so rather than failing
+when pressed. Mitsuba was picked over the alternatives because it is the only
+one that drops into this stack unaided: `bpy` publishes no wheel for the Python
+here (so Blender means installing Blender), LuxCore would need its own
+translation layer for no gain, and `three-gpu-pathtracer` — which would have
+been tidiest, since the editor already has a three.js scene — needs three
+≥ 0.180 against the r169 we vendor, plus a build step.
+
+Acrylic renders as a real dielectric rather than as alpha blending: the reason
+to reach for a raytracer on an acrylic-lidded box is the refraction and the
+edge glow, and alpha gives neither.
+
+## Engraving the front panel
+
+A laser does two jobs. A **cut** goes through the sheet and changes the shape of
+the part; an **engrave** marks the surface and changes nothing structural.
+Mixing them up is how a panel ends up with a speaker grill sawn clean out of it,
+so engraving lives in its own group in the SVG (blue, titled *do not cut*) and
+its own `_ENGRAVE` layer in the DXF, never merged with the outline.
+
+Six patterns, from the **look** pane: `fins` (the amplifier front-panel look),
+`slots` (a speaker grill, offset row to row — a square grid looks like a
+spreadsheet), `rings`, `hex`, `rule` for separating groups of controls, and
+`frame`. Each carries a preset that looks right without fiddling, and switching
+pattern brings its preset with it, so a hex mesh does not inherit fin spacing.
+
+Marks are clipped to the lid: a grill that runs off the edge of the plate is not
+a grill, it is a row of nicks in the outline, and one that misses the plate
+entirely says so instead of silently drawing nothing.
+
+**cut right through** is a separate switch with a warning on it. It moves the
+pattern out of the engraving pass and into the geometry — the one case where the
+two are allowed to meet — and you are on your own for whether the panel still
+holds together.
 
 ## Case size: auto or pinned
 
@@ -420,8 +575,14 @@ generation with kerf compensation, SVG + DXF export, vendor CAD ingest.
 
 Also done: FastAPI over the same engine, a vendored three.js editor
 (select / drag / nudge / rotate / add / delete / save / export), a one-click
-`start.bat`, derived panel planes, and a 27-case test suite (`pytest` from
-`backend/`).
+`start.bat`, derived panel planes, and a test suite (`pytest` from `backend/`,
+`node --test tests/` from `web/`).
+
+And since: body-based CAD measurement, a live Adafruit catalogue with on-demand
+import, a library audit against the vendor models, menus and panes instead of an
+overflowing toolbar, image-based lighting from CC0 environments, baked contact
+shading, front-panel engraving as its own laser pass, and an optional Mitsuba
+renderer for the final photograph.
 
 Next:
 1. **Snapping** — the editor moves parts freely in XY. Wants: snap to mates
@@ -436,3 +597,13 @@ Next:
    the same slab stack.
 5. **Cable routing** — currently a keepout distance; wants actual routes with
    fixed STEMMA QT cable lengths (50/100/200 mm) as a constraint.
+6. **Text engraving** — the pattern set has no labels in it yet, which is the
+   one decoration every panel actually needs. Wants a vectorised font so a
+   label is polygons like everything else, rather than a font dependency at
+   cut time.
+7. **More vendors in the catalogue** — Adafruit publish a product feed and a
+   CAD repository, which is why they went first. Pimoroni, SparkFun and Seeed
+   would each need their own adapter behind the same search box.
+8. **Identifying what an imported volume is.** An import knows a box is there
+   and not that it is a STEMMA QT socket. Matching against a library of known
+   connector footprints would turn most drafts into finished parts.

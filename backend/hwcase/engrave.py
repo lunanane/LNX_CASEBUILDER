@@ -20,77 +20,15 @@ text for labelling.
 from __future__ import annotations
 
 import math
-from enum import Enum
 from typing import Optional
 
-from pydantic import Field
 from shapely.affinity import rotate, translate
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon, box
 from shapely.ops import unary_union
 
-from .schema import Strict
+from .schema import Engraving, Pattern
 
-__all__ = ["Pattern", "Engraving", "build_engraving", "PATTERN_HELP"]
-
-
-class Pattern(str, Enum):
-    """What to draw."""
-
-    #: parallel raised-looking fins, the amplifier front-panel look
-    fins = "fins"
-    #: a field of rounded slots, like a speaker or vent grill
-    slots = "slots"
-    #: concentric rings, for a speaker or a rotary control
-    rings = "rings"
-    #: a hex mesh -- the most "machined" looking of the lot
-    hex = "hex"
-    #: a single hairline, for separating groups of controls
-    rule = "rule"
-    #: a filled border following the region's edge
-    frame = "frame"
-
-
-PATTERN_HELP = {
-    "fins": "parallel fins -- the amplifier front-panel look",
-    "slots": "rounded slots in rows, like a speaker grill",
-    "rings": "concentric rings, for a speaker or a big knob",
-    "hex": "hex mesh; the most machined-looking of them",
-    "rule": "one hairline, for separating groups of controls",
-    "frame": "a border following the edge of the region",
-}
-
-
-class Engraving(Strict):
-    """One decoration placed on a panel."""
-
-    name: str = "engraving"
-    pattern: Pattern = Pattern.fins
-    #: centre, in the same world XY the placements use
-    at: tuple[float, float] = (0.0, 0.0)
-    size: tuple[float, float] = (60.0, 30.0)
-    rotation: float = 0.0
-
-    #: width of one mark, mm. A laser's kerf is around 0.15 mm, so anything
-    #: under about 0.3 mm engraves as a single pass and reads as a hairline.
-    stroke: float = Field(1.2, gt=0.0, le=20.0)
-    #: gap between marks, mm
-    pitch: float = Field(3.0, gt=0.0, le=100.0)
-    #: rounded ends on the marks. Square ends look cheap at this scale.
-    round_ends: bool = True
-
-    #: cut right through instead of marking the surface. Off by default,
-    #: because a grill sawn through a faceplate is usually a mistake, and
-    #: because it changes whether the part still holds together.
-    through: bool = False
-
-    #: text, when the pattern is a label
-    text: Optional[str] = None
-
-    @property
-    def bounds(self) -> tuple[float, float, float, float]:
-        w, h = self.size
-        return (self.at[0] - w / 2, self.at[1] - h / 2,
-                self.at[0] + w / 2, self.at[1] + h / 2)
+__all__ = ["build_engraving", "engraving_area"]
 
 
 # ---------------------------------------------------------------------------

@@ -17,14 +17,7 @@ SHEET_MARGIN = 10.0
 LAYER_GAP = 8.0
 
 
-def _polys(geom) -> list[Polygon]:
-    if geom is None or geom.is_empty:
-        return []
-    if isinstance(geom, MultiPolygon):
-        return list(geom.geoms)
-    if isinstance(geom, Polygon):
-        return [geom]
-    return [g for g in getattr(geom, "geoms", []) if isinstance(g, Polygon)]
+from .geom import polygons as _polys
 
 
 def _rings(poly: Polygon) -> list[list[tuple[float, float]]]:
@@ -66,6 +59,15 @@ def to_svg(case: CaseModel, apply_kerf: bool = True) -> str:
             for ring in _rings(poly):
                 d = "M " + " L ".join(f"{x:.3f},{y:.3f}" for x, y in ring) + " Z"
                 paths.append(f'<path d="{d}"/>')
+        # Engraving is never kerf-compensated: a mark is where you asked
+        # for it, and widening it by half a kerf just makes it fat.
+        marks = []
+        if layer.engrave is not None and not layer.engrave.is_empty:
+            for poly in _polys(translate(layer.engrave, dx, dy)):
+                for ring in _rings(poly):
+                    d = "M " + " L ".join(f"{x:.3f},{y:.3f}" for x, y in ring) + " Z"
+                    marks.append(f'<path d="{d}"/>')
+
         label = f"{layer.index:02d} {layer.role} {layer.material.name} " \
                 f"z {layer.z0:.1f}..{layer.z1:.1f}"
         parts.append(
@@ -73,6 +75,14 @@ def to_svg(case: CaseModel, apply_kerf: bool = True) -> str:
             f'data-material="{layer.material.name}">\n'
             f'  <title>{label}</title>\n  ' + "\n  ".join(paths) + "\n</g>"
         )
+        if marks:
+            # Blue, and its own group. Every cutter's software wants cut and
+            # engrave separated by colour or by layer; this does both.
+            parts.append(
+                f'<g id="engrave-{layer.index}" data-role="engrave" '
+                f'stroke="#0000ff">\n  <title>{label} -- ENGRAVE, do not cut'
+                f'</title>\n  ' + "\n  ".join(marks) + "\n</g>"
+            )
     w = max_x + SHEET_MARGIN
     h = max_y + SHEET_MARGIN
     body = "\n".join(parts)
@@ -101,6 +111,15 @@ def to_dxf(case: CaseModel, path: Path, apply_kerf: bool = True) -> Path:
             for ring in _rings(poly):
                 msp.add_lwpolyline([(x, y) for x, y in ring], close=True,
                                    dxfattribs={"layer": name})
+
+        if layer.engrave is not None and not layer.engrave.is_empty:
+            mark_layer = f"{name}_ENGRAVE"
+            if mark_layer not in doc.layers:
+                doc.layers.add(mark_layer, color=5)         # blue
+            for poly in _polys(translate(layer.engrave, dx, dy)):
+                for ring in _rings(poly):
+                    msp.add_lwpolyline([(x, y) for x, y in ring], close=True,
+                                       dxfattribs={"layer": mark_layer})
     path.parent.mkdir(parents=True, exist_ok=True)
     doc.saveas(path)
     return path
@@ -183,6 +202,10 @@ def case_to_json(case: CaseModel) -> dict:
             "notes": l.notes,
             "rings": [[list(c) for c in ring]
                       for poly in _polys(l.geom) for ring in _rings(poly)],
+            "engrave": ([[list(c) for c in ring]
+                         for poly in _polys(l.engrave) for ring in _rings(poly)]
+                        if l.engrave is not None and not l.engrave.is_empty
+                        else []),
         } for l in case.layers],
     }
 

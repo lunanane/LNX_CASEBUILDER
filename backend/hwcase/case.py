@@ -43,6 +43,10 @@ class Layer:
     material: Material
     geom: Polygon | MultiPolygon
     notes: list[str] = field(default_factory=list)
+    #: surface marking, kept apart from `geom` on purpose. A cut changes the
+    #: shape of the part and an engrave does not, and merging the two is how a
+    #: panel ends up with a speaker grill sawn clean out of it.
+    engrave: Polygon | MultiPolygon | None = None
 
     @property
     def thickness(self) -> float:
@@ -147,7 +151,41 @@ def build(res: Resolved, spec: Optional[CaseSpec] = None) -> CaseModel:
         cursor = top
 
     _report_orphan_supports(res, layers, notes_to=layers)
+    _apply_engravings(res, layers)
     return CaseModel(spec=spec, outer=outer, layers=layers, z0=z0, z1=cursor)
+
+
+def _apply_engravings(res: Resolved, layers: list[Layer]) -> None:
+    """Put the decoration on the face you actually look at.
+
+    That is the top of the lid, so the marks are clipped to the lid's own
+    outline: a grill that runs off the edge of the plate is not a grill, it is
+    a row of nicks in the outline. An engraving asking to be cut through goes
+    into the geometry instead of alongside it, which is the one case where the
+    two are allowed to meet.
+    """
+    engravings = getattr(res.scene, "engravings", None) if res.scene else None
+    if not engravings or not layers:
+        return
+
+    from .engrave import build_engraving
+
+    lid = layers[-1]
+    marks, cuts = [], []
+    for e in engravings:
+        g = build_engraving(e, clip=lid.geom)
+        if g.is_empty:
+            lid.notes.append(f"engraving {e.name!r} falls outside the lid")
+            continue
+        (cuts if e.through else marks).append(g)
+        lid.notes.append(
+            f"{'cut-through' if e.through else 'engraved'} {e.pattern.value}"
+            f" {e.name!r}")
+
+    if marks:
+        lid.engrave = unary_union(marks)
+    if cuts:
+        lid.geom = lid.geom.difference(unary_union(cuts))
 
 
 def _report_orphan_supports(res: Resolved, layers: list[Layer], notes_to) -> None:

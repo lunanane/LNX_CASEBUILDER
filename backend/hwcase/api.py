@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 
 from . import scenefile
+from . import __version__
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
@@ -32,7 +33,7 @@ SCENES_DIR = ROOT / "scenes"
 WEB_DIR = REPO / "web"
 OUT_DIR = REPO / "out"
 
-app = FastAPI(title="hwcase", version="0.1.0")
+app = FastAPI(title="hwcase", version=__version__)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
@@ -362,6 +363,55 @@ def catalog_forget(part_id: str):
         raise HTTPException(404, f"{part_id} is not an imported part")
     library(reload=True)
     return {"ok": True, "removed": part_id}
+
+
+# --------------------------------------------------------------------------
+# the photographic render
+# --------------------------------------------------------------------------
+
+@app.get("/api/render/status")
+def render_status():
+    """Whether a final-image render is possible on this machine."""
+    from . import raytrace
+
+    return {"available": raytrace.available(), "hint": raytrace.INSTALL_HINT,
+            "environments": sorted(p.stem for p in raytrace.HDRI_DIR.glob("*.hdr"))}
+
+
+@app.post("/api/render")
+def render_image(scene: Scene = Body(...), samples: int = 96,
+                 width: int = 1280, height: int = 960,
+                 env: str = "studio", elevation: float = 32.0,
+                 azimuth: float = 38.0):
+    """Trace a finished picture of the machine. Minutes, not milliseconds.
+
+    Synchronous on purpose. This is a thing somebody asks for once, watches,
+    and saves -- wrapping it in a job queue would be more moving parts than
+    the feature is worth, and a request that takes two minutes is a much
+    clearer signal than a job id that has to be polled.
+    """
+    from . import raytrace
+
+    if not raytrace.available():
+        raise HTTPException(503, raytrace.INSTALL_HINT)
+
+    lib = library()
+    res = resolve(scene, lib)
+    model = case_mod.build(res, scene.case)
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out = OUT_DIR / f"{scene.name or 'scene'}-render.png"
+    settings = raytrace.RenderSettings(
+        width=max(64, min(width, 4096)), height=max(64, min(height, 4096)),
+        samples=max(1, min(samples, 4096)), env=env,
+        elevation=elevation, azimuth=azimuth)
+    try:
+        raytrace.render(res, model, out, settings)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"render failed: {exc}")
+    return FileResponse(out, media_type="image/png", filename=out.name)
 
 
 @app.get("/api/health")

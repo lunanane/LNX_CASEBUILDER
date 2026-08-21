@@ -535,6 +535,74 @@ class CaseSpec(Strict):
     outline: Optional[Outline] = None  # override the auto bounding shape
 
 
+# ---------------------------------------------------------------------------
+# front-panel decoration
+# ---------------------------------------------------------------------------
+#
+# The models live here rather than in hwcase.engrave so that a Scene can
+# reference them without the schema having to import shapely. The geometry
+# that turns one of these into marks stays in hwcase.engrave.
+
+class Pattern(str, Enum):
+    """What to draw."""
+
+    #: parallel raised-looking fins, the amplifier front-panel look
+    fins = "fins"
+    #: a field of rounded slots, like a speaker or vent grill
+    slots = "slots"
+    #: concentric rings, for a speaker or a rotary control
+    rings = "rings"
+    #: a hex mesh -- the most "machined" looking of the lot
+    hex = "hex"
+    #: a single hairline, for separating groups of controls
+    rule = "rule"
+    #: a filled border following the region's edge
+    frame = "frame"
+
+
+PATTERN_HELP = {
+    "fins": "parallel fins -- the amplifier front-panel look",
+    "slots": "rounded slots in rows, like a speaker grill",
+    "rings": "concentric rings, for a speaker or a big knob",
+    "hex": "hex mesh; the most machined-looking of them",
+    "rule": "one hairline, for separating groups of controls",
+    "frame": "a border following the edge of the region",
+}
+
+
+class Engraving(Strict):
+    """One decoration placed on a panel."""
+
+    name: str = "engraving"
+    pattern: Pattern = Pattern.fins
+    #: centre, in the same world XY the placements use
+    at: tuple[float, float] = (0.0, 0.0)
+    size: tuple[float, float] = (60.0, 30.0)
+    rotation: float = 0.0
+
+    #: width of one mark, mm. A laser's kerf is around 0.15 mm, so anything
+    #: under about 0.3 mm engraves as a single pass and reads as a hairline.
+    stroke: float = Field(1.2, gt=0.0, le=20.0)
+    #: gap between marks, mm
+    pitch: float = Field(3.0, gt=0.0, le=100.0)
+    #: rounded ends on the marks. Square ends look cheap at this scale.
+    round_ends: bool = True
+
+    #: cut right through instead of marking the surface. Off by default,
+    #: because a grill sawn through a faceplate is usually a mistake, and
+    #: because it changes whether the part still holds together.
+    through: bool = False
+
+    #: text, when the pattern is a label
+    text: Optional[str] = None
+
+    @property
+    def bounds(self) -> tuple[float, float, float, float]:
+        w, h = self.size
+        return (self.at[0] - w / 2, self.at[1] - h / 2,
+                self.at[0] + w / 2, self.at[1] + h / 2)
+
+
 class ViewSettings(Strict):
     """How the preview is lit. None of this reaches the geometry.
 
@@ -566,3 +634,6 @@ class Scene(Strict):
     case: CaseSpec = Field(default_factory=CaseSpec)
     #: preview only -- see ViewSettings
     view: ViewSettings = Field(default_factory=ViewSettings)
+    #: front-panel decoration. Marks the surface; does not cut through unless
+    #: an engraving says so explicitly. See hwcase.engrave.
+    engravings: list["Engraving"] = Field(default_factory=list)

@@ -2655,3 +2655,361 @@ def test_a_draft_validates_as_a_part():
     _check_names(part)
     assert part.outline.size == pytest.approx((35.56, 46.99), abs=0.05)
     assert part.pcb_thickness == pytest.approx(1.57, abs=0.05)
+
+
+# ---------------------------------------------------------------------------
+# front-panel engraving
+# ---------------------------------------------------------------------------
+
+def _engraving():
+    from hwcase.schema import Engraving
+    return Engraving(name="vent", pattern="fins", at=(0.0, 0.0),
+                     size=(70.0, 40.0), stroke=1.0, pitch=2.5)
+
+
+def _engraved(*engravings):
+    scene = load_scene(SCENE)
+    scene.engravings = list(engravings)
+    return scene
+
+
+def test_every_pattern_draws_something():
+    """Six patterns, all of which have to produce marks inside their own box.
+    A pattern that silently produces nothing is worse than no pattern."""
+    from shapely.geometry import box as shbox
+
+    from hwcase.engrave import build_engraving
+    from hwcase.schema import Engraving, Pattern
+
+    clip = shbox(-100, -60, 100, 60)
+    for pattern in Pattern:
+        e = Engraving(name=pattern.value, pattern=pattern,
+                      at=(0.0, 0.0), size=(80.0, 40.0), stroke=1.2, pitch=3.0)
+        g = build_engraving(e, clip)
+        assert not g.is_empty, f"{pattern.value} drew nothing"
+        assert g.area > 1.0
+        x0, y0, x1, y1 = g.bounds
+        # `size` has to mean what it says, or two engravings side by side
+        # silently overlap
+        assert x0 >= -40.001 and x1 <= 40.001
+        assert y0 >= -20.001 and y1 <= 20.001
+
+
+def test_an_engraving_is_clipped_to_the_plate():
+    """A grill that runs off the edge is not a grill, it is a row of nicks in
+    the outline."""
+    from shapely.geometry import box as shbox
+
+    from hwcase.engrave import build_engraving
+    from hwcase.schema import Engraving
+
+    plate = shbox(0, 0, 50, 50)
+    e = Engraving(name="over", pattern="fins", at=(50.0, 25.0), size=(80.0, 40.0))
+    g = build_engraving(e, plate)
+    assert not g.is_empty
+    assert plate.buffer(1e-9).contains(g)
+
+
+def test_marks_do_not_change_the_part(lib):
+    """The whole point of a separate pass: an engrave marks the surface and
+    changes nothing structural."""
+    plain = build(resolve(load_scene(SCENE), lib))
+    marked = build(resolve(_engraved(_engraving()), lib))
+
+    assert plain.layers[-1].geom.area == pytest.approx(
+        marked.layers[-1].geom.area, abs=1e-6)
+    assert marked.layers[-1].engrave is not None
+    assert marked.layers[-1].engrave.area > 1.0
+
+
+def test_cutting_through_does_change_the_part(lib):
+    """And when you ask for it explicitly, it comes out of the material."""
+    from hwcase.schema import Engraving
+
+    through = Engraving(**{**_engraving().model_dump(), "through": True})
+    plain = build(resolve(load_scene(SCENE), lib))
+    cut = build(resolve(_engraved(through), lib))
+
+    assert cut.layers[-1].geom.area < plain.layers[-1].geom.area
+    assert cut.layers[-1].engrave is None       # it is a cut, not a mark
+    assert any("cut-through" in n for n in cut.layers[-1].notes)
+
+
+def test_engraving_exports_as_its_own_pass(lib, tmp_path):
+    """Cut and engrave separated by colour and by layer, because that is what
+    every cutter's software wants -- and because a grill sawn clean through a
+    faceplate is not a grill."""
+    from hwcase.export import to_dxf
+
+    model = build(resolve(_engraved(_engraving()), lib))
+
+    svg = to_svg(model)
+    assert 'data-role="engrave"' in svg
+    assert "#0000ff" in svg                     # not the red cut stroke
+    assert "do not cut" in svg
+
+    path = to_dxf(model, tmp_path / "out.dxf")
+    import ezdxf
+    doc = ezdxf.readfile(path)
+    engrave_layers = [l.dxf.name for l in doc.layers
+                      if l.dxf.name.endswith("_ENGRAVE")]
+    assert engrave_layers, "the DXF needs a separate engrave layer"
+    assert any(e.dxf.layer.endswith("_ENGRAVE")
+               for e in doc.modelspace().query("LWPOLYLINE"))
+
+
+def test_an_engraving_off_the_plate_is_reported(lib):
+    """Silently drawing nothing is how you discover it after the cut."""
+    from hwcase.schema import Engraving
+
+    far = Engraving(name="miles away", pattern="rule",
+                    at=(5000.0, 5000.0), size=(40.0, 10.0))
+    model = build(resolve(_engraved(far), lib))
+    assert any("falls outside the lid" in n for n in model.layers[-1].notes)
+
+
+def test_engraving_survives_a_scene_round_trip(tmp_path):
+    """It is part of the document, not a preview setting."""
+    from hwcase import scenefile
+    from hwcase.schema import Scene
+
+    scene = _engraved(_engraving())
+    path = tmp_path / "s.yaml"
+    path.write_text(scenefile.dumps(scene), encoding="utf-8")
+    back = Scene.model_validate(
+        __import__("yaml").safe_load(path.read_text(encoding="utf-8")))
+    assert len(back.engravings) == 1
+    assert back.engravings[0].name == _engraving().name
+    assert back.engravings[0].pattern == _engraving().pattern
+
+
+# ---------------------------------------------------------------------------
+# the photographic renderer
+# ---------------------------------------------------------------------------
+#
+# Mitsuba is optional and almost certainly not installed on the machine
+# running these, so what is tested is the translation: the scene we hand it,
+# and the meshes we write beside it. Everything here runs without it.
+
+def _traced(lib, **kw):
+    import tempfile
+
+    from hwcase.raytrace import RenderSettings, build_scene_dict
+
+    scene = load_scene(SCENE)
+    res = resolve(scene, lib)
+    model = build(res)
+    tmp = tempfile.mkdtemp()
+    return build_scene_dict(res, model, RenderSettings(**kw), Path(tmp)), Path(tmp)
+
+
+def test_the_renderer_is_optional(lib):
+    """Nothing in hwcase may import Mitsuba at module scope: it is a 100 MB
+    optional extra, and the editor is the product."""
+    import hwcase.raytrace as rt
+
+    assert "mitsuba" not in [m.__name__ for m in vars(rt).values()
+                             if hasattr(m, "__name__")]
+    if not rt.available():
+        with pytest.raises(RuntimeError, match="pip install mitsuba"):
+            rt.render(resolve(load_scene(SCENE), lib), build(resolve(
+                load_scene(SCENE), lib)), Path("nope.png"))
+
+
+def test_a_scene_translates_without_mitsuba_installed(lib):
+    """The translation is the part we wrote, so it is the part to test."""
+    scene, _ = _traced(lib)
+    assert scene["type"] == "scene"
+    assert scene["integrator"]["type"] == "path"
+    assert scene["sensor"]["film"]["width"] == 1280
+    assert any(k.startswith("layer") for k in scene)
+    assert any(k.startswith("part") for k in scene), "an empty box is not the machine"
+
+
+def test_the_render_is_lit_by_the_same_light_as_the_editor(lib):
+    """A final image that looks nothing like what you designed under is not
+    much use, so both use the same vendored CC0 environments."""
+    scene, _ = _traced(lib, env="daylight")
+    env = scene["environment"]
+    assert env["type"] == "envmap"
+    assert Path(env["filename"]).name == "daylight.hdr"
+    assert Path(env["filename"]).exists()
+
+
+def test_a_missing_environment_still_renders(lib):
+    """Someone who deleted the HDRIs should get a duller picture, not a black
+    frame and a stack trace."""
+    scene, _ = _traced(lib, env="no-such-environment")
+    assert scene["environment"]["type"] == "constant"
+
+
+def test_triangulation_covers_the_polygon_exactly():
+    """Holes are the whole difficulty: a case layer is mostly holes."""
+    from shapely.geometry import Point
+    from shapely.geometry import box as shbox
+
+    from hwcase.raytrace import _triangulate
+
+    poly = (shbox(0, 0, 50, 30)
+            .difference(shbox(10, 10, 20, 20))
+            .difference(Point(40, 15).buffer(4, quad_segs=16)))
+    tris = _triangulate(poly)
+    assert tris
+    from shapely.geometry import Polygon as Shp
+    covered = sum(Shp(t).area for t in tris)
+    assert covered == pytest.approx(poly.area, rel=1e-6)
+
+
+def test_the_meshes_are_valid_ply(lib):
+    """Written by hand, so worth checking byte for byte -- a malformed header
+    fails deep inside someone else's loader with a useless message."""
+    import numpy as np
+
+    _, work = _traced(lib)
+    files = sorted(work.glob("*.ply"))
+    assert files
+
+    raw = files[0].read_bytes()
+    cut = raw.index(b"end_header\n") + len(b"end_header\n")
+    header = raw[:cut].decode("ascii")
+    assert header.startswith("ply\nformat binary_little_endian 1.0")
+
+    nv = int(next(l for l in header.splitlines()
+                  if l.startswith("element vertex")).split()[-1])
+    nf = int(next(l for l in header.splitlines()
+                  if l.startswith("element face")).split()[-1])
+    body = raw[cut:]
+    assert len(body) == nv * 12 + nf * 13      # 3 floats; 1 count + 3 uint32
+
+    faces = np.frombuffer(body[nv * 12:], np.uint8).reshape(nf, 13)
+    assert (faces[:, 0] == 3).all(), "every face has to be a triangle"
+    idx = faces[:, 1:].copy().view(np.uint32)
+    assert int(idx.max()) < nv, "an index past the end of the vertex list"
+
+
+def test_the_camera_looks_at_the_machine(lib):
+    """Built with numpy rather than by Mitsuba, so it is ours to get wrong."""
+    import numpy as np
+
+    from hwcase.raytrace import _transform_look_at
+
+    m = np.array(_transform_look_at((100.0, 0.0, 0.0), (0.0, 0.0, 0.0)))
+    assert m[:3, 3] == pytest.approx([100, 0, 0])
+    assert m[:3, 2] == pytest.approx([-1, 0, 0])          # forward is +Z local
+    for col in range(3):                                   # orthonormal
+        assert np.linalg.norm(m[:3, col]) == pytest.approx(1.0)
+    assert float(np.dot(m[:3, 0], m[:3, 1])) == pytest.approx(0.0, abs=1e-9)
+
+
+def test_looking_straight_down_does_not_degenerate():
+    """The up vector and the view direction go parallel, and a naive cross
+    product gives a zero-length right vector and a matrix full of NaN."""
+    import numpy as np
+
+    from hwcase.raytrace import _transform_look_at
+
+    m = np.array(_transform_look_at((0.0, 0.0, 200.0), (0.0, 0.0, 0.0)))
+    assert np.isfinite(m).all()
+    assert np.linalg.norm(m[:3, 0]) == pytest.approx(1.0)
+
+
+def test_engraving_reaches_the_render(lib):
+    """It is on the panel in the export, so it is on the panel in the picture."""
+    import tempfile
+
+    from hwcase.raytrace import RenderSettings, build_scene_dict
+    from hwcase.schema import Engraving
+
+    scene = load_scene(SCENE)
+    scene.engravings = [Engraving(name="vent", pattern="fins",
+                                  at=(0.0, 0.0), size=(70.0, 40.0))]
+    res = resolve(scene, lib)
+    model = build(res)
+    sd = build_scene_dict(res, model, RenderSettings(), Path(tempfile.mkdtemp()))
+    assert any(k.startswith("engrave") for k in sd)
+
+
+def test_acrylic_renders_as_glass_not_as_alpha(lib):
+    """The reason to reach for a raytracer on an acrylic-lidded box is the
+    refraction; alpha blending gives none of it."""
+    from hwcase.raytrace import _bsdf
+    from hwcase.schema import Material
+
+    class _L:
+        material = Material(name="acrylic-clear-3mm", thickness=3.0)
+
+    assert _bsdf(_L()).get("type") == "roughdielectric"
+
+    class _P:
+        material = Material(name="plywood-3mm", thickness=3.0)
+
+    assert _bsdf(_P()).get("type") == "roughplastic"
+
+
+# ---------------------------------------------------------------------------
+# auditing the library against the models it claims to come from
+# ---------------------------------------------------------------------------
+
+@needs_cad
+def test_the_measured_parts_agree_with_their_models(lib):
+    """The one automated second opinion on a part file.
+
+    The 1.5" OLED was wrong for weeks; this is what would have caught it on
+    the day it was written, because the outline it declared disagreed with the
+    mesh it named.
+    """
+    from hwcase.audit import audit_library
+
+    bad = []
+    for a in audit_library(lib):
+        for f in a.findings:
+            if f.severity != "info" and f.kind in ("outline", "thickness"):
+                bad.append(f"{a.part}: {f.message}")
+    assert not bad, "declared geometry disagrees with the vendor model:\n" + \
+                    "\n".join(bad)
+
+
+@needs_cad
+def test_the_oled_agrees_with_its_own_mesh(lib):
+    """It is the part that started all this, so it gets its own check."""
+    from hwcase.audit import audit_part
+
+    result = audit_part(lib["adafruit-4741-oled-1v5"])
+    assert result.checked
+    assert result.ok, [f.message for f in result.findings]
+
+
+def test_a_datasheet_is_not_a_failed_measurement(lib):
+    """`cad:` is also used for provenance -- a PDF or an annotated photo. That
+    is information, not a part we failed to read."""
+    from hwcase.audit import audit_part
+
+    result = audit_part(lib["rpi-3b"])
+    assert not result.checked
+    kinds = {(f.kind, f.severity) for f in result.findings}
+    assert ("not-a-model", "info") in kinds
+    assert not [f for f in result.findings if f.severity == "error"]
+
+
+@needs_cad
+def test_the_audit_understands_a_part_built_upside_down(lib):
+    """A vendor model may be built either way up and a part file is entitled
+    to turn it over. Comparing reaches without allowing for that flagged the
+    OLED and the encoder, both of which were correct."""
+    from hwcase.audit import audit_part
+
+    for pid in ("adafruit-4741-oled-1v5", "adafruit-5752-quad-encoder"):
+        result = audit_part(lib[pid])
+        assert not [f for f in result.findings if f.kind == "reach"], pid
+
+
+def test_the_audit_catches_a_part_that_lies(lib, tmp_path):
+    """And it has to actually fail when the numbers are wrong, or it is just
+    a slow way of printing the library."""
+    from hwcase.audit import audit_part
+
+    part = lib["adafruit-4741-oled-1v5"].model_copy(deep=True)
+    part.outline = part.outline.model_copy(update={"size": (99.0, 99.0)})
+    result = audit_part(part)
+    assert result.checked
+    assert any(f.kind == "outline" for f in result.findings)

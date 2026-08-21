@@ -4,6 +4,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { snapDelta, snapLines } from './snap.js';
 import { FINISHES, finishFor } from './finishes.js';
 import { createHistory } from './history.js';
+import { STOCK, restockName } from './stock.js';
 
 // ---------------------------------------------------------------------------
 // state
@@ -48,6 +49,7 @@ async function applyScene(scene) {
   $('sel-interior').value = state.scene.case?.interior || 'pocketed';
   renderCaseScrews();
   renderRenderPanel();
+  renderEngravePanel();
   await doResolve();
   buildGizmo();
 }
@@ -149,6 +151,8 @@ const gizmoGroup = new THREE.Group();
 const openingGroup = new THREE.Group();
 const snapGroup = new THREE.Group();
 const supportGroup = new THREE.Group();
+const engraveGroup = new THREE.Group();
+view.add(engraveGroup);
 view.add(solidsGroup, caseGroup, corridorGroup, panelGroup, gizmoGroup,
          openingGroup, snapGroup, supportGroup);
 
@@ -449,6 +453,7 @@ function buildCase(caseModel) {
     mesh.castShadow = mesh.receiveShadow = true;
     caseGroup.add(mesh);
   }
+  buildEngravings(caseModel);
 }
 
 // ---------------------------------------------------------------------------
@@ -711,10 +716,46 @@ let issuesSig = null;
 
 /** The case's material stack, bottom sheet first. Colour is what the preview
  *  paints with; the preset behind the name decides how it catches the light. */
+/** Re-stock every layer at once.
+ *
+ *  The per-layer controls below are the fine grain, and most of the time what
+ *  someone wants is "the whole thing in smoked acrylic" -- which was eleven
+ *  separate colour pickers away.
+ *
+ *  Thickness is left alone: it is a structural number, not an appearance one,
+ *  and quietly changing it here would move every board in the case.
+ */
+function restockCase(stock) {
+  const mats = state.scene?.case?.materials || [];
+  if (!mats.length) return;
+  edit();
+  for (const m of mats) {
+    m.name = restockName(m.name, stock);
+    m.color = stock.color;
+  }
+  renderMaterials();
+  buildCase(state.caseModel);
+  status(`whole case in ${stock.label}`, 'ok');
+}
+
 function renderMaterials() {
   const list = $('material-list');
   list.innerHTML = '';
   const mats = state.scene?.case?.materials || [];
+
+  const bar = document.createElement('div');
+  bar.className = 'field';
+  bar.innerHTML = '<label title="set every layer at once">all layers</label>' +
+    `<select id="stock-all"><option value="">choose stock&hellip;</option>` +
+    STOCK.map((v, i) => `<option value="${i}">${v.label}</option>`).join('') +
+    '</select>';
+  list.appendChild(bar);
+  $('stock-all').onchange = (ev) => {
+    const pick = STOCK[Number(ev.target.value)];
+    ev.target.value = '';
+    if (pick) restockCase(pick);
+  };
+
   mats.forEach((m, i) => {
     const f = finishFor(m);
     const hex = '#' + f.color.toString(16).padStart(6, '0');
@@ -740,7 +781,10 @@ function renderMaterials() {
     };
     list.appendChild(row);
   });
-  if (!mats.length) list.innerHTML = '<div class="note">no materials in this scene</div>';
+  if (!mats.length) {
+    list.insertAdjacentHTML('beforeend',
+      '<div class="note">no materials in this scene</div>');
+  }
 }
 
 /** Bolts through the whole stack.
@@ -1571,6 +1615,7 @@ async function loadScene(name) {
   $('sel-interior').value = state.scene.case?.interior || 'pocketed';
   renderCaseScrews();
   renderRenderPanel();
+  renderEngravePanel();
   state.selection = null;
   shellFor = placementsSig = issuesSig = null;
   await doResolve();
@@ -1970,7 +2015,10 @@ function wireCatalog() {
 // menus, panes, and the help that used to be a permanent strip of text
 // ---------------------------------------------------------------------------
 
-const VERSION = '0.2.0';
+// Read from the server rather than kept here: two copies of a version
+// number drift, and the one that matters is the one that computed the
+// geometry.
+let VERSION = '?';
 
 function wireMenus() {
   const menus = [...document.querySelectorAll('.menu')];
@@ -2054,7 +2102,9 @@ knobs &mdash; so the case knows what it has to avoid, not just how big the
 board is.</p>
 <p><b>Check</b> the issues pane. It is not decoration: it is the difference
 between a case that goes together and one that needs a file. "unverified"
-means a number came from a shop page rather than a measurement.</p>
+means a number came from a shop page rather than a measurement. A board you
+imported from the catalogue has <i>no connectors</i> until you add them, so it
+asks the case for no cable room at all &mdash; that one is worth remembering.</p>
 <p><b>Cut</b> with export SVG or DXF.</p>
 
 <h3>what the case pane decides</h3>
@@ -2069,6 +2119,17 @@ reported rather than drilled.</p>
 <p><b>Min web</b> is the narrowest strip of material you are willing to cut.
 Anything thinner is opened out, because a 1 mm thread of plywood snaps the
 first time it is handled.</p>
+
+<h3>decorating the panel</h3>
+<p>The <b>look</b> pane engraves the lid: fins, grills, rings, hex mesh, rules
+and frames. Engraving is a <i>separate pass</i> &mdash; blue in the SVG, its own
+DXF layer, titled &ldquo;do not cut&rdquo; &mdash; because a laser that runs a
+grill as a cut hands you a faceplate with the middle missing. If you actually
+want it cut through there is a switch for that, and you are on your own for
+whether the panel still holds together.</p>
+<p>The same pane lights the preview and, if Mitsuba is installed, traces a
+finished photograph using the same environment, so the picture looks like the
+thing you were designing.</p>
 
 <h3>what it will not do for you</h3>
 <p>It does not check your wiring, and it does not know that a board needs
@@ -2242,6 +2303,17 @@ function renderRenderPanel() {
       <input type="range" id="r-ao" min="0" max="1" step="0.05" value="${s.ao}"></div>
     <p class="note">These affect the preview only. Nothing here changes a cut
       line &mdash; the geometry is the same whichever way it is lit.</p>
+
+    <h2>final image</h2>
+    <div class="field"><label title="more samples, less noise -- noise falls with the square root, so four times the samples is half the grain">quality</label>
+      <select id="r-samples">
+        <option value="48">draft</option>
+        <option value="128" selected>good</option>
+        <option value="384">slow and clean</option>
+      </select></div>
+    <button id="btn-shoot">render a photograph</button>
+    <p class="note" id="r-shoot-note">Traced properly, on the server, using the
+      same light as the preview. Takes minutes, not milliseconds.</p>
   `;
 
   $('r-env').onchange = async () => {
@@ -2271,6 +2343,224 @@ function renderRenderPanel() {
     setRender('ao', parseFloat($('r-ao').value));
     buildCase(state.caseModel);
   };
+  $('btn-shoot').onclick = shootPhotograph;
+  refreshShootAvailability();
+}
+
+/** The renderer is an optional install, so say up front whether it is there
+ *  rather than letting the button fail when it is pressed. */
+async function refreshShootAvailability() {
+  try {
+    const r = await api('/api/render/status');
+    if (r.available) return;
+    $('btn-shoot').disabled = true;
+    $('r-shoot-note').textContent = r.hint;
+    $('r-shoot-note').classList.add('warn');
+  } catch {
+    /* the status endpoint is a courtesy; the button still works without it */
+  }
+}
+
+async function shootPhotograph() {
+  const btn = $('btn-shoot');
+  const note = $('r-shoot-note');
+  const s = renderSettings();
+  btn.disabled = true;
+  note.classList.remove('warn');
+  note.textContent = 'tracing… this takes minutes, and the editor stays usable';
+
+  const started = Date.now();
+  try {
+    const q = new URLSearchParams({
+      samples: $('r-samples').value,
+      env: s.env === 'room' ? 'studio' : s.env,   // no HDRI for the fake room
+    });
+    const res = await fetch(`/api/render?${q}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(state.scene),
+    });
+    if (!res.ok) throw new Error((await res.text()).slice(0, 300));
+
+    const url = URL.createObjectURL(await res.blob());
+    const secs = Math.round((Date.now() - started) / 1000);
+    // Shown rather than downloaded: the usual next step is deciding whether
+    // the angle was right, and that wants looking at, not saving.
+    showModal(`render — ${secs}s`,
+      `<p><img src="${url}" style="max-width:100%;border-radius:4px"></p>
+       <p class="note">Right-click to save. Lit by the ${s.env} environment,
+       the same one the preview uses.</p>`);
+    note.textContent = `done in ${secs}s`;
+  } catch (err) {
+    note.textContent = err.message;
+    note.classList.add('warn');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+
+
+// ---------------------------------------------------------------------------
+// front-panel engraving
+// ---------------------------------------------------------------------------
+//
+// A cut goes through the sheet and changes the shape of the part; an engrave
+// marks the surface and changes nothing structural. The UI keeps them apart
+// as firmly as the exporter does, and "cut through" is a deliberate switch
+// with a warning on it rather than a subtle difference in a dropdown.
+
+const PATTERNS = {
+  fins: 'parallel fins — the amplifier front-panel look',
+  slots: 'rounded slots in rows, like a speaker grill',
+  rings: 'concentric rings, for a speaker or a big knob',
+  hex: 'hex mesh; the most machined-looking of them',
+  rule: 'one hairline, for separating groups of controls',
+  frame: 'a border following the edge of the region',
+};
+
+// Starting points that look right without fiddling. A grill whose defaults
+// need three adjustments before it stops looking like a test pattern is a
+// grill nobody uses.
+const ENGRAVE_PRESETS = {
+  fins: { stroke: 1.2, pitch: 3.0, size: [70, 34], round_ends: true },
+  slots: { stroke: 1.6, pitch: 2.2, size: [64, 28], round_ends: true },
+  rings: { stroke: 0.8, pitch: 2.4, size: [40, 40], round_ends: true },
+  hex: { stroke: 0.7, pitch: 5.0, size: [60, 40], round_ends: false },
+  rule: { stroke: 0.6, pitch: 3.0, size: [80, 4], round_ends: true },
+  frame: { stroke: 1.0, pitch: 3.0, size: [80, 50], round_ends: false },
+};
+
+function engravings() {
+  if (!state.scene) return [];
+  if (!state.scene.engravings) state.scene.engravings = [];
+  return state.scene.engravings;
+}
+
+function addEngraving(pattern = 'fins') {
+  const p = ENGRAVE_PRESETS[pattern];
+  const n = engravings().length + 1;
+  edit();
+  engravings().push({
+    name: `${pattern} ${n}`, pattern,
+    at: [0, 0], size: [...p.size], rotation: 0,
+    stroke: p.stroke, pitch: p.pitch, round_ends: p.round_ends, through: false,
+  });
+  renderEngravePanel();
+  refreshCase();
+}
+
+function renderEngravePanel() {
+  const box = $('engrave-panel');
+  if (!box) return;
+  const list = engravings();
+
+  box.innerHTML = `
+    <div class="field">
+      <label>add</label>
+      <select id="eng-add">
+        <option value="">choose a pattern&hellip;</option>
+        ${Object.entries(PATTERNS).map(([k, v]) =>
+          `<option value="${k}">${k} — ${v}</option>`).join('')}
+      </select>
+    </div>
+    <div id="eng-list"></div>
+    ${list.length ? '' : `<p class="note">Nothing engraved yet. Marks go on
+      the top face of the lid and are exported as their own pass, in blue,
+      on their own DXF layer — a cutter must never run them as cuts.</p>`}
+  `;
+
+  $('eng-add').onchange = () => {
+    const v = $('eng-add').value;
+    if (v) addEngraving(v);
+    $('eng-add').value = '';
+  };
+
+  const holder = $('eng-list');
+  list.forEach((e, i) => {
+    const el = document.createElement('div');
+    el.className = 'engrow' + (e.through ? ' through' : '');
+    el.innerHTML = `
+      <div class="engrow-head">
+        <input type="text" class="eng-name" value="${escapeHtml(e.name)}" title="name">
+        <button class="eng-del" title="remove this engraving">&times;</button>
+      </div>
+      <div class="field"><label>pattern</label>
+        <select class="eng-pattern">${Object.keys(PATTERNS).map((k) =>
+          `<option value="${k}"${k === e.pattern ? ' selected' : ''}>${k}</option>`).join('')}
+        </select></div>
+      <div class="field"><label>centre</label>
+        <input type="number" class="eng-x" step="1" value="${e.at[0]}">
+        <input type="number" class="eng-y" step="1" value="${e.at[1]}"></div>
+      <div class="field"><label>size</label>
+        <input type="number" class="eng-w" step="1" min="1" value="${e.size[0]}">
+        <input type="number" class="eng-h" step="1" min="1" value="${e.size[1]}"></div>
+      <div class="field"><label title="width of one mark">stroke</label>
+        <input type="number" class="eng-stroke" step="0.1" min="0.1" value="${e.stroke}">
+        <label title="gap between marks">pitch</label>
+        <input type="number" class="eng-pitch" step="0.1" min="0.1" value="${e.pitch}"></div>
+      <div class="field"><label>angle</label>
+        <input type="number" class="eng-rot" step="15" value="${e.rotation}"><span class="unit">deg</span></div>
+      <label class="check"><input type="checkbox" class="eng-round"${e.round_ends ? ' checked' : ''}> rounded ends</label>
+      <label class="check danger"><input type="checkbox" class="eng-through"${e.through ? ' checked' : ''}>
+        cut right through</label>
+      ${e.through ? `<p class="note warn">This one is cut, not engraved — it
+        comes out of the plate. Check the panel still holds together.</p>` : ''}
+    `;
+
+    const num = (sel) => parseFloat(el.querySelector(sel).value);
+    const set = (fn) => { edit(); fn(); refreshCase(); };
+
+    el.querySelector('.eng-del').onclick = () => {
+      edit();
+      list.splice(i, 1);
+      renderEngravePanel();
+      refreshCase();
+    };
+    el.querySelector('.eng-name').onchange = (ev) => set(() => { e.name = ev.target.value; });
+    el.querySelector('.eng-pattern').onchange = (ev) => {
+      // Switching pattern brings its preset with it, otherwise a hex mesh
+      // inherits fin spacing and looks like a mistake.
+      const p = ENGRAVE_PRESETS[ev.target.value];
+      set(() => {
+        e.pattern = ev.target.value;
+        e.stroke = p.stroke; e.pitch = p.pitch; e.round_ends = p.round_ends;
+      });
+      renderEngravePanel();
+    };
+    el.querySelector('.eng-x').onchange = () => set(() => { e.at = [num('.eng-x'), e.at[1]]; });
+    el.querySelector('.eng-y').onchange = () => set(() => { e.at = [e.at[0], num('.eng-y')]; });
+    el.querySelector('.eng-w').onchange = () => set(() => { e.size = [num('.eng-w'), e.size[1]]; });
+    el.querySelector('.eng-h').onchange = () => set(() => { e.size = [e.size[0], num('.eng-h')]; });
+    el.querySelector('.eng-stroke').onchange = () => set(() => { e.stroke = num('.eng-stroke'); });
+    el.querySelector('.eng-pitch').onchange = () => set(() => { e.pitch = num('.eng-pitch'); });
+    el.querySelector('.eng-rot').onchange = () => set(() => { e.rotation = num('.eng-rot'); });
+    el.querySelector('.eng-round').onchange = (ev) => set(() => { e.round_ends = ev.target.checked; });
+    el.querySelector('.eng-through').onchange = (ev) => {
+      set(() => { e.through = ev.target.checked; });
+      renderEngravePanel();
+    };
+    holder.appendChild(el);
+  });
+}
+
+/** Draw the marks on the lid, so you can see them without exporting. */
+function buildEngravings(caseModel) {
+  engraveGroup.clear();
+  if (!caseModel || !$('chk-case').checked) return;
+  for (const layer of caseModel.layers) {
+    if (!layer.engrave?.length) continue;
+    const shapes = shapesFromRings(layer.engrave);
+    if (!shapes.length) continue;
+    // A shallow extrusion rather than a flat plane: coplanar with the lid it
+    // would z-fight, and a mark you cannot see is not a preview.
+    const geom = new THREE.ExtrudeGeometry(shapes, {
+      depth: 0.35, bevelEnabled: false, curveSegments: 6 });
+    const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
+      color: 0x1a1d22, roughness: 0.95, metalness: 0.0 }));
+    mesh.position.z = layer.z1 - 0.3;
+    engraveGroup.add(mesh);
+  }
 }
 
 
@@ -2288,7 +2578,9 @@ function renderRenderPanel() {
   wireTabs();
   wireHelp();
   renderRenderPanel();
+  renderEngravePanel();
   try {
+    api('/api/health').then((h) => { VERSION = h.version ?? '?'; }).catch(() => {});
     const { parts } = await api('/api/parts');
     state.parts = parts;
     state.partsById = new Map(parts.map((p) => [p.id, p]));

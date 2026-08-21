@@ -216,3 +216,21 @@ def z_overlap(a: Vec2, b: Vec2, tol: float = 1e-6) -> float:
 
 def area(geom: BaseGeometry) -> float:
     return float(getattr(geom, "area", 0.0))
+
+def polygons(geom) -> list[Polygon]:
+    """Every polygon in a geometry, however it is wrapped.
+
+    Shapely hands back whatever the last operation produced, and clipping a
+    pattern to a plate full of holes readily produces a GeometryCollection
+    with stray lines in it. Code that only checks for Polygon and MultiPolygon
+    silently sees nothing in that case -- which is how an engraving made it all
+    the way to the renderer and then quietly failed to appear.
+    """
+    if geom is None or geom.is_empty:
+        return []
+    if isinstance(geom, Polygon):
+        return [geom]
+    out: list[Polygon] = []
+    for g in getattr(geom, "geoms", []):
+        out.extend(polygons(g))          # a collection can nest
+    return [p for p in out if not p.is_empty]

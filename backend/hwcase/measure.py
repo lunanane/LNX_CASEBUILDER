@@ -32,9 +32,9 @@ from typing import Optional, Sequence
 import numpy as np
 
 __all__ = [
-    "Band", "Step", "Measurement", "HoleGroup",
-    "load_points", "z_bands", "feature_stack", "measure", "step_holes",
-    "name_steps", "to_yaml_block",
+    "Band", "Body", "Step", "Measurement", "HoleGroup",
+    "bodies", "load_points", "z_bands", "feature_stack", "measure",
+    "step_holes", "name_bodies", "to_yaml_block",
 ]
 
 
@@ -385,3 +385,139 @@ def bodies(path: Path, min_footprint: float = 0.0) -> list[Body]:
         if b.footprint >= min_footprint:
             out.append(b)
     return sorted(out, key=lambda b: -b.footprint)
+
+
+# ---------------------------------------------------------------------------
+# the whole part
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Measurement:
+    """Everything we could read off one part's CAD, in our frame.
+
+    Our frame is: origin at the board's minimum corner, z = 0 at the bottom of
+    the board. Vendor models land wherever their author left them, so
+    everything is shifted -- otherwise every part carries an arbitrary offset
+    that somebody has to remember, and sooner or later somebody does not.
+    """
+
+    source: str
+    size: tuple[float, float, float]
+    origin: tuple[float, float, float]
+    bodies: list[Body] = field(default_factory=list)
+    holes: list[HoleGroup] = field(default_factory=list)
+    pcb: Optional[Body] = None
+    notes: list[str] = field(default_factory=list)
+
+    @property
+    def pcb_thickness(self) -> Optional[float]:
+        return round(self.pcb.height, 2) if self.pcb else None
+
+    @property
+    def features(self) -> list[Body]:
+        """Everything that is not the board itself, biggest first."""
+        return [b for b in self.bodies if b is not self.pcb]
+
+
+def _pick_board(found: Sequence[Body]) -> Optional[Body]:
+    """Which body is the board.
+
+    Broadest thing that is board-thick. Worth being fussy about: the 1.5"
+    OLED's display module is nearly as broad as its PCB, and only the
+    thickness tells them apart -- and getting it wrong moves the datum that
+    every mount height in the case is measured from.
+    """
+    if not found:
+        return None
+    board_like = [b for b in found if 0.6 <= b.height <= 2.6]
+    return max(board_like or list(found), key=lambda b: b.footprint)
+
+
+def measure(path: Path, *, step_file: Optional[Path] = None,
+            min_footprint: float = 0.0) -> Measurement:
+    """Measure one part, normalised into our frame."""
+    path = Path(path)
+    found = bodies(path, min_footprint=min_footprint)
+    if not found:
+        raise ValueError(f"{path.name}: no geometry")
+
+    board = _pick_board(found)
+    dx, dy, dz = board.x0, board.y0, board.z0
+    shifted = [b.shifted(dx, dy, dz) for b in found]
+    board_shifted = shifted[found.index(board)]
+
+    lo = (min(b.x0 for b in found), min(b.y0 for b in found),
+          min(b.z0 for b in found))
+    hi = (max(b.x1 for b in found), max(b.y1 for b in found),
+          max(b.z1 for b in found))
+    size = (hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2])
+
+    m = Measurement(source=path.name, size=size, origin=(dx, dy, dz),
+                    bodies=shifted, pcb=board_shifted)
+
+    if step_file is None and path.suffix.lower() in (".step", ".stp"):
+        step_file = path
+    if step_file is None:
+        # The STL has no holes in it -- a mesh of a board is a slab and the
+        # drilling is gone -- so look for a STEP beside it.
+        for candidate in sorted(path.parent.glob("*.ste*")):
+            step_file = candidate
+            break
+    if step_file is not None and Path(step_file).exists():
+        try:
+            m.holes = step_holes(Path(step_file))
+        except Exception as exc:      # pragma: no cover - malformed vendor file
+            m.notes.append(f"hole extraction failed: {exc}")
+    else:
+        m.notes.append("no STEP beside this mesh, so no mounting holes")
+
+    if len(found) == 1:
+        m.notes.append("one body only -- the model may be a simplified block")
+    return m
+
+
+def name_bodies(m: Measurement) -> None:
+    """Give the bodies plausible names, so generated YAML reads like YAML.
+
+    Guesses, and the confidence on the part says so -- but `top_1` beats
+    `body_3` when somebody opens the file to check it.
+    """
+    above = below = 0
+    for b in m.bodies:
+        if b is m.pcb:
+            b.name = "pcb"
+        elif b.z0 >= -1e-9:
+            above += 1
+            b.name = f"top_{above}"
+        else:
+            below += 1
+            b.name = f"under_{below}"
+
+
+def to_yaml_block(m: Measurement, indent: str = "    ",
+                  min_footprint: float = 20.0) -> str:
+    """A `volumes:` block ready to paste, one entry per real body.
+
+    The board itself is left out: the solver already extrudes the outline into
+    a solid called `pcb`, and a declared volume of the same name collides with
+    it -- which once made a full-size panel look like it was hovering in mid
+    air with nothing underneath.
+    """
+    name_bodies(m)
+    out = [f"{indent}volumes:"]
+    for b in m.features:
+        if b.footprint < min_footprint:
+            continue
+        cx, cy = b.centre
+        w, d, _h = b.size
+        out += [
+            f"{indent}  - name: {b.name}",
+            f"{indent}    kind: body",
+            f"{indent}    at: [{cx:.2f}, {cy:.2f}]",
+            f"{indent}    size: [{w:.2f}, {d:.2f}]",
+            f"{indent}    z: [{b.z0:.2f}, {b.z1:.2f}]",
+            f'{indent}    src: {{confidence: datasheet, note: "from {m.source}"}}',
+        ]
+    if len(out) == 1:
+        out.append(f"{indent}  []   # nothing stands proud of the board")
+    return "\n".join(out)
