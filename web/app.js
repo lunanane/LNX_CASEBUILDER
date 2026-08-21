@@ -46,6 +46,8 @@ async function applyScene(scene) {
   }
   shellFor = placementsSig = issuesSig = null;
   $('sel-interior').value = state.scene.case?.interior || 'pocketed';
+  renderCaseScrews();
+  renderRenderPanel();
   await doResolve();
   buildGizmo();
 }
@@ -379,6 +381,43 @@ function buildSupports(resolved) {
   }
 }
 
+
+/** Darken the walls of a slab where they meet the slabs above and below.
+ *
+ *  A stack of flat sheets has almost nothing concave in it, so a screen-space
+ *  AO pass finds very little to darken and costs a full postprocessing chain
+ *  to run. What actually reads as "these are separate pieces of plywood" is
+ *  the shadow line in the seam between two of them, and that is a function of
+ *  position within the slab -- so it can simply be baked in.
+ *
+ *  Only the walls: the flat faces are what you look at, and dimming those
+ *  would just make the whole model muddy. Returns whether it did anything, so
+ *  the material only pays for vertex colours when there are some.
+ */
+function bakeContactShading(geom, depth, strength) {
+  if (!(strength > 0) || depth <= 0) return false;
+  const pos = geom.getAttribute('position');
+  const nrm = geom.getAttribute('normal');
+  if (!pos || !nrm) return false;
+
+  const col = new Float32Array(pos.count * 3).fill(1);
+  // How far in from a seam the darkening reaches. Fixed in millimetres, not a
+  // fraction of the thickness: a shadow in a joint is about the same width
+  // whether the sheet is 3 mm or 12 mm.
+  const reach = Math.min(1.2, depth / 2);
+
+  for (let i = 0; i < pos.count; i++) {
+    if (Math.abs(nrm.getZ(i)) > 0.5) continue;          // a cap, not a wall
+    const z = pos.getZ(i);
+    const d = Math.min(z, depth - z);                   // distance to a seam
+    if (d >= reach) continue;
+    const shade = 1 - strength * (1 - d / reach);
+    col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = shade;
+  }
+  geom.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return true;
+}
+
 function buildCase(caseModel) {
   caseGroup.clear();
   if (!caseModel || !$('chk-case').checked) return;
@@ -400,10 +439,11 @@ function buildCase(caseModel) {
     const depth = Math.max(layer.z1 - layer.z0 - 0.05, 0.05);
     const geom = new THREE.ExtrudeGeometry(shapes, {
       depth, bevelEnabled: false, curveSegments: 6 });
+    const ao = bakeContactShading(geom, depth, renderSettings().ao);
     const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
       color: finish.color, roughness: finish.roughness, metalness: finish.metalness,
       transparent: finish.opacity < 1, opacity: finish.opacity,
-      side: THREE.DoubleSide,
+      side: THREE.DoubleSide, vertexColors: ao,
     }));
     mesh.position.z = layer.z0 + 0.025;
     mesh.castShadow = mesh.receiveShadow = true;
@@ -601,6 +641,7 @@ async function refreshCase() {
       method: 'POST', body: JSON.stringify(state.scene),
     });
     buildCase(state.caseModel);
+    renderCaseScrews();
   } catch (err) {
     console.warn('case build failed', err);
   }
@@ -702,6 +743,77 @@ function renderMaterials() {
   if (!mats.length) list.innerHTML = '<div class="note">no materials in this scene</div>';
 }
 
+/** Bolts through the whole stack.
+ *
+ *  These are what turn a pile of sheets into a case, so they get their own
+ *  section rather than another checkbox in the toolbar. Every field writes
+ *  straight to scene.case and rebuilds, because the only way to judge a screw
+ *  pattern is to look at it.
+ */
+const SCREW_FIELDS = {
+  'cs-inset': 'case_screw_inset',
+  'cs-d': 'case_screw_d',
+  'cs-head': 'case_screw_head',
+  'cs-spacing': 'case_screw_spacing',
+  'cs-min-seg': 'min_segment',
+};
+
+function renderCaseScrews() {
+  const c = state.scene?.case;
+  if (!c) return;
+  const mode = c.case_screws || 'none';
+  $('cs-mode').value = mode;
+  $('cs-center').checked = !!c.case_screw_center;
+  for (const [id, key] of Object.entries(SCREW_FIELDS)) {
+    const el = $(id);
+    if (document.activeElement !== el) el.value = c[key] ?? '';
+  }
+  // spacing only means anything when there are edge bolts to space
+  $('cs-spacing').disabled = mode !== 'perimeter';
+  for (const id of ['cs-inset', 'cs-d', 'cs-head']) $(id).disabled = mode === 'none';
+
+  // The build tells us if a bolt is about to go through a board; that is the
+  // one thing here worth interrupting for.
+  const hits = new Set();
+  for (const l of state.caseModel?.layers || []) {
+    for (const n of l.notes || []) {
+      const m = /^case bolt at \(([-\d.]+), ([-\d.]+)\) runs into (.+)$/.exec(n);
+      if (m) hits.add(`(${m[1]}, ${m[2]}) hits ${m[3]}`);
+    }
+  }
+  $('cs-note').textContent = hits.size
+    ? `bolt ${[...hits].join('; ')} — move the board or the screw`
+    : '';
+}
+
+function wireCaseScrews() {
+  const push = () => {
+    if (!$('chk-case').checked) $('chk-case').checked = true;
+    renderCaseScrews();
+    refreshCase().then(renderCaseScrews);
+    scheduleResolve(0);
+  };
+  $('cs-mode').onchange = () => {
+    edit();
+    state.scene.case.case_screws = $('cs-mode').value;
+    push();
+  };
+  $('cs-center').onchange = () => {
+    edit();
+    state.scene.case.case_screw_center = $('cs-center').checked;
+    push();
+  };
+  for (const [id, key] of Object.entries(SCREW_FIELDS)) {
+    $(id).onchange = () => {
+      const v = parseFloat($(id).value);
+      if (!Number.isFinite(v) || v < 0) { renderCaseScrews(); return; }
+      edit();
+      state.scene.case[key] = v;
+      push();
+    };
+  }
+}
+
 /** Auto, or pinned where it is.
  *
  *  While the outline is derived from the hardware's bounding box, pushing a
@@ -770,6 +882,9 @@ function renderIssues(issues) {
     el.onclick = () => { const ref = i.refs?.[0]; if (ref) select(ref.split('.')[0]); };
     list.appendChild(el);
   }
+  // A problem has to be visible from whichever pane you happen to be in,
+  // otherwise panes just hide things better than one long scroll did.
+  markIssueCount(issues);
 }
 
 // ---------------------------------------------------------------------------
@@ -1401,6 +1516,15 @@ renderer.domElement.addEventListener('pointercancel', endDrag, { capture: true }
 // keyboard
 // ---------------------------------------------------------------------------
 
+async function timeTravel(redo) {
+  const next = redo ? history.redo(state.scene) : history.undo(state.scene);
+  if (!next) { status(redo ? 'nothing to redo' : 'nothing to undo'); return; }
+  await applyScene(next);
+  status(redo ? 'redone' : `undone (${history.depth} left)`, 'ok');
+}
+document.addEventListener('hw-undo', () => timeTravel(false));
+document.addEventListener('hw-redo', () => timeTravel(true));
+
 window.addEventListener('keydown', async (ev) => {
   // undo works even from a field: it is the one shortcut you want everywhere
   const z = (ev.key === 'z' || ev.key === 'Z');
@@ -1445,6 +1569,8 @@ async function loadScene(name) {
   state.scene = await api(`/api/scenes/${encodeURIComponent(name)}`);
   history.clear();
   $('sel-interior').value = state.scene.case?.interior || 'pocketed';
+  renderCaseScrews();
+  renderRenderPanel();
   state.selection = null;
   shellFor = placementsSig = issuesSig = null;
   await doResolve();
@@ -1559,6 +1685,10 @@ const turnSelection = (dir) => {
   quarterTurn(pl, dir);
   scheduleResolve(0);
 };
+$('btn-undo').onclick = () => document.dispatchEvent(new Event('hw-undo'));
+$('btn-redo').onclick = () => document.dispatchEvent(new Event('hw-redo'));
+$('btn-delete').onclick = () => removeSelected();
+$('btn-frame').onclick = () => frameCamera();
 $('btn-ccw').onclick = () => turnSelection(1);
 $('btn-cw').onclick = () => turnSelection(-1);
 
@@ -1579,8 +1709,11 @@ $('chk-panels').onchange = () => buildPanels(state.resolved);
  *  guides and diagnostic overlays only make sense in the former. */
 function applyRenderMode() {
   const on = $('chk-render').checked;
+  const rs = renderSettings();
   view.background = new THREE.Color(on ? 0x0d0f12 : 0x14161a);
-  view.environment = on ? envTexture : null;
+  view.environment = on ? (envCache.get(rs.env) ?? envTexture) : null;
+  renderer.toneMappingExposure = rs.exposure;
+  renderer.shadowMap.enabled = on && rs.shadows;
   ground.visible = on;
   grid.visible = axes.visible = !on && $('chk-grid').checked;
   sun.visible = on;
@@ -1595,6 +1728,10 @@ function applyRenderMode() {
     const e = state.resolved?.extent;
     ground.position.z = e ? e.min[2] - 0.6 : -8;
     placeSun();
+    // The chosen environment may not be in memory yet; this is the one place
+    // that notices and fetches it.
+    if (!envCache.has(rs.env)) applyEnvironment(rs.env);
+    else applyEnvironment(rs.env);
   }
   buildCase(state.caseModel);
   document.body.classList.toggle('rendering', on);
@@ -1610,6 +1747,533 @@ $('chk-grid').onchange = () => {
 };
 $('scene-select').onchange = (ev) => loadScene(ev.target.value);
 
+
+// ---------------------------------------------------------------------------
+// modal sheets
+// ---------------------------------------------------------------------------
+//
+// One sheet serves the import report, the manual and the about box. They all
+// want the same thing: say something at length, offer a couple of actions, and
+// get out of the way. Escape and a click on the backdrop both close it, because
+// a dialog you cannot dismiss with Escape is a dialog people learn to dread.
+
+let modalPrevFocus = null;
+
+function showModal(title, bodyHtml, actions = []) {
+  $('modal-title').textContent = title;
+  $('modal-body').innerHTML = bodyHtml;
+
+  const bar = $('modal-actions');
+  bar.innerHTML = '';
+  for (const a of actions) {
+    const b = document.createElement('button');
+    b.textContent = a.label;
+    b.onclick = () => { closeModal(); a.act?.(); };
+    bar.appendChild(b);
+  }
+  const close = document.createElement('button');
+  close.textContent = actions.length ? 'close' : 'got it';
+  close.onclick = closeModal;
+  bar.appendChild(close);
+
+  modalPrevFocus = document.activeElement;
+  $('modal').hidden = false;
+  close.focus();
+}
+
+/** Same, but for plain text: paragraphs split on blank lines. */
+function showAbout(title, text, actions = []) {
+  const html = String(text).split('\n\n')
+    .map((p) => `<p>${escapeHtml(p)}</p>`).join('');
+  showModal(title, html, actions);
+}
+
+function closeModal() {
+  $('modal').hidden = true;
+  $('modal-body').innerHTML = '';
+  modalPrevFocus?.focus?.();
+  modalPrevFocus = null;
+}
+
+function wireModal() {
+  $('modal').onpointerdown = (ev) => {
+    if (ev.target === $('modal')) closeModal();   // backdrop only
+  };
+  // Capture, so Escape closes the sheet instead of clearing the selection
+  // behind it.
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && !$('modal').hidden) {
+      ev.stopPropagation();
+      closeModal();
+    }
+  }, true);
+}
+
+// ---------------------------------------------------------------------------
+// the vendor catalogue
+// ---------------------------------------------------------------------------
+//
+// The palette lists parts somebody has measured and vouched for. This searches
+// the other five and a half thousand things Adafruit sell, and imports one on
+// demand. Listing them all would bury the dozen that matter.
+//
+// An import is a draft, and the UI says so rather than smoothing it over: the
+// envelope and mounting holes are real, but the orientation is a guess and
+// there are no connectors at all, so the board asks the case for no cable room
+// until somebody adds them. Discovering that with a soldering iron in hand is
+// the outcome this warning exists to prevent.
+
+const catalog = { timer: null, seq: 0, busy: false, last: '' };
+
+function catStatus(msg, cls = '') {
+  const el = $('cat-status');
+  el.textContent = msg;
+  el.className = cls;
+}
+
+async function runCatalogSearch(q) {
+  const seq = ++catalog.seq;
+  try {
+    const r = await api(`/api/catalog/search?q=${encodeURIComponent(q)}&limit=20`);
+    if (seq !== catalog.seq) return;          // a later keystroke won already
+    renderCatalog(r.results, r.catalog);
+  } catch (err) {
+    if (seq !== catalog.seq) return;
+    catStatus(err.message, 'err');
+    $('cat-results').innerHTML = '';
+  }
+}
+
+function renderCatalog(results, status) {
+  const box = $('cat-results');
+  box.innerHTML = '';
+
+  if (status?.error && !status.products) {
+    catStatus('catalogue unavailable — ' + status.error, 'err');
+    return;
+  }
+  const age = status?.age_seconds;
+  const stale = status?.stale
+    ? ` · showing a cached copy${age ? ` ${Math.round(age / 3600)}h old` : ''}`
+    : '';
+  catStatus(results.length
+    ? `${results.length} of ${status.products} products${stale}`
+    : `nothing matches${stale}`);
+
+  for (const e of results) {
+    const row = document.createElement('div');
+    row.className = 'row cat-row' + (e.in_library ? ' have' : '');
+    const badge = e.in_library
+      ? '<span class="tag measured">in library</span>'
+      : (e.importable ? '<span class="tag datasheet">has CAD</span>'
+                      : '<span class="tag estimated">no CAD</span>');
+    row.innerHTML =
+      `<div class="name">${escapeHtml(e.name)}${badge}</div>` +
+      `<div class="meta">#${e.id}${e.category ? ' · ' + escapeHtml(e.category) : ''}</div>`;
+
+    if (e.in_library) {
+      row.title = 'already in the palette above — click to add it to the scene';
+      row.onclick = () => addPlacement(e.part_id);
+    } else if (e.importable) {
+      row.title = 'click to measure the vendor model and add it to the palette';
+      row.onclick = () => importProduct(e, row);
+    } else {
+      row.title = 'Adafruit publish no model for this one, so there is nothing '
+        + 'to measure — it would have to be entered by hand';
+      row.classList.add('disabled');
+    }
+    box.appendChild(row);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function importProduct(entry, row) {
+  if (catalog.busy) return;
+  catalog.busy = true;
+  row.classList.add('working');
+  catStatus(`fetching and measuring ${entry.name}…`);
+  try {
+    const r = await api(`/api/catalog/import/${entry.id}`, { method: 'POST' });
+    const { parts } = await api('/api/parts?reload=true');
+    state.parts = parts;
+    state.partsById = new Map(parts.map((p) => [p.id, p]));
+    renderParts();
+
+    // Say what was guessed. An imported board has no connectors, so it asks
+    // the case for no cable room -- that is worth interrupting for.
+    const lines = [
+      `${r.part.name} imported from ${r.bodies} bodies in ${r.source}.`,
+      'This is a DRAFT: the envelope and mounting holes are measured, but the '
+        + 'volumes are unnamed and it has no connectors, so it will ask the '
+        + 'case for no cable room until you add them.',
+    ];
+    if (r.flipped) lines.push('It was turned over — check the side you expect '
+      + 'to face the panel really does.');
+    for (const w of r.warnings || []) lines.push('· ' + w);
+    showAbout(`imported ${r.part.name}`, lines.join('\n\n'),
+      [{ label: 'add it to the scene', act: () => addPlacement(r.part.id) },
+       { label: 'undo the import', act: () => forgetPart(r.part.id) }]);
+    catStatus(`${r.part.name} added to the palette`);
+  } catch (err) {
+    catStatus(err.message, 'err');
+  } finally {
+    catalog.busy = false;
+    row.classList.remove('working');
+  }
+}
+
+async function forgetPart(partId) {
+  try {
+    await api(`/api/catalog/import/${encodeURIComponent(partId)}`,
+      { method: 'DELETE' });
+    const { parts } = await api('/api/parts?reload=true');
+    state.parts = parts;
+    state.partsById = new Map(parts.map((p) => [p.id, p]));
+    renderParts();
+    catStatus('import undone');
+  } catch (err) {
+    catStatus(err.message, 'err');
+  }
+}
+
+function wireCatalog() {
+  const input = $('cat-q');
+  input.oninput = () => {
+    const q = input.value.trim();
+    clearTimeout(catalog.timer);
+    if (q.length < 2) {
+      catalog.seq++;                          // cancel anything in flight
+      $('cat-results').innerHTML = '';
+      catStatus('');
+      return;
+    }
+    if (q === catalog.last) return;
+    catalog.last = q;
+    catStatus('searching…');
+    // Debounced: the catalogue is five and a half thousand rows and there is
+    // no reason to score it on every keystroke.
+    catalog.timer = setTimeout(() => runCatalogSearch(q), 220);
+  };
+  input.onkeydown = (ev) => {
+    ev.stopPropagation();                     // the editor owns R, Del, arrows
+    if (ev.key === 'Escape') { input.value = ''; input.oninput(); input.blur(); }
+  };
+}
+
+
+
+// ---------------------------------------------------------------------------
+// menus, panes, and the help that used to be a permanent strip of text
+// ---------------------------------------------------------------------------
+
+const VERSION = '0.2.0';
+
+function wireMenus() {
+  const menus = [...document.querySelectorAll('.menu')];
+
+  const closeAll = (except) => {
+    for (const m of menus) {
+      if (m === except) continue;
+      m.classList.remove('open');
+      m.querySelector('.menu-btn')?.setAttribute('aria-expanded', 'false');
+    }
+  };
+
+  for (const m of menus) {
+    const btn = m.querySelector('.menu-btn');
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      const open = !m.classList.contains('open');
+      closeAll(m);
+      m.classList.toggle('open', open);
+      btn.setAttribute('aria-expanded', String(open));
+    };
+    // Once one menu is open, sliding across the bar should open the next --
+    // that is what every menu bar does, and doing it differently feels broken.
+    m.onpointerenter = () => {
+      if (menus.some((x) => x.classList.contains('open'))) btn.onclick(new Event('x'));
+    };
+    // A menu item that acts and leaves the menu hanging open is worse than no
+    // menu, so anything clicked inside closes it.
+    m.querySelector('.menu-pop').addEventListener('click', (ev) => {
+      if (ev.target.closest('button')) closeAll(null);
+    });
+  }
+
+  window.addEventListener('pointerdown', () => closeAll(null));
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') closeAll(null);
+  });
+}
+
+function wireTabs() {
+  const tabs = [...document.querySelectorAll('.tabs .tab')];
+  const show = (id) => {
+    for (const t of tabs) {
+      const on = t.dataset.pane === id;
+      t.classList.toggle('active', on);
+      $(t.dataset.pane).hidden = !on;
+    }
+  };
+  for (const t of tabs) t.onclick = () => show(t.dataset.pane);
+  showPane = show;
+}
+
+let showPane = () => {};
+
+/** Badge the issues tab, so a problem is visible from whichever pane you are in. */
+function markIssueCount(issues) {
+  const el = $('issue-count');
+  const errs = issues.filter((i) => i.level === 'error').length;
+  const warns = issues.length - errs;
+  el.textContent = issues.length ? String(issues.length) : '';
+  el.className = errs ? 'err' : (warns ? 'warn' : '');
+}
+
+// ---------------------------------------------------------------------------
+// help
+// ---------------------------------------------------------------------------
+
+const MANUAL = `
+<p>hwcase builds an enclosure around hardware you already own, by stacking
+flat sheets. Every layer is a 2D outline, which means the same model is a
+laser job, a 2.5D milling job and a solid you can look at &mdash; there is no
+separate "export" model that can drift out of step with what you see.</p>
+
+<h3>the loop</h3>
+<p><b>Add</b> parts from the palette on the left. What is listed there has been
+measured and vouched for; the search box under it reaches the rest of what
+Adafruit sell and imports one on demand.</p>
+<p><b>Arrange</b> them by dragging. Boards snap edge to edge; hold <kbd>alt</kbd>
+to place one freely. A part carries its real volumes &mdash; sockets, glass,
+knobs &mdash; so the case knows what it has to avoid, not just how big the
+board is.</p>
+<p><b>Check</b> the issues pane. It is not decoration: it is the difference
+between a case that goes together and one that needs a file. "unverified"
+means a number came from a shop page rather than a measurement.</p>
+<p><b>Cut</b> with export SVG or DXF.</p>
+
+<h3>what the case pane decides</h3>
+<p><b>Interior</b> is what the layers between your boards look like.
+<i>pocketed</i> cuts each part its own recess; <i>hollow</i> takes out
+everything it can; <i>ribs</i> leaves stiffening walls; <i>grown</i> routes
+around the cables. All four keep the outer wall and all four guarantee an
+I2C lead can get from any board to any other.</p>
+<p><b>Bolts</b> clamp the stack together. Corners is usually enough; add edges
+for anything much over a hand's width. A bolt that would land on a board is
+reported rather than drilled.</p>
+<p><b>Min web</b> is the narrowest strip of material you are willing to cut.
+Anything thinner is opened out, because a 1 mm thread of plywood snaps the
+first time it is handled.</p>
+
+<h3>what it will not do for you</h3>
+<p>It does not check your wiring, and it does not know that a board needs
+airflow, or that you wanted the display the other way up. It reserves room for
+cables and tells you when something does not fit.</p>
+`;
+
+const SHORTCUTS = `
+<h3>mouse</h3>
+<p><kbd>drag a part</kbd> move it in its plane &middot;
+<kbd>shift + drag</kbd> move it in Z &middot;
+<kbd>drag the blue ring</kbd> rotate (hold <kbd>shift</kbd> for 15&deg; steps)
+&middot; <kbd>drag empty space</kbd> orbit &middot;
+<kbd>alt</kbd> while dragging bypasses snapping</p>
+
+<h3>keyboard</h3>
+<p><kbd>R</kbd> / <kbd>shift R</kbd> rotate 90&deg; &middot;
+<kbd>arrows</kbd> nudge 1&nbsp;mm, with <kbd>shift</kbd> 0.1&nbsp;mm &middot;
+<kbd>del</kbd> remove &middot; <kbd>esc</kbd> deselect &middot;
+<kbd>ctrl Z</kbd> / <kbd>ctrl shift Z</kbd> undo and redo &middot;
+<kbd>ctrl S</kbd> save &middot; <kbd>F1</kbd> this manual</p>
+`;
+
+function aboutHtml() {
+  const c = state.scene?.case;
+  const parts = state.parts?.length ?? 0;
+  return `
+<p><b>hwcase ${VERSION}</b> &mdash; parametric enclosures around real hardware.</p>
+<p>Parts are described once, in YAML, with where every number came from
+attached to it: <i>measured</i>, <i>datasheet</i>, <i>vendor</i>,
+<i>community</i> or <i>estimated</i>. Nothing in the geometry is a round
+number somebody liked the look of, and anything that is still a guess says so
+in the issues pane rather than quietly becoming a cut line.</p>
+<p>The case is a stack of 2D slabs, so a layer is simultaneously a laser
+outline, a milling pass and a solid. Geometry is shapely, the browser only
+draws &mdash; it never computes a cut line of its own, which is why what you
+see and what you cut cannot disagree.</p>
+<p>Loaded: ${parts} parts &middot; ${state.scene?.placements?.length ?? 0}
+placements &middot; case ${c?.interior ?? '?'},
+${(c?.materials ?? []).length} layers.</p>
+<p>Vendor models come from Adafruit's public CAD repository and their product
+API; both are cached locally, so the editor works with the network unplugged.</p>
+`;
+}
+
+function wireHelp() {
+  $('btn-manual').onclick = () => showModal('how this works', MANUAL);
+  $('btn-shortcuts').onclick = () => showModal('keyboard & mouse', SHORTCUTS);
+  $('btn-about').onclick = () => showModal(`about hwcase ${VERSION}`, aboutHtml());
+  $('btn-hint-more').onclick = () => showModal('keyboard & mouse', SHORTCUTS);
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key === 'F1') { ev.preventDefault(); showModal('how this works', MANUAL); }
+  });
+}
+
+
+
+// ---------------------------------------------------------------------------
+// image-based lighting
+// ---------------------------------------------------------------------------
+//
+// RoomEnvironment is a box with a few emissive panels in it. It is enough for
+// gloss to have *something* to reflect, and it is not enough for a picture:
+// everything comes out lit from nowhere in particular, and brushed aluminium
+// looks like grey plastic.
+//
+// These are real captured environments (Poly Haven, CC0, credits in
+// vendor/hdri/CREDITS.json), vendored at 1k because that is about 1.6 MB each
+// and a PMREM cares far more about the light in an environment than its
+// resolution. They load on demand and are cached: nobody should pay five
+// megabytes for a schematic view they never switch out of.
+
+const ENVIRONMENTS = {
+  room: { label: 'room (built in)', file: null,
+    hint: 'the synthetic box -- instant, and lit from nowhere in particular' },
+  studio: { label: 'studio', file: './vendor/hdri/studio.hdr',
+    hint: 'soft even light from large sources; the product-shot look' },
+  daylight: { label: 'daylight', file: './vendor/hdri/daylight.hdr',
+    hint: 'hard sun and blue sky; strong shadows, cool fill' },
+  dusk: { label: 'dusk', file: './vendor/hdri/dusk.hdr',
+    hint: 'low warm light against a dark surround; flatters metal' },
+};
+
+const envCache = new Map();          // key -> PMREM texture
+let envLoader = null;
+
+async function loadEnvironment(key) {
+  if (envCache.has(key)) return envCache.get(key);
+
+  const spec = ENVIRONMENTS[key];
+  if (!spec || !spec.file) {
+    envCache.set('room', envTexture);
+    return envTexture;
+  }
+
+  if (!envLoader) {
+    const { RGBELoader } = await import('./vendor/RGBELoader.js');
+    envLoader = new RGBELoader();
+  }
+  const hdr = await envLoader.loadAsync(spec.file);
+  hdr.mapping = THREE.EquirectangularReflectionMapping;
+  const tex = pmrem.fromEquirectangular(hdr).texture;
+  hdr.dispose();                      // the PMREM is all we keep
+  envCache.set(key, tex);
+  return tex;
+}
+
+async function applyEnvironment(key) {
+  const rendering = $('chk-render').checked;
+  try {
+    const tex = await loadEnvironment(key);
+    view.environment = rendering ? tex : null;
+    // Showing the environment as a backdrop only makes sense when it is a real
+    // place; the synthetic room as a backdrop is just a grey smear.
+    const asBackdrop = rendering && key !== 'room' && $('r-backdrop')?.checked;
+    view.background = asBackdrop ? tex
+      : new THREE.Color(rendering ? 0x0d0f12 : 0x14161a);
+    view.backgroundBlurriness = asBackdrop ? 0.25 : 0;
+    ground.visible = rendering && !asBackdrop;
+  } catch (err) {
+    status(`could not load the ${key} environment: ${err.message}`, 'err');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ambient occlusion
+// ---------------------------------------------------------------------------
+//
+// The cheap trick, and the reason it is the right one here: a stack of flat
+// slabs has no concave detail for a screen-space AO pass to find, but it has a
+// great many *edges*, and what actually reads as "these are separate sheets"
+// is contact darkening where one slab meets the next. A darkened rim baked
+// into the material does that convincingly, costs one shader tweak, and does
+// not need eight postprocessing files vendored to achieve it.
+//
+// Real GTAO is the next step up and is deliberately behind a switch: it needs
+// the whole EffectComposer chain, and on an integrated GPU at 4K it is the
+// difference between a live editor and a slideshow.
+
+const RENDER_DEFAULTS = {
+  env: 'studio', exposure: 1.0, backdrop: false, ao: 0.55, shadows: true,
+};
+
+function renderSettings() {
+  const s = state.scene?.view ?? {};
+  return { ...RENDER_DEFAULTS, ...s };
+}
+
+function setRender(key, value) {
+  if (!state.scene) return;
+  state.scene.view = { ...renderSettings(), [key]: value };
+}
+
+function renderRenderPanel() {
+  const box = $('render-panel');
+  if (!box) return;
+  const s = renderSettings();
+  box.innerHTML = `
+    <div class="field"><label>light</label>
+      <select id="r-env">${Object.entries(ENVIRONMENTS).map(([k, v]) =>
+        `<option value="${k}"${k === s.env ? ' selected' : ''}>${v.label}</option>`
+      ).join('')}</select></div>
+    <p class="note" id="r-env-hint">${ENVIRONMENTS[s.env]?.hint ?? ''}</p>
+    <label class="check"><input type="checkbox" id="r-backdrop"${s.backdrop ? ' checked' : ''}>
+      show it behind the case</label>
+    <label class="check"><input type="checkbox" id="r-shadows"${s.shadows ? ' checked' : ''}>
+      cast shadows</label>
+    <div class="field"><label title="film exposure; the environments are not all the same brightness">exposure</label>
+      <input type="range" id="r-exposure" min="0.2" max="2.5" step="0.05" value="${s.exposure}"></div>
+    <div class="field"><label title="darkening where one sheet meets the next -- what makes a stack read as separate slabs">contact</label>
+      <input type="range" id="r-ao" min="0" max="1" step="0.05" value="${s.ao}"></div>
+    <p class="note">These affect the preview only. Nothing here changes a cut
+      line &mdash; the geometry is the same whichever way it is lit.</p>
+  `;
+
+  $('r-env').onchange = async () => {
+    const k = $('r-env').value;
+    setRender('env', k);
+    $('r-env-hint').textContent = ENVIRONMENTS[k]?.hint ?? '';
+    if (!$('chk-render').checked) $('chk-render').checked = true;
+    applyRenderMode();
+    status(`loading the ${k} environment…`);
+    await applyEnvironment(k);
+    status('');
+  };
+  $('r-backdrop').onchange = () => {
+    setRender('backdrop', $('r-backdrop').checked);
+    applyEnvironment(renderSettings().env);
+  };
+  $('r-shadows').onchange = () => {
+    setRender('shadows', $('r-shadows').checked);
+    applyRenderMode();
+  };
+  $('r-exposure').oninput = () => {
+    const v = parseFloat($('r-exposure').value);
+    setRender('exposure', v);
+    renderer.toneMappingExposure = v;
+  };
+  $('r-ao').oninput = () => {
+    setRender('ao', parseFloat($('r-ao').value));
+    buildCase(state.caseModel);
+  };
+}
+
+
 // ---------------------------------------------------------------------------
 // boot
 // ---------------------------------------------------------------------------
@@ -1617,6 +2281,13 @@ $('scene-select').onchange = (ev) => loadScene(ev.target.value);
 (async function boot() {
   resize();
   tick();
+  wireCaseScrews();
+  wireModal();
+  wireCatalog();
+  wireMenus();
+  wireTabs();
+  wireHelp();
+  renderRenderPanel();
   try {
     const { parts } = await api('/api/parts');
     state.parts = parts;

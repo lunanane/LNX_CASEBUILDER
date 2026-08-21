@@ -268,6 +268,102 @@ def post_freeze(scene: Scene = Body(...)):
     }}
 
 
+# --------------------------------------------------------------------------
+# the vendor catalogue
+# --------------------------------------------------------------------------
+#
+# The palette lists parts somebody has measured and vouched for. The catalogue
+# is the other five and a half thousand things Adafruit sell, searched on
+# demand -- listing them all would bury the dozen that matter, and a hosted
+# instance picking up new products the week they ship is the whole point.
+
+@app.get("/api/catalog/search")
+def catalog_search(q: str, limit: int = 25):
+    """Products matching `q`, best first.
+
+    Never fails because someone else's site is down: a stale catalogue still
+    answers most questions, and the response says how old it is.
+    """
+    from . import catalog as cat
+
+    try:
+        c = cat.shared()
+    except Exception as exc:                  # pragma: no cover - defensive
+        raise HTTPException(503, f"catalogue unavailable: {exc}")
+
+    known = {p.sku: p.id for p in library() if p.sku}
+    hits = c.search(q, limit=max(1, min(limit, 100)), known=known)
+    return {"results": [e.as_dict() for e in hits], "catalog": c.status()}
+
+
+@app.get("/api/catalog/status")
+def catalog_status(refresh: bool = False):
+    from . import catalog as cat
+
+    return cat.shared(refresh=refresh).status()
+
+
+@app.post("/api/catalog/import/{product_id}")
+def catalog_import(product_id: str, download: bool = True):
+    """Measure a product's vendor model and add it to the library.
+
+    The result is a draft: real envelope, real mounting holes, guessed
+    orientation, unnamed volumes and *no connectors at all*. Those caveats ride
+    along in the response and in the part's own notes rather than being
+    smoothed over, because a board that silently asks for no cable room is a
+    case you find out about with a soldering iron.
+    """
+    from . import catalog as cat
+    from . import ingest
+
+    if not re.fullmatch(r"[0-9]{1,7}", product_id):
+        raise HTTPException(400, "a product id is digits")
+
+    entry = cat.shared().get(product_id)
+    if entry is None:
+        raise HTTPException(404, f"no product {product_id} in the catalogue")
+    if not entry.cad:
+        raise HTTPException(
+            422, f"{entry.name} has no vendor CAD, so there is nothing to "
+                 f"measure -- it would have to be entered by hand")
+
+    if download and not ingest.local_cad(product_id):
+        try:
+            ingest.download_cad(entry)
+        except Exception as exc:
+            raise HTTPException(502, f"could not fetch vendor CAD: {exc}")
+
+    try:
+        draft = ingest.draft_part(entry)
+    except Exception as exc:
+        raise HTTPException(422, f"could not measure {entry.name}: {exc}")
+
+    try:
+        part = ingest.save_draft(draft)
+    except Exception as exc:
+        raise HTTPException(500, f"could not save the part: {exc}")
+
+    library(reload=True)
+    return {
+        "part": _part_json(part),
+        "warnings": draft.warnings,
+        "flipped": draft.flipped,
+        "bodies": draft.bodies,
+        "source": Path(draft.source).name,
+    }
+
+
+@app.delete("/api/catalog/import/{part_id}")
+def catalog_forget(part_id: str):
+    """Drop an imported part again -- a bad draft should be one click to undo."""
+    from . import ingest
+
+    if not ingest.forget_draft(part_id):
+        raise HTTPException(404, f"{part_id} is not an imported part")
+    library(reload=True)
+    return {"ok": True, "removed": part_id}
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True, "parts": len(library()), "version": app.version}

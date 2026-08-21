@@ -84,12 +84,15 @@ parts:
     tags: [oled, i2c, stemma_qt, spi]
     cad: adafruit/4741/4741 1.5-inch OLED.stl
     notes: >-
-      Envelope 35.56 x 46.99 x 5.63 mm, measured off the vendor mesh with
-      tools/measure_cad.py -- note that the shop pages and several distributors
-      quote nothing at all for this one, and it is NOT square: 1.4" x 1.85".
-      The z profile shows the board flat to +2.9 mm and a 34.65 x 19.86 mm
-      feature above that; the exact position of the 128x128 active window
-      inside the glass still needs calipers before you cut a bezel.
+      Measured by splitting the vendor mesh into connected bodies rather than
+      by slicing it into bands -- band slicing merged the two STEMMA QT
+      connectors on opposite edges into one imaginary "strip across the
+      display", and a display was then fitted to that fiction.
+      The model is built display-DOWN, so it is flipped here (mirrored in z
+      and in x, because mirroring one axis alone would put every connector on
+      the wrong side). Board 35.56 x 46.99 x 1.57, display module 33.80 x
+      36.50 x 1.10 on top of it, two QT connectors and the SMD components
+      underneath. Not square: 1.4" x 1.85".
     src:
       confidence: datasheet
       url: https://github.com/adafruit/Adafruit_CAD_Parts
@@ -110,49 +113,67 @@ parts:
       - {name: h4, at: [33.02, 44.45], diameter: 2.5, screw: M2, src: {confidence: datasheet, note: "from the vendor STEP"}}
 
     volumes:
-      - name: glass
+      - name: display_module
         kind: body
-        at: [17.78, 23.5]
-        size: [35.56, 46.99]
-        z: [1.6, 4.0]
-        src: {confidence: datasheet, note: "from 4741 1.5-inch OLED.stl"}
-      - name: top_features
-        kind: body
-        at: [17.78, 23.5]
-        size: [34.65, 19.86]
-        z: [4.0, 5.63]
-        src: {confidence: datasheet, note: "tallest band of the vendor mesh"}
+        at: [17.65, 23.75]
+        size: [33.80, 36.50]
+        z: [1.57, 2.67]
+        src: {confidence: datasheet, note: "body 2 of 4741 1.5-inch OLED.stl"}
+      # 1.5 inch on a 128x128 square panel is a 26.9 mm side, and unlike the
+      # last attempt it fits: the module is 33.8 x 36.5. Where exactly it sits
+      # inside that module is the guess -- centred is the sane default, and
+      # the bezel is generous enough that being a millimetre out is survivable.
       - name: active_area
         kind: display
-        at: [17.78, 23.5]
+        at: [17.65, 23.75]
         size: [26.9, 26.9]
-        z: [5.2, 5.63]
+        z: [2.57, 2.67]
         src:
           confidence: estimated
           note: >-
-            1.5in diagonal square -> ~26.9 mm a side, assumed centred.
-            MEASURE the offset before cutting a window.
-      - name: underside
+            26.9 mm square is the datasheet 1.5" 128x128 panel; the module it
+            sits in is measured. Assumed centred in the module -- MEASURE the
+            lit area before cutting a tight bezel.
+      # Underneath: the QT connectors stand furthest proud, so they set how
+      # much room the board needs below the PCB.
+      - name: qt_left_body
         kind: body
-        at: [17.78, 23.5]
+        at: [2.93, 23.51]
+        size: [4.95, 6.00]
+        z: [-2.96, 0.0]
+        src: {confidence: datasheet, note: "body 4 of 4741 1.5-inch OLED.stl"}
+      - name: qt_right_body
+        kind: body
+        at: [32.63, 23.48]
+        size: [4.95, 6.00]
+        z: [-2.96, 0.0]
+        src: {confidence: datasheet, note: "body 3 of 4741 1.5-inch OLED.stl"}
+      - name: components
+        kind: keepout
+        at: [17.78, 23.49]
         size: [35.56, 46.99]
-        z: [-1.1, 0.0]
-        src: {confidence: datasheet, note: "vendor mesh reaches -1.1 below the board plane"}
+        z: [-2.0, 0.0]
+        src:
+          confidence: datasheet
+          note: >-
+            225 small bodies on the underside, tallest 2.0 mm. Not worth 225
+            volumes; one keepout says the same thing to a case.
 
     connectors:
+      # Measured: both sit mid-board, on the underside, facing outward.
       - name: qt_left
         type: stemma_qt
         face: -x
-        at: [0.0, 40.0, 1.6]
+        at: [0.0, 23.51, -1.5]
         plug_depth: 6.0
         bend_radius: 10.0
         external: false
-        src: {confidence: estimated, note: "edge is right, position along it is not"}
+        src: {confidence: datasheet, note: "body 4 of the vendor mesh"}
       - name: qt_right
         type: stemma_qt
         face: +x
-        at: [35.56, 40.0, 1.6]
+        at: [35.56, 23.48, -1.5]
         plug_depth: 6.0
         bend_radius: 10.0
         external: false
-        src: {confidence: estimated, note: "edge is right, position along it is not"}
+        src: {confidence: datasheet, note: "body 3 of the vendor mesh"}

@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from shapely.geometry import Point
 
 from hwcase import PartLibrary, build, check, load_scene, resolve
 from hwcase.case import kerf_compensated
@@ -752,10 +753,15 @@ def test_passing_too_close_over_is_reported(lib):
     scene.placements = [p for p in scene.placements if p.id == "hub"]
     scene.placements[0].pos = (0.0, 0.0, 0.0)
     hub_top = max(s.z[1] for s in resolve(scene, lib).solids)
-    low = min(v.z_min() for v in lib["adafruit-4741-oled-1v5"].volumes)
+
+    # Stack it by the board, not by the part's lowest point: the OLED's lowest
+    # feature is a 5 mm STEMMA QT socket at one edge, and hanging the part off
+    # that would leave nothing above the hub to be too close to it. The PCB
+    # bottom is z = 0 in the part frame, so this is 0.4 mm of clearance
+    # between the two boards -- which is the thing being warned about.
     scene.placements.append(Placement(
         id="over", part="adafruit-4741-oled-1v5", mount="manual",
-        pos=(10.0, 0.0, hub_top - low + 0.4)))    # 0.4 mm of clearance
+        pos=(0.0, 0.0, hub_top + 0.4)))
     issues = check(resolve(scene, lib), lib)
     assert any(i.code == "tight_overlap" for i in issues), \
         "0.4 mm of clearance should be called out"
@@ -1420,14 +1426,32 @@ def test_the_countersink_is_wider_than_the_screw(lib):
         "the floor should carry screw-head sized holes"
 
 
-def test_from_lid_drills_a_board_that_is_flush_with_it(lib):
-    """The overlap test used to measure zero for a board whose top *is* the
-    faceplate -- exactly the board you want to screw down from above."""
+def test_from_lid_says_so_when_the_board_is_inside_the_lid(lib):
+    """A slab is material or void at a given XY -- it cannot be thick above a
+    board and hollow below it. The OLED's PCB lands inside the 3 mm lid slab,
+    so there is no lid material over its screw holes to bear on, and screwing
+    down from above cannot work. Saying that is the whole point; drilling four
+    holes that hold nothing is worse than drilling none."""
     scene = _supported(load_scene(SCENE), "from_lid", "oled")
-    res = resolve(scene, lib)
-    model = build(res)
+    model = build(resolve(scene, lib))
     lid = model.layers[-1]
-    assert len([n for n in lid.notes if n.startswith("countersink")]) == 4
+    assert not [n for n in lid.notes if n.startswith("countersink for oled")]
+    refused = [n for n in lid.notes if n.startswith("cannot support oled")]
+    assert len(refused) == 4
+    assert "inside the lid layer" in refused[0]
+
+
+def test_from_lid_drills_a_board_that_sits_below_the_lid(lib):
+    """The case it is actually for: a board clear of the lid gets its four
+    countersinks. This used to measure a zero overlap and drill nothing."""
+    scene = _supported(load_scene(SCENE), "from_lid", "oled")
+    scene.case = scene.case.model_copy(deep=True)
+    scene.case.materials[-1] = scene.case.materials[-1].model_copy(
+        update={"thickness": 1.0})
+    model = build(resolve(scene, lib))
+    lid = model.layers[-1]
+    assert len([n for n in lid.notes
+                if n.startswith("countersink for oled")]) == 4
 
 
 def test_from_lid_does_not_post_below_the_board(lib):
@@ -1842,7 +1866,7 @@ def test_you_cannot_overwrite_by_accident(client):
     assert c.post("/api/scenes/base/rename", json={"to": "taken"}).status_code == 409
 
 
-BAD_NAMES = ("../evil", "..\evil", "/etc/passwd", "a/b", "", ".", "..",
+BAD_NAMES = ("../evil", r"..\evil", "/etc/passwd", "a/b", "", ".", "..",
              "con.yaml", "x" * 200)
 
 
@@ -2123,3 +2147,511 @@ def test_linking_can_be_turned_off(demo):
     off = demo.scene.case.model_copy(update={"link_cables": False})
     assert (sum(l.geom.area for l in build(demo, off).layers) >
             sum(l.geom.area for l in build(demo, on).layers))
+
+
+# --------------------------------------------------------------------------
+# the outline is what makes this a case rather than a tray
+# --------------------------------------------------------------------------
+
+def _wall_gaps(model, layer):
+    return model.outer.exterior.difference(layer.geom.buffer(0.02))
+
+
+def _coverage(model):
+    per = model.outer.exterior.length
+    return [100.0 * model.outer.exterior.intersection(l.geom.buffer(0.02)).length / per
+            for l in model.layers]
+
+
+@pytest.mark.parametrize("interior", ["pocketed", "hollow", "ribs", "grown"])
+def test_every_hole_in_the_wall_is_deliberate(demo, interior):
+    """No pocket, hollow or grown cable route may thin the outside. Only ports
+    and side openings are meant to breach it."""
+    from shapely.ops import unary_union
+    from hwcase.case import case_screw_points
+    from hwcase.geom import z_overlap
+
+    spec = demo.scene.case.model_copy(update={"interior": interior})
+    model = build(demo, spec)
+    for layer in model.layers:
+        gaps = _wall_gaps(model, layer)
+        if gaps.length < 1.0:
+            continue
+        slab = (layer.z0, layer.z1)
+        allowed = [wc.corridor_poly.buffer(spec.part_clearance + 0.5)
+                   for wc in demo.connectors
+                   if wc.cuts_the_wall and z_overlap(wc.corridor_z, slab) > 0]
+        allowed += [so.poly.buffer(0.5) for so in demo.side_openings
+                    if z_overlap(so.z, slab) > 0]
+        allowed += [Point(p).buffer(spec.case_screw_head)
+                    for p in case_screw_points(spec, model.outer)]
+        unexplained = gaps.difference(unary_union(allowed)).length if allowed else gaps.length
+        assert unexplained < 1.0, \
+            f"{interior}: layer {layer.index} has {unexplained:.1f} mm of wall " \
+            f"missing for no reason"
+
+
+def test_the_wall_does_not_depend_on_the_interior(demo):
+    """Hollowing out the middle is not licence to open the sides."""
+    runs = {m: _coverage(build(demo, demo.scene.case.model_copy(update={"interior": m})))
+            for m in ("pocketed", "hollow", "ribs", "grown")}
+    ref = runs["pocketed"]
+    for mode, cov in runs.items():
+        assert cov == pytest.approx(ref, abs=0.5), \
+            f"{mode} gives a different wall from pocketed"
+
+
+def test_internal_wiring_does_not_breach_the_wall(demo):
+    """`grown` reserves room for every lead including the internal ones. Eight
+    I2C ports on a hub near the edge were each punching straight through."""
+    from hwcase.case import outer_shape
+    from hwcase.geom import z_overlap
+
+    spec = demo.scene.case.model_copy(update={"interior": "grown"})
+    outer = outer_shape(demo, spec)
+    # The guarantee is a MINIMUM wall, not the full nominal one: `wall` places
+    # the outline, `min_segment` is the hard floor a pocket may not eat past.
+    # A grown cable route taking the wall from 8 mm down to 4 mm is fine.
+    inner = outer.buffer(-spec.min_segment)
+    model = build(demo, spec)
+    for layer in model.layers:
+        slab = (layer.z0, layer.z1)
+        for wc in demo.connectors:
+            if wc.cuts_the_wall or z_overlap(wc.corridor_z, slab) <= 0:
+                continue
+            outside = wc.corridor_poly.difference(inner).intersection(outer)
+            if outside.area < 1.0:
+                continue
+            still_there = layer.geom.intersection(outside).area
+            assert still_there > outside.area * 0.5, \
+                f"{wc.ref} ate the wall in layer {layer.index}"
+
+
+def test_the_minimum_wall_survives_a_thin_setting(demo):
+    """Even with the wall set thinner than min_segment, what is left is a wall
+    rather than a row of slivers."""
+    spec = demo.scene.case.model_copy(update={"wall": 3.0, "min_segment": 4.0})
+    model = build(demo, spec)
+    assert min(_coverage(model)) > 80.0
+
+
+def test_hardware_inside_the_band_is_not_buried(lib):
+    """If a board really sits within min_segment of the outline then the wall
+    cannot be there, and the board wins -- pressing plywood into it would be
+    worse than an honest gap."""
+    from hwcase.geom import z_overlap
+
+    scene = lab()
+    scene.case.wall = 1.0                 # squeeze the outline onto the hardware
+    scene.case.min_segment = 6.0
+    res = resolve(scene, lib)
+    model = build(res)
+    for layer in model.layers:
+        slab = (layer.z0, layer.z1)
+        for s in res.solids:
+            if s.kind.value != "body" or z_overlap(s.z, slab) <= 0:
+                continue
+            assert layer.geom.intersection(s.poly).area < s.poly.area * 0.05, \
+                f"layer {layer.index} has material inside {s.ref}"
+
+
+# ---------------------------------------------------------------------------
+# case bolts through the stack
+# ---------------------------------------------------------------------------
+
+def test_centre_bolt_is_optional_and_central(lib):
+    """The centre bolt adds exactly one hole, in the middle."""
+    from hwcase import case as C
+
+    scene = lab()
+    base = scene.case.model_copy(update={"case_screws": "corners",
+                                         "case_screw_center": False})
+    res = resolve(scene, lib)
+    outer = C.outer_shape(res, base)
+    corners = C.case_screw_points(base, outer)
+    assert len(corners) == 4
+
+    with_c = C.case_screw_points(
+        base.model_copy(update={"case_screw_center": True}), outer)
+    assert len(with_c) == 5
+    assert outer.contains(Point(*with_c[-1]))
+
+
+def test_perimeter_bolts_respect_spacing(lib):
+    """Tightening the spacing may only ever add bolts, never lose the corners."""
+    from hwcase import case as C
+
+    scene = lab()
+    res = resolve(scene, lib)
+    spec = scene.case.model_copy(update={"case_screws": "perimeter"})
+    outer = C.outer_shape(res, spec)
+
+    wide = C.case_screw_points(spec.model_copy(
+        update={"case_screw_spacing": 500.0}), outer)
+    tight = C.case_screw_points(spec.model_copy(
+        update={"case_screw_spacing": 25.0}), outer)
+    assert len(wide) == 4                      # nothing fits between corners
+    assert len(tight) > len(wide)
+    assert set(wide) <= set(tight)             # corners survive
+
+
+def test_a_bolt_through_a_board_is_reported(lib):
+    """Silently drilling through the hardware is the failure mode to avoid."""
+    from hwcase import case as C
+
+    from hwcase.schema import CaseSpec, Placement, Scene
+
+    # One board, and a bolt asked for in the middle of the case -- which is
+    # exactly where the board is. That is the case worth catching.
+    scene = Scene(
+        name="collide",
+        placements=[Placement(id="pi", part="rpi-3b", pos=(0.0, 0.0, 0.0),
+                              mount="manual")],
+        case=CaseSpec(case_screws="corners", case_screw_center=True),
+    )
+    model = C.build(resolve(scene, lib), scene.case)
+    notes = [n for layer in model.layers for n in layer.notes
+             if "runs into" in n]
+    assert notes, "a bolt landing on a board must say so"
+
+
+def test_bolt_holes_go_through_every_layer(lib):
+    """A bolt that stops half way through the stack holds nothing together."""
+    from hwcase import case as C
+
+    scene = lab()
+    scene.case = scene.case.model_copy(update={"case_screws": "corners"})
+    res = resolve(scene, lib)
+    model = C.build(res, scene.case)
+    pts = C.case_screw_points(scene.case, C.outer_shape(res, scene.case))
+    assert pts
+
+    for layer in model.layers:
+        geom = layer.geom
+        for x, y in pts:
+            # either the hole is there, or there is no material to drill
+            probe = Point(x, y)
+            assert not geom.contains(probe), (
+                f"layer {layer.index} has no bolt hole at ({x:.1f}, {y:.1f})")
+
+
+# ---------------------------------------------------------------------------
+# the OLED used to be modelled as two planes crossing each other
+# ---------------------------------------------------------------------------
+
+def test_oled_volumes_do_not_cross(lib):
+    """Volumes may nest or stack, but two boxes cutting through each other
+    describe a shape that does not exist and produce a nonsense window."""
+    import itertools
+
+    from hwcase.geom import box_polygon
+
+    part = lib["adafruit-4741-oled-1v5"]
+    for a, b in itertools.combinations(part.volumes, 2):
+        za, zb = (min(a.z), max(a.z)), (min(b.z), max(b.z))
+        if min(za[1], zb[1]) - max(za[0], zb[0]) <= 1e-9:
+            continue                            # stacked, not crossing
+        pa, pb = box_polygon(a), box_polygon(b)
+        if not pa.intersects(pb):
+            continue
+        assert pa.contains(pb) or pb.contains(pa), (
+            f"{part.id}: {a.name} and {b.name} cross each other")
+
+
+def test_oled_window_covers_the_display_module(lib):
+    """The lit area is a datasheet number placed inside a measured module.
+    The previous attempt derived it from a bounding box that had merged two
+    connectors into an imaginary strip, so nothing fitted inside anything."""
+    from hwcase.geom import box_polygon
+
+    part = lib["adafruit-4741-oled-1v5"]
+    by_name = {v.name: v for v in part.volumes}
+    module, active = by_name["display_module"], by_name["active_area"]
+    assert box_polygon(module).buffer(1e-6).contains(box_polygon(active)), (
+        "the lit area has to be inside the module it is part of")
+
+
+# ---------------------------------------------------------------------------
+# reading geometry out of vendor CAD
+# ---------------------------------------------------------------------------
+
+CAD = BACKEND.parent / "vendor" / "cad" / "adafruit"
+needs_cad = pytest.mark.skipif(not CAD.exists(), reason="vendor CAD not fetched")
+
+
+def _stl(product: str) -> Path:
+    hits = sorted(CAD.glob(f"{product}*/*.stl")) + sorted(CAD.glob(f"{product}/*.stl"))
+    if not hits:
+        pytest.skip(f"no STL for {product}")
+    return hits[0]
+
+
+@needs_cad
+def test_bodies_finds_the_board_and_the_display(lib):
+    """Splitting on connectivity asks the model what objects it contains.
+
+    Band slicing inferred them instead, and inferred wrong: it merged the two
+    STEMMA QT connectors on opposite edges of the 4741 into a single 34 mm
+    box, which is a thing that does not exist.
+    """
+    from hwcase.measure import bodies
+
+    found = bodies(_stl("4741"))
+    assert len(found) > 100                      # a board and its components
+
+    pcb = found[0]
+    assert pcb.size[0] == pytest.approx(35.56, abs=0.05)
+    assert pcb.size[1] == pytest.approx(46.99, abs=0.05)
+    assert pcb.size[2] == pytest.approx(1.57, abs=0.05)
+
+    module = found[1]
+    assert module.size[0] == pytest.approx(33.80, abs=0.05)
+    assert module.size[1] == pytest.approx(36.50, abs=0.05)
+
+    # the two QT connectors are two bodies, not one strip
+    qt = [b for b in found if abs(b.size[0] - 4.95) < 0.1
+          and abs(b.size[1] - 6.0) < 0.1]
+    assert len(qt) == 2
+    assert abs(qt[0].centre[0] - qt[1].centre[0]) > 25.0, "opposite edges"
+
+
+@needs_cad
+def test_flipping_a_part_keeps_it_the_same_part():
+    """Mirroring z alone turns a part into its mirror image, which quietly
+    moves every connector to the wrong edge. Mirror two axes or none."""
+    from hwcase.measure import Body
+
+    b = Body(1.0, 5.0, 10.0, 16.0, -1.0, 0.0)
+    f = b.flipped(width=35.56, pcb_top=1.57)
+    assert f.size == pytest.approx(b.size)               # same box
+    assert (f.z0, f.z1) == pytest.approx((1.57, 2.57))   # above the board now
+    assert f.flipped(35.56, 1.57).centre == pytest.approx(b.centre)
+
+
+@needs_cad
+def test_z_bands_report_position_not_just_extent():
+    """'Something 34 mm wide up there' is not enough to cut a window for it."""
+    from hwcase.measure import load_points, z_bands
+
+    bands = [b for b in z_bands(load_points(_stl("4741")), 0.5) if b.count]
+    assert bands
+    for b in bands:
+        assert b.x1 >= b.x0 and b.y1 >= b.y0
+        assert b.width == pytest.approx(b.x1 - b.x0)
+
+
+@needs_cad
+def test_step_holes_finds_the_oled_mounting_pattern():
+    """A mounting hole is a screw-sized circle, repeated, spread out."""
+    from hwcase.measure import step_holes
+
+    steps = sorted(CAD.glob("4741*/*.step")) + sorted(CAD.glob("4741*/*.stp"))
+    if not steps:
+        pytest.skip("no STEP for 4741")
+    groups = step_holes(steps[0])
+    assert groups, "the 4741 has four M2 holes"
+    best = groups[0]
+    assert len(best.centres) >= 4
+    assert best.diameter == pytest.approx(2.5, abs=0.3)
+
+
+# ---------------------------------------------------------------------------
+# the vendor catalogue and the importer
+# ---------------------------------------------------------------------------
+
+def _fake_catalog(tmp_path, products, cad=None):
+    """A Catalog backed by files on disk, so no test touches the network."""
+    import json
+
+    from hwcase.catalog import Catalog
+
+    cache = Path(tmp_path) / "catalog"
+    cache.mkdir(parents=True)
+    (cache / "adafruit-products.json").write_text(json.dumps(products),
+                                                  encoding="utf-8")
+    (cache / "adafruit-cad.json").write_text(json.dumps(cad or {}),
+                                             encoding="utf-8")
+    c = Catalog(cache_dir=cache, ttl=10 ** 9)
+    c._read_cache()
+    return c
+
+
+PRODUCTS = [
+    {"product_id": 4741, "product_name": 'Grayscale 1.5" 128x128 OLED Display',
+     "product_master_category": "Displays"},
+    {"product_id": 3954, "product_name": "NeoTrellis RGB Driver PCB for 4x4 Keypad",
+     "product_master_category": "Breakouts"},
+    {"product_id": 1234, "product_name": "Hook-up Wire Spool Set",
+     "product_master_category": "Wire"},
+    {"product_id": 5752, "product_name": "I2C Quad Rotary Encoder Breakout",
+     "product_master_category": "Breakouts"},
+]
+
+
+def test_catalog_search_puts_the_sku_first(tmp_path):
+    """Typing a product number is an exact request, not a fuzzy one."""
+    c = _fake_catalog(tmp_path, PRODUCTS)
+    hits = c.search("5752")
+    assert hits[0].id == "5752"
+    assert hits[0].score > 50
+
+
+def test_catalog_search_requires_every_term(tmp_path):
+    """"quad keypad" matches nothing: two products each match one word, and
+    neither of them is what was asked for."""
+    c = _fake_catalog(tmp_path, PRODUCTS)
+    assert c.search("quad keypad") == []
+    assert [e.id for e in c.search("quad rotary")] == ["5752"]
+
+
+def test_catalog_ranks_importable_and_known_parts_higher(tmp_path):
+    """A product we can measure beats one we would have to guess at, and one
+    already in the library beats both."""
+    plain = _fake_catalog(tmp_path / "a", PRODUCTS)
+    withcad = _fake_catalog(tmp_path / "b", PRODUCTS, cad={"4741": "4741 OLED"})
+
+    base = plain.search("oled")[0].score
+    cadded = withcad.search("oled")[0].score
+    assert cadded > base
+
+    known = withcad.search("oled", known={"4741": "adafruit-4741-oled-1v5"})[0]
+    assert known.score > cadded
+    assert known.part_id == "adafruit-4741-oled-1v5"
+    assert known.as_dict()["in_library"] is True
+
+
+def test_catalog_survives_the_vendor_being_down(tmp_path, monkeypatch):
+    """A search box that empties itself because someone else's server is down
+    is worse than one showing yesterday's catalogue."""
+    import json
+
+    from hwcase import catalog as cat
+
+    cache = Path(tmp_path) / "catalog"
+    cache.mkdir(parents=True)
+    (cache / "adafruit-products.json").write_text(json.dumps(PRODUCTS),
+                                                  encoding="utf-8")
+
+    def explode(*a, **kw):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(cat, "_fetch", explode)
+    c = cat.Catalog(cache_dir=cache, ttl=0).load()    # ttl 0 forces a refresh
+    assert c.stale is True
+    assert c.error and "connection refused" in c.error
+    assert len(c.products) == 4                       # still usable
+    assert c.search("oled")[0].id == "4741"
+
+
+def test_catalog_reports_having_nothing_at_all(tmp_path, monkeypatch):
+    from hwcase import catalog as cat
+
+    def explode(*a, **kw):
+        raise OSError("no route to host")
+
+    monkeypatch.setattr(cat, "_fetch", explode)
+    c = cat.Catalog(cache_dir=Path(tmp_path) / "empty", ttl=0).load()
+    assert c.products == []
+    assert c.error
+    assert c.search("oled") == []
+
+
+def test_a_truncated_download_is_not_cached(tmp_path, monkeypatch):
+    """Writing half a JSON file to the cache would break every later search,
+    including the offline ones."""
+    from hwcase import catalog as cat
+
+    monkeypatch.setattr(cat, "_fetch", lambda *a, **kw: b'[{"product_id": 1,')
+    c = cat.Catalog(cache_dir=Path(tmp_path) / "c", ttl=0).load()
+    assert not (Path(tmp_path) / "c" / "adafruit-products.json").exists()
+    assert c.error
+
+
+def test_slug_makes_a_usable_part_id():
+    from hwcase.ingest import slug
+
+    assert slug('Adafruit Grayscale 1.5" 128x128 OLED') == \
+        "adafruit-grayscale-1-5in-128x128-oled"
+    assert slug("!!!") == "part"
+    assert len(slug("x" * 200)) <= 60
+
+
+def test_flip_puts_a_display_module_face_up():
+    """One large flat body alone under the board is a display, and a display
+    is the thing that should face the world."""
+    from hwcase.ingest import _should_flip
+    from hwcase.measure import Body
+
+    pcb = Body(0, 35.6, 0, 47, 0, 1.57)
+    module = Body(1, 34.6, 5, 42, -1.1, 0)
+    flip, why = _should_flip([pcb, module], pcb)
+    assert flip and "display module" in why
+
+
+def test_flip_uses_reach_not_body_count():
+    """A rotary encoder straddles the PCB, so counting bodies per face reads
+    the board as symmetric while its knobs point the wrong way."""
+    from hwcase.ingest import _should_flip
+    from hwcase.measure import Body
+
+    pcb = Body(0, 76.2, 0, 21.6, 0, 1.57)
+    knobs = [Body(x, x + 12, 4, 17, -21.4, 3.7) for x in (3, 22, 41, 60)]
+    flip, why = _should_flip([pcb] + knobs, pcb)
+    assert flip and "proud below" in why
+
+    # and the other way round: tall things already on top stay on top
+    tall = [Body(x, x + 12, 4, 17, 1.57, 6.4) for x in (3, 22)]
+    assert _should_flip([pcb] + tall, pcb)[0] is False
+
+
+def test_saving_a_draft_replaces_rather_than_duplicates(tmp_path):
+    """The usual reason to import a product twice is that the first go was
+    wrong, so a second entry for the same id is never what anyone wants."""
+    from hwcase.ingest import Draft, forget_draft, save_draft
+
+    part = {
+        "id": "demo-board", "name": "Demo Board",
+        "outline": {"type": "rect", "size": [20.0, 30.0], "origin": "min"},
+        "volumes": [], "connectors": [],
+    }
+    path = Path(tmp_path) / "imported.yaml"
+    save_draft(Draft(part=part, source="a.stl"), path)
+    save_draft(Draft(part={**part, "name": "Demo Board rev B"}, source="a.stl"),
+               path)
+
+    import yaml
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert len(doc["parts"]) == 1
+    assert doc["parts"][0]["name"] == "Demo Board rev B"
+    assert "MACHINE WRITTEN" in path.read_text(encoding="utf-8")
+
+    assert forget_draft("demo-board", path) is True
+    assert not path.exists()                  # an empty file is just clutter
+    assert forget_draft("demo-board", path) is False
+
+
+@needs_cad
+def test_a_draft_never_invents_connectors():
+    """A mesh cannot say where a cable plugs in, and a made-up socket is worse
+    than a missing one because the case would route wiring to it."""
+    from hwcase.catalog import CatalogEntry
+    from hwcase.ingest import draft_part
+
+    entry = CatalogEntry(id="4741", name="Test OLED", cad="4741 OLED")
+    draft = draft_part(entry, cad=_stl("4741"))
+    assert draft.part["connectors"] == []
+    assert "no connectors" in draft.part["notes"]
+    assert "DRAFT" in draft.part["notes"]
+
+
+@needs_cad
+def test_a_draft_validates_as_a_part():
+    from hwcase.catalog import CatalogEntry
+    from hwcase.ingest import draft_part
+    from hwcase.library import _check_names
+
+    entry = CatalogEntry(id="4741", name="Test OLED", cad="4741 OLED")
+    part = Part.model_validate(draft_part(entry, cad=_stl("4741")).part)
+    _check_names(part)
+    assert part.outline.size == pytest.approx((35.56, 46.99), abs=0.05)
+    assert part.pcb_thickness == pytest.approx(1.57, abs=0.05)

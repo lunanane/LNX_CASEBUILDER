@@ -525,10 +525,33 @@ class CaseSpec(Strict):
     case_screw_head: float = 6.5       # countersink in the outer plate
     #: `perimeter` only: roughly how far apart bolts sit along each edge
     case_screw_spacing: float = 80.0
+    #: One more bolt in the middle. A wide lid bows between its edge screws,
+    #: and this pulls the centre down -- but only works if the middle of the
+    #: case is actually empty, so the build warns when it lands on a board.
+    case_screw_center: bool = False
     #: vertical room wanted where one board passes over another
     overlap_clearance: float = 1.5
     corner_radius: float = 6.0
     outline: Optional[Outline] = None  # override the auto bounding shape
+
+
+class ViewSettings(Strict):
+    """How the preview is lit. None of this reaches the geometry.
+
+    It lives on the scene rather than in the browser because a case is a
+    document you come back to, and "which light made this look right" is part
+    of what you decided -- losing it to a cleared cache is a small, avoidable
+    annoyance.
+    """
+
+    #: key into the editor's environment list: room, studio, daylight, dusk
+    env: str = "studio"
+    exposure: float = Field(1.0, gt=0.0, le=8.0)
+    #: show the environment behind the case, not just reflected in it
+    backdrop: bool = False
+    #: how strongly to darken the seams between slabs, 0..1
+    ao: float = Field(0.55, ge=0.0, le=1.0)
+    shadows: bool = True
 
 
 class Scene(Strict):
@@ -541,3 +564,5 @@ class Scene(Strict):
     floor: Optional[float] = None
     placements: list[Placement] = Field(default_factory=list)
     case: CaseSpec = Field(default_factory=CaseSpec)
+    #: preview only -- see ViewSettings
+    view: ViewSettings = Field(default_factory=ViewSettings)

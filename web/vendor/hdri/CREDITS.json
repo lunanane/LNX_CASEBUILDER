@@ -1,0 +1,27 @@
+{
+  "studio": {
+    "slug": "brown_photostudio_02",
+    "authors": [
+      "Sergej Majboroda"
+    ],
+    "license": "CC0",
+    "bytes": 1648130
+  },
+  "daylight": {
+    "slug": "kloppenheim_02_puresky",
+    "authors": [
+      "Greg Zaal",
+      "Jarod Guest"
+    ],
+    "license": "CC0",
+    "bytes": 1393622
+  },
+  "dusk": {
+    "slug": "moonless_golf",
+    "authors": [
+      "Greg Zaal"
+    ],
+    "license": "CC0",
+    "bytes": 1672754
+  }
+}

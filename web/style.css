@@ -90,12 +90,24 @@ h2:first-child { margin-top: 0; }
 .issue .code { color: var(--dim); font-size: 11px; }
 .issue .msg { font-size: 12px; }
 
-#selection .field { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
-#selection label { width: 44px; color: var(--dim); }
-#selection input {
+#selection .field, #case-screws .field {
+  display: flex; gap: 6px; align-items: center; margin-bottom: 4px;
+}
+#selection label, #case-screws .field label { width: 44px; color: var(--dim); }
+#case-screws .field label { width: 58px; }
+#selection input, #case-screws input[type=number], #case-screws select {
   width: 70px; background: var(--panel-2); color: var(--fg);
   border: 1px solid var(--line); border-radius: 3px; padding: 2px 5px; font: inherit;
 }
+#case-screws select { width: 100px; }
+#case-screws .unit { color: var(--dim); font-size: 11px; }
+#case-screws .check {
+  display: block; color: var(--dim); margin: 2px 0 6px; cursor: pointer;
+}
+#case-screws .check input { margin-right: 5px; }
+/* a bolt landing on a board is the one thing worth shouting about here */
+#case-screws .note { color: var(--warn, #d9a441); font-size: 11px; margin: 6px 0 0; }
+#case-screws .note:empty { display: none; }
 #selection .note { color: var(--dim); font-size: 11px; margin: 6px 0; }
 
 .side {
@@ -145,3 +157,113 @@ body:not(.rendering) .sunctl { opacity: .35; }
 #status.busy { color: var(--warn); }
 #status.err  { color: var(--err); }
 #status.ok   { color: var(--ok); }
+
+
+/* --------------------------------------------------------------------------
+   the vendor catalogue
+   -------------------------------------------------------------------------- */
+
+#catalog { padding: 0 8px 10px; }
+#cat-q {
+  width: 100%; box-sizing: border-box; background: var(--panel-2);
+  color: var(--fg); border: 1px solid var(--line); border-radius: 3px;
+  padding: 4px 6px; font: inherit;
+}
+#cat-status { color: var(--dim); font-size: 11px; margin: 5px 0; min-height: 13px; }
+#cat-status.err { color: var(--bad, #e06c6c); }
+#cat-results { max-height: 40vh; overflow-y: auto; }
+.cat-row.have { opacity: 0.75; }
+/* nothing to measure, so nothing to click */
+.cat-row.disabled { opacity: 0.4; cursor: default; }
+.cat-row.working { outline: 1px solid var(--accent, #6ea8fe); }
+
+/* --------------------------------------------------------------------------
+   modal sheets: import reports, the manual, about
+   -------------------------------------------------------------------------- */
+
+#modal {
+  position: fixed; inset: 0; z-index: 40; display: flex;
+  align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+}
+#modal[hidden] { display: none; }
+#modal .sheet {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 18px 20px; width: min(680px, 88vw); max-height: 80vh;
+  overflow-y: auto; box-shadow: 0 12px 48px rgba(0, 0, 0, 0.5);
+}
+#modal h2 { margin: 0 0 10px; font-size: 15px; }
+#modal-body { font-size: 13px; line-height: 1.55; color: var(--fg); }
+#modal-body p { margin: 0 0 10px; }
+#modal-body h3 { font-size: 13px; margin: 16px 0 6px; color: var(--dim); }
+#modal-body kbd {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px;
+  padding: 0 4px; font: 11px/1.6 inherit;
+}
+#modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+#modal-actions button { font: inherit; }
+
+/* --------------------------------------------------------------------------
+   menus
+   --------------------------------------------------------------------------
+   There were fourteen controls in the header and the last four were off the
+   edge of the screen. Anything reached for once a session lives in a menu now;
+   only what you toggle while working stays on the bar. */
+
+.menubar { display: flex; gap: 2px; }
+.menu { position: relative; }
+.menu-btn { border-color: transparent; background: transparent; }
+.menu.open > .menu-btn { background: var(--panel-2); border-color: var(--line); }
+
+.menu-pop {
+  display: none; position: absolute; top: 100%; left: 0; z-index: 30;
+  margin-top: 4px; min-width: 210px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+}
+.menu.open > .menu-pop { display: block; }
+.menu-pop button, .menu-pop label {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 4px 8px; border: none; background: none; border-radius: 3px;
+  color: var(--fg); text-align: left; font: inherit; cursor: pointer;
+}
+.menu-pop button:hover, .menu-pop label:hover { background: var(--panel-2); color: var(--accent); }
+.menu-pop button:disabled { opacity: .35; cursor: default; background: none; color: var(--fg); }
+.menu-pop kbd {
+  margin-left: auto; color: var(--dim); font-size: 11px;
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 3px; padding: 0 4px;
+}
+.menu-pop hr { border: none; border-top: 1px solid var(--line); margin: 4px 2px; }
+
+/* --------------------------------------------------------------------------
+   inspector panes
+   --------------------------------------------------------------------------
+   The case settings used to sit below everything about the selected board, so
+   you only met them by scrolling past a screenful of something else. */
+
+#inspector { padding: 0; display: flex; flex-direction: column; }
+.tabs {
+  display: flex; flex: 0 0 auto; background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+}
+.tabs .tab {
+  flex: 1; border: none; border-radius: 0; background: none;
+  padding: 6px 4px; color: var(--dim); border-bottom: 2px solid transparent;
+}
+.tabs .tab:hover { color: var(--fg); }
+.tabs .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.pane { flex: 1; overflow-y: auto; padding: 8px; min-height: 0; }
+.pane[hidden] { display: none; }
+#issue-count {
+  margin-left: 5px; font-size: 11px; padding: 0 4px; border-radius: 7px;
+  background: var(--line); color: var(--fg);
+}
+#issue-count:empty { display: none; }
+#issue-count.err { background: var(--err); color: #12141a; }
+#issue-count.warn { background: var(--warn); color: #12141a; }
+
+.linky {
+  background: none; border: none; padding: 0; color: var(--accent);
+  text-decoration: underline; cursor: pointer; font: inherit;
+}

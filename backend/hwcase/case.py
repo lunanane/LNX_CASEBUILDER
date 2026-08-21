@@ -146,11 +146,45 @@ def build(res: Resolved, spec: Optional[CaseSpec] = None) -> CaseModel:
         layers.append(Layer(i, cursor, top, role, mat, geom, notes))
         cursor = top
 
+    _report_orphan_supports(res, layers, notes_to=layers)
     return CaseModel(spec=spec, outer=outer, layers=layers, z0=z0, z1=cursor)
 
 
+def _report_orphan_supports(res: Resolved, layers: list[Layer], notes_to) -> None:
+    """Say when a board asked to be screwed down and no layer could do it.
+
+    A slab is material or void at a given XY -- it cannot be 3 mm thick above
+    a board and hollow below it. So if a board's PCB ends up *inside* the lid
+    slab rather than under it, there is no lid material over the screw holes to
+    bear on, and screwing down from above is not a thing that can happen. That
+    is worth a sentence; doing nothing quietly is how you discover it with a
+    drill in your hand.
+    """
+    served = set()
+    for layer in layers:
+        for note in layer.notes:
+            for word in ("countersink for ", "boss for "):
+                if note.startswith(word):
+                    served.add(note[len(word):])
+
+    for sp in res.supports:
+        if sp.mode == Support.none or sp.ref in served:
+            continue
+        target = next((layer for layer in layers
+                       if layer.role == ("lid" if sp.mode == Support.from_lid
+                                         else "floor")), None)
+        if target is None:
+            continue
+        where = "lid" if sp.mode == Support.from_lid else "floor"
+        edge = sp.board_top if sp.mode == Support.from_lid else sp.board_bottom
+        target.notes.append(
+            f"cannot support {sp.ref} from the {where}: the board face at "
+            f"z {edge:.1f} is inside the {where} layer "
+            f"({target.z0:.1f}..{target.z1:.1f}), not clear of it")
+
+
 def _hardware_in(res: Resolved, spec: CaseSpec, slab: tuple[float, float],
-                 pad: float = 0.0) -> list[Polygon]:
+                 pad: float = 0.0, outer: Polygon | None = None) -> list[Polygon]:
     """Everything physical in this slab -- boards, plugs, cable runs alike.
 
     Used to keep ribs and walls off the hardware. `pad` widens it, which is how
@@ -161,11 +195,20 @@ def _hardware_in(res: Resolved, spec: CaseSpec, slab: tuple[float, float],
     for s in res.solids:
         if z_overlap(s.z, slab) > 0:
             out.append(s.poly.buffer(spec.part_clearance + pad, join_style=2))
-    # every connector, not just the ones that pierce a wall: an I2C lead never
-    # leaves the box and still has to go somewhere
+    # Every connector, not just the ones that pierce a wall: an I2C lead never
+    # leaves the box and still has to go somewhere. But a lead that stays
+    # inside must reserve its room INSIDE -- clipped to the inner face, or the
+    # eight I2C ports on a hub sitting near the edge would each punch a hole
+    # straight through the outside of the case.
+    inner = outer.buffer(-spec.wall, join_style=2) if outer is not None else None
     for wc in res.connectors:
-        if z_overlap(wc.corridor_z, slab) > 0:
-            out.append(wc.corridor_poly.buffer(spec.part_clearance, join_style=2))
+        if z_overlap(wc.corridor_z, slab) <= 0:
+            continue
+        room = wc.corridor_poly.buffer(spec.part_clearance, join_style=2)
+        if not wc.cuts_the_wall and inner is not None and not inner.is_empty:
+            room = room.intersection(inner)
+        if not room.is_empty:
+            out.append(room)
     return out
 
 
@@ -293,6 +336,10 @@ def case_screw_points(spec: CaseSpec, outer: Polygon) -> list[tuple[float, float
                     pts += [(v, ay0), (v, ay1)]
                 else:
                     pts += [(ax0, v), (ax1, v)]
+
+    if spec.case_screw_center:
+        c = outer.representative_point()
+        pts.append((c.x, c.y))
     return pts
 
 
@@ -371,33 +418,91 @@ def _link_cable_void(res: Resolved, spec: CaseSpec, outer: Polygon, geom,
     return geom.difference(unary_union(channels))
 
 
-def _open_out_slivers(geom, spec: CaseSpec, notes: list[str]):
-    """Remove material too narrow to survive.
+def _keep_a_wall(res: Resolved, spec: CaseSpec, outer: Polygon, geom,
+                 slab: tuple[float, float], notes: list[str]):
+    """Put back any outer wall that pocketing ate into.
 
-    A morphological opening: erode by half the minimum and dilate back. Any
-    neck thinner than `min_segment` disappears and the cutouts either side of
-    it merge into one, which is both stronger and easier to cut than a 1 mm
-    thread of plywood that snaps the first time it is handled.
+    The outline is what makes this a case rather than a tray, and no pocket,
+    hollow or grown cable route has any business thinning it. Ports and side
+    openings are meant to breach it and are applied after this.
 
-    Deliberately before the bosses and bolts are added -- a boss ring around an
-    M2.5 screw is legitimately narrow, and eroding it away would take the very
-    thing holding a board up.
+    The one thing that may stand inside the wall band is hardware: if a board
+    genuinely sits within `min_segment` of the outline then the wall cannot be
+    there, and saying so is more useful than pressing plywood into the board.
+    """
+    w = spec.min_segment
+    if w <= 0 or outer.is_empty:
+        return geom
+    band = outer.difference(outer.buffer(-w, join_style=2))
+    if band.is_empty:
+        return geom
+
+    blocking = [s.poly for s in res.solids
+                if z_overlap(s.z, slab) > 0 and s.kind is VolumeKind.body]
+    if blocking:
+        band = band.difference(unary_union(blocking))
+    if band.is_empty:
+        return geom
+
+    missing = band.difference(geom).area
+    if missing > 1.0:
+        notes.append(f"restored {missing:.0f} mm2 of {w:.1f} mm wall")
+    return geom.union(band)
+
+
+def _open_out_slivers(geom, spec: CaseSpec, notes: list[str],
+                      cuts: list[Polygon] | None = None):
+    """Remove material too narrow to survive -- but never by reshaping a hole.
+
+    A morphological opening finds anything thinner than `min_segment`. What is
+    done with it depends on where it is:
+
+    * a spur, a tongue or a sliver simply goes;
+    * material lying BETWEEN two specified openings is kept, and reported.
+
+    That second case is the important one. The keypad's buttons are 11.2 mm on
+    a 15 mm pitch, so the web between them is 3.8 mm -- just under a 4 mm
+    minimum. Letting the opening take it merges thirty-two button holes into
+    one slot and the pad has nothing to sit on. A cutout is a specified
+    dimension; if two of them are too close, that is a layout problem to be
+    told about, not something to quietly dissolve.
     """
     w = spec.min_segment
     if w <= 0 or geom.is_empty:
         return geom
-    opened = geom.buffer(-w / 2.0, join_style=2).buffer(w / 2.0, join_style=2)
-    # Clamp to the original. Dilating back rounds off the inner end of a narrow
-    # slot, so the tip of a 5 mm connector pocket was being filled in with
-    # plywood -- an opening must only ever take material away, never put it
-    # somewhere the hardware is.
-    opened = opened.intersection(geom)
+
+    # round joins: mitred ones leave notches where the erosion and the dilation
+    # disagree, which is what made the button holes look gnawed
+    opened = geom.buffer(-w / 2.0, join_style=1).buffer(w / 2.0, join_style=1)
     if opened.is_empty:
         notes.append(f"every part of this layer is thinner than {w:.1f} mm")
         return geom
-    lost = geom.area - opened.area
-    if lost > 0.5:
-        notes.append(f"opened out {lost:.0f} mm2 of material thinner than {w:.1f} mm")
+    opened = opened.intersection(geom)          # only ever take material away
+
+    lost = geom.difference(opened)
+    if lost.is_empty:
+        return opened
+
+    openings = _pieces(unary_union(cuts)) if cuts else []
+    keep: list[Polygon] = []
+    removed = 0.0
+    for piece in _pieces(lost):
+        if piece.area < 1e-9:
+            continue
+        between = [o for o in openings if piece.buffer(0.05).intersects(o)]
+        if len(between) >= 2:
+            width = 2.0 * piece.area / piece.length if piece.length else 0.0
+            keep.append(piece)
+            notes.append(
+                f"kept a {width:.1f} mm web between two openings -- thinner than "
+                f"the {w:.1f} mm minimum, so move them apart or lower it")
+        else:
+            removed += piece.area
+
+    if removed > 0.5:
+        notes.append(f"opened out {removed:.0f} mm2 thinner than {w:.1f} mm")
+    if keep:
+        opened = unary_union([opened] + keep)
     return opened
 
 
@@ -458,30 +563,38 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
     for s in res.solids:
         if z_overlap(s.z, slab) <= 0:
             continue
-        if s.kind is VolumeKind.body and role in ("floor", "lid"):
-            # the floor stays solid under the hardware, and only things the
-            # user must see or touch pierce the lid
-            continue
+        if s.kind is VolumeKind.body:
+            if role == "floor":
+                continue      # hardware rests ON the floor; it does not cut it
+            if role == "lid" and s.placement in under_panel:
+                continue      # this one asked for the plate to pass over it
+            # Otherwise the lid is cut like any other layer. It used to skip
+            # bodies outright, which was harmless while the top layer floated
+            # above everything -- but the faceplate IS the top layer now, and
+            # a board sitting flush against it had plywood driven through it:
+            # 1698 mm2 inside the screen, 881 inside the OLED glass.
         if s.kind in (VolumeKind.display, VolumeKind.actuator):
             if s.placement in under_panel:
                 continue          # the faceplate runs over this one unbroken
             notes.append(f"opening for {s.ref}")
         cuts.append(s.poly.buffer(spec.part_clearance, join_style=2))
 
+    # These are deliberate holes in the outside, so they are kept apart from the
+    # pockets and re-applied after the minimum wall has been restored -- a port
+    # is meant to breach the wall, a pocket is not.
+    breaches: list[Polygon] = []
     for wc in res.connectors:
         if not wc.cuts_the_wall:
             continue
         if z_overlap(wc.corridor_z, slab) <= 0:
             continue
-        cuts.append(wc.corridor_poly.buffer(spec.part_clearance, join_style=2))
+        breaches.append(wc.corridor_poly.buffer(spec.part_clearance, join_style=2))
         notes.append(f"cutout for {wc.ref} ({wc.conn.type})")
 
-    # a side the user asked to leave open: everything beyond that edge goes,
-    # from the floor up to just above the cable
     for so in res.side_openings:
         if z_overlap(so.z, slab) <= 0:
             continue
-        cuts.append(so.poly)
+        breaches.append(so.poly)
         notes.append(so.reason)
 
     # How much of the inside to take out. The floor and the lid are structural
@@ -491,7 +604,8 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
         if not void.is_empty:
             if spec.interior == Interior.grown:
                 # the void is only the hardware and the room its cables need
-                grown = _hardware_in(res, spec, slab, pad=spec.cable_clearance)
+                grown = _hardware_in(res, spec, slab, pad=spec.cable_clearance,
+                                     outer=outer)
                 if grown:
                     cuts.extend(grown)
                     notes.append("pockets grown to clear the cable runs")
@@ -499,7 +613,7 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
                 cuts.append(void)
                 notes.append(f"hollow, {spec.wall:.1f} mm wall")
             elif spec.interior == Interior.ribs:
-                blocked = _hardware_in(res, spec, slab)
+                blocked = _hardware_in(res, spec, slab, outer=outer)
                 rib = _ribs(outer, void, spec, blocked)
                 cuts.append(void.difference(rib) if not rib.is_empty else void)
                 notes.append(f"hollow with stiffeners, {spec.wall:.1f} mm wall")
@@ -508,7 +622,10 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
     if cuts:
         geom = outer.difference(unary_union(cuts))
 
-    geom = _open_out_slivers(geom, spec, notes)
+    geom = _open_out_slivers(geom, spec, notes, cuts)
+    geom = _keep_a_wall(res, spec, outer, geom, slab, notes)
+    if breaches:
+        geom = geom.difference(unary_union(breaches))
 
     # Bosses go on last but one: after the pockets and the hollowing, because
     # both would otherwise remove the post, and before the screw holes, which
@@ -525,6 +642,15 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
 
     bolt_holes, bolt_notes = _case_screws(spec, outer, role)
     if bolt_holes:
+        # A bolt that lands on a board is not a bolt, it is a hole through the
+        # HyperPixel. Say so rather than quietly drilling it -- the fix is the
+        # user's (move the board, or the screw), not ours to guess.
+        for hole, note in zip(bolt_holes, bolt_notes):
+            hit = [s.ref for s in res.solids
+                   if s.kind is VolumeKind.body and z_overlap(s.z, slab) > 0
+                   and s.poly.intersects(hole)]
+            if hit:
+                notes.append(f"{note} runs into {', '.join(sorted(set(hit)))}")
         geom = geom.difference(unary_union(bolt_holes))
         notes += bolt_notes
 

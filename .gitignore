@@ -5,3 +5,6 @@ __pycache__/
 node_modules/
 .pytest_cache/
 *.yaml.bak
+
+# derived caches: rebuilt from the vendor APIs on demand
+vendor/catalog/
