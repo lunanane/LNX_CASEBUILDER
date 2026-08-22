@@ -48,7 +48,11 @@ export function wireMenus(root = document, win = window) {
   const anyOpen = () => menus.some((m) => m.classList.contains('open'));
   const closeAll = (why) => {
     if (anyOpen()) note(`closed: ${why}`);
+    closingOnPurpose = true;
     menus.forEach((m) => setOpen(m, false));
+    // Cleared after the microtask queue drains, because a MutationObserver
+    // callback runs then rather than synchronously.
+    Promise.resolve().then(() => { closingOnPurpose = false; });
   };
 
   for (const m of menus) {
@@ -60,8 +64,10 @@ export function wireMenus(root = document, win = window) {
       // shutting the menu we are in the middle of opening.
       ev.stopPropagation();
       const open = !m.classList.contains('open');
+      closingOnPurpose = true;
       menus.forEach((other) => setOpen(other, false));
       setOpen(m, open);
+      Promise.resolve().then(() => { closingOnPurpose = false; });
       note(open ? 'opened by click' : 'closed: its own button again');
     });
   }
@@ -86,5 +92,38 @@ export function wireMenus(root = document, win = window) {
     if (ev.key === 'Escape') closeAll('escape');
   });
 
+  // Catch a menu being closed by something that is not this module.
+  //
+  // Three fixes in and it still shuts on its own, so the possibility that the
+  // culprit is elsewhere has to be tested rather than assumed. Every close
+  // routed through here sets `expected` first; if the class disappears without
+  // that, some other code did it, and the stack says which.
+  watchForOutsideInterference(menus, note, win);
+
   return { closeAll, log, isOpen: (m) => m.classList.contains('open') };
 }
+
+/** Report anyone removing `.open` who is not us. */
+function watchForOutsideInterference(menus, note, win) {
+  const Observer = win.MutationObserver ?? globalThis.MutationObserver;
+  if (!Observer) return;
+
+  for (const m of menus) {
+    let was = m.classList.contains('open');
+    new Observer(() => {
+      const now = m.classList.contains('open');
+      if (was && !now && !closingOnPurpose) {
+        // A stack from inside the observer names the code that mutated the
+        // class, which is the whole point.
+        const where = (new Error().stack || '').split(/\r?\n/)
+          .slice(1, 4).join(' | ');
+        note(`closed by something outside menu.js -- ${where}`);
+      }
+      was = now;
+    }).observe(m, { attributes: true, attributeFilter: ['class'] });
+  }
+}
+
+//: set while this module is deliberately closing a menu, so the observer above
+//: can tell our own work from somebody else's
+let closingOnPurpose = false;

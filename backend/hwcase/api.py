@@ -17,7 +17,8 @@ from . import scenefile
 from . import __version__
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               PlainTextResponse)
 from fastapi.staticfiles import StaticFiles
 
 from . import case as case_mod
@@ -424,23 +425,73 @@ def health():
 # --------------------------------------------------------------------------
 
 class _NoCacheStatic(StaticFiles):
-    """Serve the editor, but make the browser check before reusing it.
+    """Serve the editor, but never let a browser reuse it without asking.
 
     Without a Cache-Control header a browser is free to guess how long a file
-    stays fresh, and for a plain .js with a last-modified date the guess can be
-    hours. The server reloads on edit, the page does not, and you end up
-    debugging a fix that is sitting on disk but is not the code running -- the
-    symptom being a button that does nothing.
-
-    `no-cache` is not `no-store`: the file is still cached, the browser just has
-    to revalidate. The ETag makes that a 304 and a few bytes.
+    stays fresh, and for a plain .js with a last-modified date that guess runs
+    to hours. The server reloads on edit, the page does not, and you end up
+    debugging a fix that is on disk but is not the code running. The symptom is
+    a button that does nothing, which is indistinguishable from a bug in the
+    button, and that cost several rounds of chasing the wrong thing.
     """
 
     async def get_response(self, path: str, scope):
         response = await super().get_response(path, scope)
-        response.headers.setdefault("Cache-Control", "no-cache")
+        response.headers["Cache-Control"] = "no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
         return response
 
 
+def asset_stamp() -> str:
+    """A token that changes whenever any editor source does."""
+    newest = 0.0
+    for pattern in ("*.js", "*.css", "*.html"):
+        for f in WEB_DIR.glob(pattern):
+            newest = max(newest, f.stat().st_mtime)
+    return str(int(newest))
+
+
+#: Local modules the page pulls in. Listed by scanning rather than hardcoded,
+#: so a new one cannot be forgotten and quietly become the stale file.
+def _local_modules() -> list[str]:
+    return sorted(f.name for f in WEB_DIR.glob("*.js"))
+
+
+def index_html() -> str:
+    """`index.html`, with every local script pinned to the current build.
+
+    Cache-Control only governs responses fetched *after* it was added. A copy
+    already sitting in a browser cache under an earlier heuristic keeps its
+    freshness and is never re-requested, so no header can dislodge it. Changing
+    the URL can: a versioned query is a cache miss, always.
+
+    The `<script src>` is rewritten, and the import map gains an entry per
+    local module -- without that, a fresh app.js would go straight back to a
+    stale menu.js, which is a worse kind of confusing.
+    """
+    html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
+    stamp = asset_stamp()
+
+    html = html.replace('src="./app.js"', f'src="./app.js?v={stamp}"')
+
+    pins = "".join(
+        ',\n    "./%s": "./%s?v=%s"' % (name, name, stamp)
+        for name in _local_modules())
+    html = html.replace(
+        '"three/addons/environments/RoomEnvironment.js": "./vendor/RoomEnvironment.js"',
+        '"three/addons/environments/RoomEnvironment.js": "./vendor/RoomEnvironment.js"'
+        + pins, 1)
+    return html
+
+
 if WEB_DIR.exists():
+    @app.get("/", response_class=HTMLResponse)
+    @app.get("/index.html", response_class=HTMLResponse)
+    def editor():
+        return HTMLResponse(index_html(), headers={
+            "Cache-Control": "no-store, must-revalidate",
+            "Pragma": "no-cache",
+        })
+
     app.mount("/", _NoCacheStatic(directory=str(WEB_DIR), html=True), name="web")

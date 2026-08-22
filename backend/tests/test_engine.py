@@ -3316,3 +3316,110 @@ def test_the_inset_hole_is_bigger_than_the_clearance_hole(lib):
     proud = build(resolve(_mounted("from_floor", inset=False), lib)).layers[0]
     assert flush.geom.area < proud.geom.area, (
         "the counterbored plate should have more material removed")
+
+
+@pytest.fixture()
+def client_app():
+    """The real app, serving the real editor -- no tmp scene directory.
+
+    These tests are about what the browser receives, so they have to go
+    through the actual static handling rather than a stand-in.
+    """
+    from fastapi.testclient import TestClient
+
+    from hwcase import api
+
+    with TestClient(api.app) as c:
+        yield c
+
+
+
+# ---------------------------------------------------------------------------
+# the editor is never served from a stale cache
+# ---------------------------------------------------------------------------
+#
+# This cost several rounds of chasing a menu bug that was not there. The
+# browser had a fresh index.html and a months-stale app.js, so the page showed
+# a new button whose handler did not exist, and reverted to hover behaviour
+# that had already been deleted twice. A button that does nothing is
+# indistinguishable from a button that is broken.
+
+def test_the_editor_is_never_cached(client_app):
+    """Cache-Control alone was not enough, but it is still the first line."""
+    for path in ("/", "/app.js", "/menu.js", "/style.css"):
+        r = client_app.get(path)
+        assert r.status_code == 200, path
+        assert "no-store" in r.headers.get("cache-control", ""), path
+
+
+def test_every_local_module_is_pinned_to_a_build(client_app):
+    """A header only governs responses fetched after it was added. A copy
+    already in a browser cache under an earlier heuristic keeps its freshness
+    and is never re-requested, so no header can dislodge it -- but a changed
+    URL is a cache miss, always."""
+    import json
+    import re
+
+    html = client_app.get("/").text
+
+    tag = re.search(r'src="\./app\.js\?v=(\d+)"', html)
+    assert tag, "the page does not pin app.js to a build"
+    stamp = tag.group(1)
+
+    imports = json.loads(
+        re.search(r'<script type="importmap">(.*?)</script>', html, re.S).group(1)
+    )["imports"]
+
+    # Without these a fresh app.js would import a stale menu.js, which is a
+    # worse kind of confusing than everything being stale together.
+    for name in ("menu.js", "stock.js", "finishes.js", "history.js", "snap.js"):
+        key = f"./{name}"
+        assert key in imports, f"{name} is not pinned"
+        assert imports[key] == f"./{name}?v={stamp}", imports[key]
+
+
+def test_a_pinned_url_actually_serves_the_file(client_app):
+    """The query is decoration to the router and everything to the cache."""
+    import re
+
+    html = client_app.get("/").text
+    stamp = re.search(r"app\.js\?v=(\d+)", html).group(1)
+    r = client_app.get(f"/app.js?v={stamp}")
+    assert r.status_code == 200
+    assert len(r.text) > 1000
+
+
+def test_the_stamp_moves_when_a_source_does(client_app, tmp_path):
+    """A build token that does not change is worse than none: it pins the
+    browser to whatever it fetched first."""
+    import os
+    import re
+    import time
+
+    from hwcase import api
+
+    before = re.search(r"app\.js\?v=(\d+)", client_app.get("/").text).group(1)
+    target = api.WEB_DIR / "app.js"
+    original = target.stat().st_mtime
+    # The stamp is the newest source, and app.js is not necessarily it -- so
+    # move well past whatever currently holds the maximum.
+    future = time.time() + 10_000
+    try:
+        os.utime(target, (future, future))
+        after = re.search(r"app\.js\?v=(\d+)", client_app.get("/").text).group(1)
+        assert after != before, "editing a source did not move the build stamp"
+    finally:
+        os.utime(target, (original, original))
+
+
+def test_the_import_map_stays_valid_json(client_app):
+    """It is built by string surgery on the page, and a browser that cannot
+    parse it silently ignores the whole map -- every module then loads
+    unpinned, which is exactly the failure this exists to prevent."""
+    import json
+    import re
+
+    html = client_app.get("/").text
+    raw = re.search(r'<script type="importmap">(.*?)</script>', html, re.S).group(1)
+    data = json.loads(raw)
+    assert data["imports"]["three"] == "./vendor/three.module.js"
