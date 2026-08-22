@@ -419,6 +419,22 @@ class Placement(Strict):
 
     #: whether the case carries this board on its own mounting holes
     support: Support = Support.none
+    #: Counterbore the outer plate so the screw head finishes flush with it.
+    #:
+    #: Left unset this follows the mount direction, because the right answer is
+    #: different at each end:
+    #:
+    #: * `from_floor` -> ON. A proud screw head on the underside makes the case
+    #:   rock on the bench.
+    #: * `from_lid` -> OFF. A front-mounted board usually sits directly under
+    #:   the faceplate, and counterboring the only plate between the head and
+    #:   the board leaves the head nothing to bear on -- it drops through and
+    #:   clamps nothing. A plain clearance hole pulls the board up against the
+    #:   faceplate, which is the point.
+    #:
+    #: Set it explicitly when there are layers between the plate and the board
+    #: and you want the heads flush with the faceplate.
+    screw_inset: Optional[bool] = None
     #: how the case treats each side of this board. Sides not listed use
     #: `per_connector`, which is what the case did before this existed.
     sides: list[SidePolicy] = Field(default_factory=list)

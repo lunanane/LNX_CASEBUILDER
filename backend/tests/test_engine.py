@@ -1450,8 +1450,11 @@ def test_from_lid_drills_a_board_that_sits_below_the_lid(lib):
         update={"thickness": 1.0})
     model = build(resolve(scene, lib))
     lid = model.layers[-1]
+    # Drilled, and drilled as a clearance hole: the board sits right under the
+    # faceplate, so counterboring it would leave the head nothing to pull on.
     assert len([n for n in lid.notes
-                if n.startswith("countersink for oled")]) == 4
+                if n.startswith("clearance hole for oled")]) == 4
+    assert not [n for n in lid.notes if n.startswith("cannot support oled")]
 
 
 def test_from_lid_does_not_post_below_the_board(lib):
@@ -1584,8 +1587,13 @@ def test_support_measures_the_board_not_its_knobs(lib):
     shaft_top = max(s.z[1] for s in res.solids if s.placement == "encoders")
     assert sp.board_top < shaft_top - 10.0, "the shafts are not the board"
 
+    # Every mounting hole gets drilled through the faceplate. A clearance hole
+    # rather than a counterbore, because the board is directly under the plate
+    # and the head has to bear on its outside face -- see screw_inset.
     lid = build(res).layers[-1]
-    assert len([n for n in lid.notes if n.startswith("countersink")]) == len(part.holes)
+    drilled = [n for n in lid.notes if n.startswith("clearance hole for encoders")]
+    assert len(drilled) == len(part.holes)
+    assert not [n for n in lid.notes if n.startswith("countersink for encoders")]
 
 
 # --------------------------------------------------------------------------
@@ -3221,3 +3229,90 @@ def test_a_blank_label_and_a_misplaced_one_read_differently(lib):
     notes = build(resolve(scene, lib)).layers[-1].notes
     assert any("'blank' has no text in it" in n for n in notes)
     assert any("'away' falls outside the lid" in n for n in notes)
+
+
+# ---------------------------------------------------------------------------
+# whether the screw head sinks into the outer plate
+# ---------------------------------------------------------------------------
+
+def _mounted(mode, inset=None, lid=1.0):
+    """The fixture, with the OLED screwed down and a lid thin enough that the
+    board is genuinely under it rather than embedded in it."""
+    scene = _supported(load_scene(SCENE), mode, "oled")
+    scene.case = scene.case.model_copy(deep=True)
+    scene.case.materials[-1] = scene.case.materials[-1].model_copy(
+        update={"thickness": lid})
+    if inset is not None:
+        next(p for p in scene.placements if p.id == "oled").screw_inset = inset
+    return scene
+
+
+def _outer_notes(model, mode):
+    layer = model.layers[-1] if mode == "from_lid" else model.layers[0]
+    return [n for n in layer.notes if "oled.h" in n]
+
+
+def test_a_front_mounted_board_gets_no_inset_by_default(lib):
+    """A board directly under the faceplate is held by a screw whose head
+    bears on the OUTSIDE of that faceplate. Counterbore the plate and the head
+    drops through onto the board, clamping nothing -- so the default has to be
+    a plain clearance hole."""
+    notes = _outer_notes(build(resolve(_mounted("from_lid"), lib)), "from_lid")
+    assert notes
+    assert all(n.startswith("clearance hole") for n in notes), notes
+
+
+def test_a_back_mounted_board_gets_an_inset_by_default(lib):
+    """The other end of the case, and the opposite answer: a screw head
+    standing proud of the bottom plate makes the whole thing rock."""
+    notes = _outer_notes(build(resolve(_mounted("from_floor"), lib)), "from_floor")
+    assert notes
+    assert all(n.startswith("countersink") for n in notes), notes
+
+
+def test_the_default_can_be_overridden_either_way(lib):
+    """There are real reasons for both -- heads flush with a faceplate look
+    better when there is a layer to sink them into."""
+    proud = _outer_notes(build(resolve(_mounted("from_floor", inset=False), lib)),
+                         "from_floor")
+    assert all(n.startswith("clearance hole") for n in proud), proud
+
+
+def test_an_inset_with_nothing_to_bear_on_is_refused(lib):
+    """Asking for it anyway must not silently produce a screw that holds
+    nothing -- the hole would look right and do nothing at all."""
+    model = build(resolve(_mounted("from_lid", inset=True), lib))
+    notes = _outer_notes(model, "from_lid")
+    assert any("no inset" in n for n in notes), notes
+    assert any("nothing to pull against" in n for n in notes), notes
+    # and it falls back to the hole that does work
+    assert any(n.startswith("clearance hole") for n in notes), notes
+
+
+def test_a_clearance_hole_still_counts_as_supporting_the_board(lib):
+    """The orphan-support report keys off the notes. When 'clearance hole'
+    was added it was not on that list, so every front-mounted board was
+    reported as unsupportable while being perfectly well supported."""
+    model = build(resolve(_mounted("from_lid"), lib))
+    lid = model.layers[-1]
+    assert not [n for n in lid.notes if n.startswith("cannot support oled")]
+
+
+def test_a_hair_thin_shoulder_does_not_count_as_bearing(lib):
+    """The layers between the plate and the board are whole sheets, so the gap
+    is either nothing or at least one sheet. A 0.07 mm shoulder is the former
+    dressed as the latter, and 'greater than zero' let it through."""
+    from hwcase.case import MIN_HEAD_BEARING
+
+    assert MIN_HEAD_BEARING >= 0.3, "a shoulder needs real thickness"
+    model = build(resolve(_mounted("from_lid", inset=True, lid=1.0), lib))
+    assert any("no inset" in n for n in _outer_notes(model, "from_lid"))
+
+
+def test_the_inset_hole_is_bigger_than_the_clearance_hole(lib):
+    """Whatever the notes say, the geometry has to differ -- a counterbore
+    takes the screw head, a clearance hole takes the shank."""
+    flush = build(resolve(_mounted("from_floor", inset=True), lib)).layers[0]
+    proud = build(resolve(_mounted("from_floor", inset=False), lib)).layers[0]
+    assert flush.geom.area < proud.geom.area, (
+        "the counterbored plate should have more material removed")

@@ -5,6 +5,7 @@ import { snapDelta, snapLines } from './snap.js';
 import { FINISHES, finishFor } from './finishes.js';
 import { createHistory } from './history.js';
 import { STOCK, restockName } from './stock.js';
+import { wireMenus } from './menu.js';
 
 // ---------------------------------------------------------------------------
 // state
@@ -1129,6 +1130,19 @@ function buildSelectionShell(pl) {
       <option value="from_floor">post up from the bottom plate</option>
       <option value="from_lid">screw down through the faceplate</option>
     </select></div>
+    ${pl.support && pl.support !== 'none' ? `
+    <div class="field"><label title="sink the screw heads into the outer plate so they finish flush with it">inset</label>
+      <select id="f-inset">
+        <option value="auto">auto</option>
+        <option value="yes">flush heads</option>
+        <option value="no">heads proud</option>
+      </select></div>
+    <div class="note">${pl.support === 'from_lid'
+      ? 'Auto = <b>proud</b>. A board directly under the faceplate needs the '
+        + 'head to bear on the outside face; counterboring the only plate '
+        + 'between the head and the board leaves it nothing to pull against.'
+      : 'Auto = <b>flush</b>, so a proud head does not make the case rock on '
+        + 'the bench.'}</div>` : ''}
     <div class="field"><label>stand</label><select id="f-tilt">
       <option value="0">flat</option>
       <option value="90">on edge (front)</option>
@@ -1185,6 +1199,9 @@ function buildSelectionShell(pl) {
     };
   };
   sel('f-support', (v) => (pl.support = v));
+  sel('f-inset', (v) => {
+    pl.screw_inset = v === 'auto' ? null : v === 'yes';
+  });
   sel('f-tilt', (v) => { pl.tilt = parseInt(v, 10); pl.flip = false; });
   sel('f-mount', (v) => (pl.mount = v));
   sel('f-panel', (v) => (pl.on_panel = v || null));
@@ -1221,6 +1238,10 @@ function updateSelectionValues(pl) {
   set('f-g', pl.mate_gap || 0);
   set('f-panelofs', pl.panel_offset || 0);
   const su = $('f-support'); if (su) su.value = pl.support || 'none';
+  const ins = $('f-inset');
+  if (ins) {
+    ins.value = pl.screw_inset == null ? 'auto' : (pl.screw_inset ? 'yes' : 'no');
+  }
   const ti = $('f-tilt');
   if (ti) ti.value = String(pl.tilt || (pl.flip ? 180 : 0));
   const mo = $('f-mount'); if (mo) mo.value = pl.mount || 'auto';
@@ -1710,20 +1731,106 @@ $('btn-save').onclick = async () => {
     status(`saved ${r.placements} placements${r.backup ? ` (backup ${r.backup})` : ''}`, 'ok');
   } catch (err) { status(err.message, 'err'); }
 };
-$('btn-svg').onclick = async () => {
-  const svg = await api('/api/export/svg', { method: 'POST', body: JSON.stringify(state.scene) });
-  window.open(URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' })), '_blank');
-};
-$('btn-dxf').onclick = async () => {
-  const r = await fetch('/api/export/dxf', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(state.scene),
-  });
+// Blob URLs are held until they are replaced. One export is most of a
+// megabyte, and a session is a lot of exports.
+let lastExportUrl = null;
+
+function exportUrl(blob) {
+  if (lastExportUrl) URL.revokeObjectURL(lastExportUrl);
+  lastExportUrl = URL.createObjectURL(blob);
+  return lastExportUrl;
+}
+
+/** Hand the file to the browser's download machinery.
+ *
+ *  The anchor is put in the document before it is clicked: a detached one
+ *  works in some browsers and is quietly ignored in others.
+ */
+function downloadBlob(blob, filename) {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(await r.blob());
-  a.download = `${state.sceneName}-layers.dxf`;
+  a.href = exportUrl(blob);
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
   a.click();
+  a.remove();
+}
+
+/** Save a blob, asking where to put it when the browser can.
+ *
+ *  `showSaveFilePicker` is a real save dialog -- pick the folder, pick the
+ *  name, and the file is written there. Chrome and Edge have it; Firefox and
+ *  Safari do not, and there the download folder is the best available answer.
+ *
+ *  It needs the click that started this to still count as a user gesture, and
+ *  that lasts a few seconds -- long enough to generate the file first, which
+ *  is worth doing so a failed export never opens a dialog for a file that does
+ *  not exist. If the gesture has expired anyway, fall back rather than fail:
+ *  the point is to end up with the file.
+ */
+async function saveBlob(blob, filename, description, mime) {
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [{ description, accept: { [mime]: [`.${filename.split('.').pop()}`] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return { ok: true, message: `saved ${handle.name}` };
+    } catch (err) {
+      if (err.name === 'AbortError') return { ok: false, message: 'save cancelled' };
+      // SecurityError (gesture expired), NotAllowedError (permission), or an
+      // older browser lying about support -- the download still works.
+      console.warn('save dialog unavailable, falling back', err);
+    }
+  }
+  downloadBlob(blob, filename);
+  return { ok: true, message: `${filename} saved to your downloads folder` };
+}
+
+// Exporting is the thing you do at the end of every session, so it gets a
+// shortcut -- and a shortcut answers a question a menu cannot: if ctrl+E
+// saves a file and the menu entry does not, the menu is at fault; if neither
+// does anything, the export is.
+window.addEventListener('keydown', (ev) => {
+  if (!(ev.ctrlKey || ev.metaKey) || ev.key.toLowerCase() !== 'e') return;
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(ev.target.tagName)) return;
+  ev.preventDefault();
+  (ev.shiftKey ? $('btn-dxf') : $('btn-svg')).click();
+});
+
+$('btn-svg').onclick = async () => {
+  status('generating the SVG…');
+  try {
+    const svg = await api('/api/export/svg',
+      { method: 'POST', body: JSON.stringify(state.scene) });
+    const name = `${state.sceneName}-layers.svg`;
+    const blob = new Blob([svg], { type: 'image/svg+xml' });
+    const r = await saveBlob(blob, name, 'Cut layers', 'image/svg+xml');
+    status(r.message, r.ok ? 'ok' : '');
+  } catch (err) {
+    status(`export failed — ${err.message}`, 'err');
+  }
 };
+
+$('btn-dxf').onclick = async () => {
+  status('generating the DXF…');
+  try {
+    const r = await fetch('/api/export/dxf', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state.scene),
+    });
+    if (!r.ok) throw new Error(`${r.status}: ${(await r.text()).slice(0, 300)}`);
+    const saved = await saveBlob(await r.blob(),
+      `${state.sceneName}-layers.dxf`, 'Cut layers', 'image/vnd.dxf');
+    status(saved.message, saved.ok ? 'ok' : '');
+  } catch (err) {
+    status(`export failed — ${err.message}`, 'err');
+  }
+};
+
 const turnSelection = (dir) => {
   const pl = movableRoot(state.selection);
   if (!pl) { status('select a part first', 'err'); return; }
@@ -2022,43 +2129,12 @@ function wireCatalog() {
 // geometry.
 let VERSION = '?';
 
-function wireMenus() {
-  const menus = [...document.querySelectorAll('.menu')];
-
-  const closeAll = (except) => {
-    for (const m of menus) {
-      if (m === except) continue;
-      m.classList.remove('open');
-      m.querySelector('.menu-btn')?.setAttribute('aria-expanded', 'false');
-    }
-  };
-
-  for (const m of menus) {
-    const btn = m.querySelector('.menu-btn');
-    btn.onclick = (ev) => {
-      ev.stopPropagation();
-      const open = !m.classList.contains('open');
-      closeAll(m);
-      m.classList.toggle('open', open);
-      btn.setAttribute('aria-expanded', String(open));
-    };
-    // Once one menu is open, sliding across the bar should open the next --
-    // that is what every menu bar does, and doing it differently feels broken.
-    m.onpointerenter = () => {
-      if (menus.some((x) => x.classList.contains('open'))) btn.onclick(new Event('x'));
-    };
-    // A menu item that acts and leaves the menu hanging open is worse than no
-    // menu, so anything clicked inside closes it.
-    m.querySelector('.menu-pop').addEventListener('click', (ev) => {
-      if (ev.target.closest('button')) closeAll(null);
-    });
-  }
-
-  window.addEventListener('pointerdown', () => closeAll(null));
-  window.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape') closeAll(null);
-  });
-}
+// This one IS baked in, and that is the point: it identifies the JavaScript
+// the browser is running, which the server cannot tell you. A browser holding
+// a cached app.js will report an old stamp here while the server reports the
+// new version beside it, and that mismatch is the whole diagnosis -- "it does
+// nothing when I click it" is what stale UI code looks like from outside.
+const UI_BUILD = '2026-08-22d';
 
 function wireTabs() {
   const tabs = [...document.querySelectorAll('.tabs .tab')];
@@ -2175,6 +2251,9 @@ in the issues pane rather than quietly becoming a cut line.</p>
 outline, a milling pass and a solid. Geometry is shapely, the browser only
 draws &mdash; it never computes a cut line of its own, which is why what you
 see and what you cut cannot disagree.</p>
+<p><b>Engine ${VERSION}</b>, <b>interface ${UI_BUILD}</b>. If those look out
+of step with each other, the browser is running a cached copy of the editor:
+reload with <kbd>ctrl</kbd>+<kbd>shift</kbd>+<kbd>R</kbd>.</p>
 <p>Loaded: ${parts} parts &middot; ${state.scene?.placements?.length ?? 0}
 placements &middot; case ${c?.interior ?? '?'},
 ${(c?.materials ?? []).length} layers.</p>
@@ -2663,7 +2742,12 @@ function buildEngravings(caseModel) {
   renderRenderPanel();
   renderEngravePanel();
   try {
-    api('/api/health').then((h) => { VERSION = h.version ?? '?'; }).catch(() => {});
+    api('/api/health')
+      .then((h) => {
+        VERSION = h.version ?? '?';
+        status(`hwcase ${VERSION} · ui ${UI_BUILD}`);
+      })
+      .catch(() => {});
     const { parts } = await api('/api/parts');
     state.parts = parts;
     state.partsById = new Map(parts.map((p) => [p.id, p]));

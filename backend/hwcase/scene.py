@@ -70,6 +70,18 @@ class WorldConnector:
             CutoutPolicy.per_connector, CutoutPolicy.open_to_edge)
 
 
+def _wants_inset(pl) -> bool:
+    """Whether this board's screw heads sink into the outer plate.
+
+    Unset means "whichever is right for this end of the case": flush on the
+    bottom so it does not rock, proud on the faceplate so the head has
+    something to pull against.
+    """
+    if pl.screw_inset is not None:
+        return bool(pl.screw_inset)
+    return pl.support == Support.from_floor
+
+
 @dataclass
 class SupportPoint:
     """One mounting hole the case is asked to carry, in world coordinates.
@@ -87,6 +99,8 @@ class SupportPoint:
     board_bottom: float    # world z of the board's underside
     board_top: float       # world z of its top face
     screw: Optional[str] = None
+    #: counterbore the outer plate for the head -- see Placement.screw_inset
+    inset: bool = False
 
     @property
     def ref(self) -> str:
@@ -563,7 +577,8 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
                     at = frame.point((h.at[0], h.at[1], 0.0))
                     supports.append(SupportPoint(
                         pl.id, h.name, (at[0], at[1]), pl.support,
-                        h.diameter, bottom, top, h.screw))
+                        h.diameter, bottom, top, h.screw,
+                        inset=_wants_inset(pl)))
 
         by_side: dict[Face, SidePolicy] = {sp.side: sp for sp in pl.sides}
 

@@ -104,3 +104,82 @@ test('every module app.js imports is present', () => {
     assert.ok(fs.existsSync(p), `missing module: ${spec}`);
   }
 });
+
+// The menu's own behaviour is tested by running it, in menu.test.mjs --
+// grepping the source for the right shape was how it got shipped broken twice.
+// All that is left to check here is that the page still uses that tested code.
+
+test('the menu bar uses the module the tests exercise', () => {
+  assert.match(js, /import \{ wireMenus \} from '\.\/menu\.js'/,
+    'app.js must delegate to menu.js, not keep its own copy');
+  assert.ok(!/function wireMenus\s*\(/.test(js),
+    'a second copy of the menu logic will drift away from the tested one');
+});
+
+test('hover cannot close a menu', () => {
+  // The gap between a button and its popup used to matter: crossing it left
+  // .menu and re-entering, and the hover handler toggled. It stopped mattering
+  // when hover moved onto the button and became open-only, so the invisible
+  // strip that used to bridge the gap is gone -- it was 210 px wide and sat
+  // over the neighbouring buttons at z-index 30.
+  const menu = fs.readFileSync(path.join(here, '..', 'menu.js'), 'utf8');
+  const at = menu.indexOf("addEventListener('pointerenter'");
+  assert.ok(at > 0, 'no hover handler');
+  const hover = menu.slice(at, menu.indexOf('\n    });', at));
+
+  // The one close hover is allowed to cause is switching to the menu the
+  // pointer has landed on. Any other close from here and reaching towards an
+  // item becomes a hazard.
+  const closes = [...hover.matchAll(/closeAll\('([^']*)'/g)].map((m) => m[1]);
+  assert.deepEqual(closes, ['slid onto another menu'],
+    `hover may only ever open a menu, never close one: ${closes}`);
+  const css = fs.readFileSync(path.join(here, '..', 'style.css'), 'utf8');
+  assert.ok(!/\.menu-pop::before/.test(css),
+    'the bridge is an invisible overlay on the header and is no longer needed');
+});
+
+// Exporting produced no file and no error, twice over: a popup that the
+// blocker ate, and then a click the menu swallowed. Both were silent, which
+// is the part worth pinning.
+
+test('nothing opens a popup window', () => {
+  // window.open() called after an await is no longer attributable to the click
+  // that started it, so a blocker discards it and the user sees nothing at
+  // all. Exports save to a file instead.
+  assert.ok(!/window\.open\s*\(/.test(js),
+    'window.open is unreliable here; save the file or show it in the modal');
+});
+
+/** The body of a top-level `$('id').onclick = async () => { ... };`
+ *
+ *  Sliced by index rather than matched by a built-up RegExp: escaping a
+ *  pattern through a template literal is its own small nightmare, and getting
+ *  it wrong here fails the test rather than the code. */
+function handlerBody(id) {
+  const head = `$('${id}').onclick = async () => {`;
+  const at = js.indexOf(head);
+  if (at < 0) return null;
+  const end = js.indexOf('\n};', at);
+  return end < 0 ? null : js.slice(at + head.length, end);
+}
+
+test('both exports report success and failure', () => {
+  // "Nothing happened" was the actual bug report. Whatever an export does, it
+  // has to say so.
+  for (const id of ['btn-svg', 'btn-dxf']) {
+    const body = handlerBody(id);
+    assert.ok(body, `${id} has no async click handler`);
+    assert.match(body, /catch\s*\(/, `${id} swallows failures`);
+    assert.match(body, /status\(/, `${id} never reports anything`);
+  }
+});
+
+test('saving falls back when there is no save dialog', () => {
+  // showSaveFilePicker is Chrome and Edge only, and needs a live user gesture
+  // even there. Firefox must still end up with the file.
+  const fn = /async function saveBlob\(([\s\S]*?)\n\}/.exec(js);
+  assert.ok(fn, 'no saveBlob helper');
+  assert.match(fn[1], /window\.showSaveFilePicker/);
+  assert.match(fn[1], /downloadBlob\(/, 'no fallback path');
+  assert.match(fn[1], /AbortError/, 'a cancelled save must not read as an error');
+});

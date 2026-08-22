@@ -220,7 +220,7 @@ def _report_orphan_supports(res: Resolved, layers: list[Layer], notes_to) -> Non
     served = set()
     for layer in layers:
         for note in layer.notes:
-            for word in ("countersink for ", "boss for "):
+            for word in ("countersink for ", "boss for ", "clearance hole for "):
                 if note.startswith(word):
                     served.add(note[len(word):])
 
@@ -563,6 +563,12 @@ def _open_out_slivers(geom, spec: CaseSpec, notes: list[str],
     return opened
 
 
+#: How much material has to remain under a counterbore for the screw head to
+#: pull against. Below this the plate is, for practical purposes, flush with
+#: the board and the head has nothing to bite on.
+MIN_HEAD_BEARING = 0.5
+
+
 def _support_features(res: Resolved, spec: CaseSpec, slab: tuple[float, float],
                       role: Role, zspan: tuple[float, float],
                       main: Polygon | MultiPolygon):
@@ -585,19 +591,43 @@ def _support_features(res: Resolved, spec: CaseSpec, slab: tuple[float, float],
         # a post there would be driven straight through it.
         if sp.mode == Support.from_floor:
             involved = slab[1] <= sp.board_bottom + 1e-6 and slab[1] > case_z0 - 1e-6
-            countersunk = role == "floor"
+            outer = role == "floor"
+            # how much material sits between this plate and the board
+            standoff = sp.board_bottom - slab[1]
         elif sp.mode == Support.from_lid:
             involved = slab[0] >= sp.board_top - 1e-6 and slab[0] < case_z1 + 1e-6
-            countersunk = role == "lid"
+            outer = role == "lid"
+            standoff = slab[0] - sp.board_top
         else:
             continue
         if not involved:
             continue
 
         centre = Point(sp.at)
-        if countersunk:
-            holes.append(centre.buffer(spec.screw_head / 2.0, quad_segs=24))
-            notes.append(f"countersink for {sp.ref}")
+        if outer:
+            # A counterbore takes the full thickness of this plate. If it is
+            # the only thing between the head and the board, the head drops
+            # straight through and lands on the board, clamping nothing -- so
+            # the screw does not hold. A plain clearance hole does: the head
+            # bears on the outside face and pulls the board against the inside
+            # one, which is the whole idea of a front-mounted board.
+            # Not just "greater than zero": the layers between this plate
+            # and the board are whole sheets, so the gap is either essentially
+            # nothing or at least one sheet thick. A 0.07 mm shoulder is the
+            # former wearing the latter's clothes.
+            can_bear = standoff >= MIN_HEAD_BEARING
+            if sp.inset and not can_bear:
+                notes.append(
+                    f"{sp.ref}: no inset -- this plate is all that is between "
+                    f"the screw head and the board, so counterboring it would "
+                    f"leave the head nothing to pull against")
+            if sp.inset and can_bear:
+                holes.append(centre.buffer(spec.screw_head / 2.0, quad_segs=24))
+                notes.append(f"countersink for {sp.ref}")
+            else:
+                holes.append(centre.buffer(
+                    (sp.screw_d + spec.screw_clearance) / 2.0, quad_segs=24))
+                notes.append(f"clearance hole for {sp.ref}")
             continue
 
         disc = centre.buffer(spec.support_boss / 2.0, quad_segs=24)

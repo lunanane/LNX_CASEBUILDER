@@ -423,5 +423,24 @@ def health():
 # the editor itself
 # --------------------------------------------------------------------------
 
+class _NoCacheStatic(StaticFiles):
+    """Serve the editor, but make the browser check before reusing it.
+
+    Without a Cache-Control header a browser is free to guess how long a file
+    stays fresh, and for a plain .js with a last-modified date the guess can be
+    hours. The server reloads on edit, the page does not, and you end up
+    debugging a fix that is sitting on disk but is not the code running -- the
+    symptom being a button that does nothing.
+
+    `no-cache` is not `no-store`: the file is still cached, the browser just has
+    to revalidate. The ETag makes that a 304 and a few bytes.
+    """
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers.setdefault("Cache-Control", "no-cache")
+        return response
+
+
 if WEB_DIR.exists():
-    app.mount("/", StaticFiles(directory=str(WEB_DIR), html=True), name="web")
+    app.mount("/", _NoCacheStatic(directory=str(WEB_DIR), html=True), name="web")

@@ -519,8 +519,34 @@ mounting holes — and which way round:
 | `support` | what the case grows |
 |---|---|
 | `none` | nothing (the default) |
-| `from_floor` | a column of material from the bottom plate up to the board's underside, with a clearance hole through it, and a **countersink in the bottom plate** so a screw head finishes flush with the outside |
+| `from_floor` | a column of material from the bottom plate up to the board's underside, with a clearance hole through it |
 | `from_lid` | a clearance hole down through the faceplate so the board can be screwed up against its underside, plus posts across any gap |
+
+### Flush heads or proud heads
+
+`screw_inset` decides whether the head sinks into the outer plate. Left on
+**auto** it follows the mount direction, because the right answer is opposite at
+each end of the case:
+
+- **`from_floor` → flush.** A screw head standing proud of the bottom plate
+  makes the whole case rock on the bench.
+- **`from_lid` → proud.** This one is not cosmetic. A counterbore removes the
+  *full thickness* of the plate it is cut in. A front-mounted board sits
+  directly under the faceplate, so that plate is the only thing between the
+  screw head and the board — counterbore it and the head drops straight through
+  and lands on the board, clamping nothing. A plain clearance hole is what
+  works: the head bears on the outside face and pulls the board up against the
+  inside one, which is the entire point of mounting a board to a faceplate.
+
+Set it explicitly when there *are* layers between the plate and the board and
+you want the heads flush with the faceplate. Ask for an inset that has nothing
+to bear on and the build refuses it, says why, and falls back to the hole that
+works — a counterbore there would look right on the drawing and hold nothing.
+
+"Nothing to bear on" means less than half a millimetre of material, not zero:
+the layers in between are whole sheets, so the gap is either essentially nothing
+or at least one sheet thick, and a 0.07 mm shoulder is the former in the
+latter's clothing.
 
 The hole positions are the real ones, read out of the vendor STEP files by
 `tools/extract_holes.py` — eight M2.5 on a NeoTrellis, not the four corners we
@@ -537,7 +563,7 @@ Two details that matter and are tested:
   most want to screw down from above.
 
 `support_boss`, `screw_clearance` and `screw_head` on the case spec set the post
-diameter, the slop on the through hole and the countersink.
+diameter, the slop on the through hole and the counterbore.
 
 ## Two connectivity guarantees
 
