@@ -14,6 +14,9 @@ vendor/catalog/
 
 # Exports land wherever the save dialog was last pointed, and that is often
 # the repo root. They are generated from a scene, so they are never source.
-*-layers.svg
-*-layers.dxf
-*-render.png
+# ...and the browser's "(2)" suffix when you export twice, which the exact
+# names missed.
+*-layers*.svg
+*-layers*.dxf
+*-render*.png
+*-photo*.png
