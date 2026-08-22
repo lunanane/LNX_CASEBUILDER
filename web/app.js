@@ -1790,16 +1790,9 @@ async function saveBlob(blob, filename, description, mime) {
   return { ok: true, message: `${filename} saved to your downloads folder` };
 }
 
-// Exporting is the thing you do at the end of every session, so it gets a
-// shortcut -- and a shortcut answers a question a menu cannot: if ctrl+E
-// saves a file and the menu entry does not, the menu is at fault; if neither
-// does anything, the export is.
-window.addEventListener('keydown', (ev) => {
-  if (!(ev.ctrlKey || ev.metaKey) || ev.key.toLowerCase() !== 'e') return;
-  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(ev.target.tagName)) return;
-  ev.preventDefault();
-  (ev.shiftKey ? $('btn-dxf') : $('btn-svg')).click();
-});
+// The same handler, reachable two ways: from the file menu and from a plain
+// button on the bar. A menu is a nicety; exporting is the point.
+$('btn-svg-bar').onclick = () => $('btn-svg').click();
 
 $('btn-svg').onclick = async () => {
   status('generating the SVG…');
@@ -2134,7 +2127,7 @@ let VERSION = '?';
 // a cached app.js will report an old stamp here while the server reports the
 // new version beside it, and that mismatch is the whole diagnosis -- "it does
 // nothing when I click it" is what stale UI code looks like from outside.
-const UI_BUILD = '2026-08-22d';
+const UI_BUILD = '2026-08-22e';
 
 function wireTabs() {
   const tabs = [...document.querySelectorAll('.tabs .tab')];

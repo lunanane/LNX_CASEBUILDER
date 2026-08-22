@@ -116,26 +116,31 @@ test('the menu bar uses the module the tests exercise', () => {
     'a second copy of the menu logic will drift away from the tested one');
 });
 
-test('hover cannot close a menu', () => {
-  // The gap between a button and its popup used to matter: crossing it left
-  // .menu and re-entering, and the hover handler toggled. It stopped mattering
-  // when hover moved onto the button and became open-only, so the invisible
-  // strip that used to bridge the gap is gone -- it was 210 px wide and sat
-  // over the neighbouring buttons at z-index 30.
+test('the menu ignores the pointer entirely', () => {
+  // Three attempts at this bug all involved hover. The behaviour it buys --
+  // sliding along the bar to switch menus -- is a convenience; being able to
+  // click an item is not. So there is no pointer handling at all now, and the
+  // cheapest way to keep it that way is to check that none exists.
   const menu = fs.readFileSync(path.join(here, '..', 'menu.js'), 'utf8');
-  const at = menu.indexOf("addEventListener('pointerenter'");
-  assert.ok(at > 0, 'no hover handler');
-  const hover = menu.slice(at, menu.indexOf('\n    });', at));
+  const code = menu.replace(/\/\/[^\n]*/g, '');   // comments discuss it freely
+  for (const evt of ['pointerenter', 'pointerleave', 'pointerover',
+                     'pointerout', 'pointermove', 'pointerdown',
+                     'mouseenter', 'mouseover', 'mouseleave']) {
+    assert.ok(!code.includes(evt),
+      `menu.js listens to ${evt}; an open menu must only react to clicks`);
+  }
 
-  // The one close hover is allowed to cause is switching to the menu the
-  // pointer has landed on. Any other close from here and reaching towards an
-  // item becomes a hazard.
-  const closes = [...hover.matchAll(/closeAll\('([^']*)'/g)].map((m) => m[1]);
-  assert.deepEqual(closes, ['slid onto another menu'],
-    `hover may only ever open a menu, never close one: ${closes}`);
+  // And the invisible strip that used to bridge the gap between button and
+  // popup goes with it: 210 px wide at z-index 30, across its neighbours.
   const css = fs.readFileSync(path.join(here, '..', 'style.css'), 'utf8');
-  assert.ok(!/\.menu-pop::before/.test(css),
-    'the bridge is an invisible overlay on the header and is no longer needed');
+  assert.ok(!/\.menu-pop::before/.test(css), 'the bridge is no longer needed');
+});
+
+test('exporting does not depend on the menu', () => {
+  // It is the last thing you do every session, and it spent three rounds
+  // being unreachable because it lived only in a dropdown.
+  assert.ok(staticIds.has('btn-svg-bar'), 'no export button on the bar');
+  assert.match(js, /\$\('btn-svg-bar'\)\.onclick/, 'the bar button is not wired');
 });
 
 // Exporting produced no file and no error, twice over: a popup that the

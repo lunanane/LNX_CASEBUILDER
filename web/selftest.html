@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>hwcase — menu self test</title>
+<link rel="stylesheet" href="./style.css">
+<style>
+  body { padding: 0; display: block; overflow: auto; }
+  main { display: block; padding: 20px; max-width: 900px; }
+  #verdict { font-size: 20px; padding: 12px 16px; border-radius: 6px; margin: 16px 0; }
+  #verdict.pass { background: #1d3a24; color: #8ce99a; }
+  #verdict.fail { background: #3a1d1d; color: #ff8787; }
+  #verdict.busy { background: var(--panel-2); color: var(--dim); }
+  li { margin: 3px 0; font-size: 13px; }
+  li.ok::before { content: 'ok  '; color: var(--ok); }
+  li.no::before { content: 'FAIL '; color: var(--err); }
+  li.no { color: var(--err); }
+  .why { color: var(--dim); font-size: 12px; margin-left: 26px; }
+  #stage { border: 1px dashed var(--line); padding: 8px; margin-top: 24px; }
+  h1 { font-size: 18px; }
+  p { max-width: 70ch; line-height: 1.5; }
+</style>
+</head>
+<body>
+<main>
+<h1>menu self test</h1>
+<p>This runs the editor's real <code>menu.js</code> against a real menu built
+from the real stylesheet, driving it with real browser events — in whichever
+browser you opened this in. The unit tests use a hand-written stand-in for the
+DOM, which can only ever prove the logic agrees with my model of a browser.
+This proves it agrees with <em>yours</em>.</p>
+
+<div id="verdict" class="busy">running…</div>
+<ul id="results"></ul>
+
+<p>The live bar below is wired by the same code. Click <b>file</b> and try to
+reach an item: it should stay open until you click something.</p>
+<div id="stage"></div>
+</main>
+
+<script type="module">
+import { wireMenus } from './menu.js';
+
+const results = [];
+const check = (name, cond, why = '') => results.push({ name, ok: !!cond, why });
+
+/** A menu bar with the same shape and classes as the editor's header. */
+function build(host) {
+  host.innerHTML = `
+    <div class="menubar">
+      <div class="menu" data-menu="file">
+        <button class="menu-btn">file</button>
+        <div class="menu-pop" role="menu">
+          <button id="t-save">save</button>
+          <button id="t-svg">export SVG</button>
+          <hr>
+          <button id="t-dxf">export DXF</button>
+        </div>
+      </div>
+      <div class="menu" data-menu="view">
+        <button class="menu-btn">view</button>
+        <div class="menu-pop" role="menu">
+          <label><input type="checkbox" id="t-grid"> grid</label>
+          <button id="t-frame">frame</button>
+        </div>
+      </div>
+    </div>`;
+  return {
+    file: host.querySelector('[data-menu=file]'),
+    view: host.querySelector('[data-menu=view]'),
+    fileBtn: host.querySelector('[data-menu=file] .menu-btn'),
+    viewBtn: host.querySelector('[data-menu=view] .menu-btn'),
+    svg: host.querySelector('#t-svg'),
+    grid: host.querySelector('#t-grid'),
+  };
+}
+
+const isOpen = (m) => m.classList.contains('open');
+
+/** A full press: the events a real click produces, in order. */
+function fullClick(el) {
+  const at = el.getBoundingClientRect();
+  const opts = {
+    bubbles: true, cancelable: true, composed: true,
+    clientX: at.left + at.width / 2, clientY: at.top + at.height / 2,
+  };
+  el.dispatchEvent(new PointerEvent('pointerdown', opts));
+  el.dispatchEvent(new MouseEvent('mousedown', opts));
+  el.dispatchEvent(new PointerEvent('pointerup', opts));
+  el.dispatchEvent(new MouseEvent('mouseup', opts));
+  el.dispatchEvent(new MouseEvent('click', opts));
+}
+
+function hover(el) {
+  const at = el.getBoundingClientRect();
+  const opts = { bubbles: false, clientX: at.left + 2, clientY: at.top + 2 };
+  el.dispatchEvent(new PointerEvent('pointerenter', opts));
+  el.dispatchEvent(new PointerEvent('pointerover', { ...opts, bubbles: true }));
+  el.dispatchEvent(new PointerEvent('pointermove', { ...opts, bubbles: true }));
+}
+
+function leave(el) {
+  el.dispatchEvent(new PointerEvent('pointerleave', { bubbles: false }));
+  el.dispatchEvent(new PointerEvent('pointerout', { bubbles: true }));
+}
+
+// --- the tests ------------------------------------------------------------
+
+const host = document.getElementById('stage');
+const el = build(host);
+wireMenus(document, window);
+
+// 1. it opens
+fullClick(el.fileBtn);
+check('clicking "file" opens it', isOpen(el.file), why());
+
+// 2. it is actually visible -- open in the DOM is not the same as on screen
+const popBox = el.file.querySelector('.menu-pop').getBoundingClientRect();
+check('the popup is visible', popBox.height > 10 && popBox.width > 10,
+  `measured ${Math.round(popBox.width)}x${Math.round(popBox.height)}`);
+
+// 3. the item is what the browser would actually hit at that point
+const target = document.elementFromPoint(
+  popBox.left + 20, popBox.top + popBox.height / 2);
+check('a click at the popup lands inside the menu',
+  !!target?.closest?.('.menu'),
+  `topmost element there is <${target?.tagName?.toLowerCase()}${
+    target?.className ? ' class="' + target.className + '"' : ''}>`);
+
+// 4. moving the pointer around must not close it -- the reported bug
+hover(el.fileBtn);
+leave(el.fileBtn);
+hover(el.file.querySelector('.menu-pop'));
+hover(el.svg);
+leave(el.svg);
+hover(el.viewBtn);          // even crossing another menu's button
+leave(el.viewBtn);
+check('moving the pointer never closes it', isOpen(el.file), why());
+
+// 5. pressing on an item must not close it before the click lands
+el.svg.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+check('pressing an item does not close it first', isOpen(el.file), why());
+
+// 6. the click reaches the item
+let reached = 0;
+el.svg.addEventListener('click', () => { reached += 1; });
+fullClick(el.svg);
+check('the click reaches the item', reached === 1, `handler ran ${reached}x`);
+
+// 7. and then it closes
+check('choosing an item closes the menu', !isOpen(el.file), why());
+
+// 8. a checkbox does not close it
+fullClick(el.viewBtn);
+fullClick(el.grid);
+check('a checkbox leaves the menu open', isOpen(el.view), why());
+
+// 9. clicking outside closes it
+fullClick(document.getElementById('verdict'));
+check('clicking outside closes it', !isOpen(el.view), why());
+
+// 10. escape closes it
+fullClick(el.fileBtn);
+window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+check('escape closes it', !isOpen(el.file), why());
+
+function why() {
+  const last = (window.__menuLog ?? []).slice(-1)[0];
+  return last ? `last menu event: ${last.why}` : 'no menu events recorded';
+}
+
+// --- report ---------------------------------------------------------------
+
+const list = document.getElementById('results');
+for (const r of results) {
+  const li = document.createElement('li');
+  li.className = r.ok ? 'ok' : 'no';
+  li.textContent = r.name;
+  list.appendChild(li);
+  if (r.why) {
+    const d = document.createElement('div');
+    d.className = 'why';
+    d.textContent = r.why;
+    list.appendChild(d);
+  }
+}
+
+const failed = results.filter((r) => !r.ok);
+const verdict = document.getElementById('verdict');
+verdict.className = failed.length ? 'fail' : 'pass';
+verdict.textContent = failed.length
+  ? `${failed.length} of ${results.length} FAILED — ${failed.map((f) => f.name).join('; ')}`
+  : `all ${results.length} passed in ${navigator.userAgent.split(') ').pop()}`;
+</script>
+</body>
+</html>

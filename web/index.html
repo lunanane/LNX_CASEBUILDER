@@ -36,8 +36,8 @@
         <button id="btn-saveas">save as&hellip;</button>
         <button id="btn-reload">reload from disk</button>
         <hr>
-        <button id="btn-svg">export SVG<kbd>ctrl E</kbd></button>
-        <button id="btn-dxf">export DXF<kbd>ctrl ⇧ E</kbd></button>
+        <button id="btn-svg">export SVG</button>
+        <button id="btn-dxf">export DXF</button>
       </div>
     </div>
 
@@ -81,6 +81,9 @@
 
   <span class="sep"></span>
   <select id="scene-select" title="scene"></select>
+  <!-- On the bar as well as in the file menu. Exporting is the last thing you
+       do every session, and it should not depend on a dropdown behaving. -->
+  <button id="btn-svg-bar" title="save the cut layers as SVG">export</button>
 
   <span class="sep"></span>
   <!-- These two stay on the bar: they change what you are looking at, and you

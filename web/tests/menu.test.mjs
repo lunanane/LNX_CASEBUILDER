@@ -25,6 +25,14 @@ function press(win, el) {
   return win.fire(el, 'click');
 }
 
+/** Every pointer event a mouse produces while wandering over an element. */
+function wander(el) {
+  for (const type of ['pointerenter', 'pointerover', 'pointermove',
+                      'pointerleave', 'pointerout']) {
+    el.dispatch(type);
+  }
+}
+
 test('a click on a menu item reaches the item', () => {
   const { menus, win } = bar();
   let fired = 0;
@@ -74,29 +82,31 @@ test('reaching into an open menu does not shut it', () => {
   assert.ok(menus.file.menu.classList.contains('open'));
 });
 
-test('sliding onto another menu switches to it', () => {
+test('the pointer moving never changes anything', () => {
+  // The rule, stated plainly: an open menu closes when a button in it is
+  // clicked, or when something outside it is clicked. Nothing else. Hover
+  // switching is a convenience that cost three rounds of this bug; being able
+  // to click an item is not a convenience.
   const { menus, win } = bar();
   press(win, menus.file.btn);
 
-  menus.view.btn.dispatch('pointerenter');
-  assert.ok(menus.view.menu.classList.contains('open'), 'view did not open');
-  assert.ok(!menus.file.menu.classList.contains('open'), 'file stayed open too');
-});
-
-test('hovering a menu with none open does nothing', () => {
-  const { menus } = bar();
-  menus.view.btn.dispatch('pointerenter');
+  for (const m of [menus.file, menus.view]) {
+    for (const el of [m.btn, m.menu, m.pop]) wander(el);
+  }
+  assert.ok(menus.file.menu.classList.contains('open'),
+    `the pointer closed it: ${JSON.stringify(win.__menuLog)}`);
   assert.ok(!menus.view.menu.classList.contains('open'),
-    'menus must not open on hover alone');
+    'hover opened a menu nobody clicked');
 });
 
-test('a press outside closes everything', () => {
+
+test('a click outside closes everything', () => {
   const { root, menus, win } = bar();
   press(win, menus.file.btn);
 
   const outside = new (menus.file.btn.constructor)('div');
   root.append(outside);
-  win.fire(outside, 'pointerdown');
+  win.fire(outside, 'click');
   assert.ok(!menus.file.menu.classList.contains('open'));
 });
 
@@ -123,26 +133,6 @@ test('aria-expanded tracks the menu', () => {
   assert.equal(menus.file.btn.getAttribute('aria-expanded'), 'false');
 });
 
-test('hover can never close a menu, only open one', () => {
-  // The invariant that makes "it vanished while I was reaching for it"
-  // impossible by construction. Hover is bound to the button rather than to
-  // .menu, because .menu contains the popup -- which is wider than the button
-  // and overlaps its neighbours -- so pointer traffic around the popup would
-  // otherwise be able to drive the menu's state.
-  const { menus, win } = bar();
-  press(win, menus.file.btn);
-
-  for (const m of [menus.file, menus.view]) {
-    for (const el of [m.btn, m.menu, m.pop]) {
-      el.dispatch('pointerenter');
-      el.dispatch('pointerleave');
-      el.dispatch('pointerout');
-    }
-  }
-  const open = [menus.file, menus.view].filter(
-    (m) => m.menu.classList.contains('open'));
-  assert.equal(open.length, 1, 'hover left no menu open, or left two open');
-});
 
 test('every close records why it happened', () => {
   // A menu that vanishes on its own cannot be diagnosed by watching it.
@@ -161,7 +151,7 @@ test('a menu left alone stays open', () => {
   const { menus, win } = bar();
   press(win, menus.file.btn);
   win.fireBare('keydown', { key: 'a' });
-  win.fire(menus.file.pop, 'pointermove');
+  wander(menus.file.pop);
   assert.ok(menus.file.menu.classList.contains('open'),
     `menu closed on its own: ${JSON.stringify(win.__menuLog)}`);
 });

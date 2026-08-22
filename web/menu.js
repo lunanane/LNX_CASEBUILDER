@@ -1,25 +1,34 @@
 // The header menu bar.
 //
-// Extracted from app.js so the click path can be executed in a test rather
-// than argued about. It shipped broken twice, both times because reasoning
-// about event order looked easier than running it.
+// An open menu closes for exactly three reasons: a button in it was clicked,
+// something outside it was clicked, or Escape. Nothing else. In particular
+// **nothing here reacts to the pointer moving**, which is what took three
+// attempts to get right.
 //
-// Two rules keep it out of trouble:
+// The history is worth keeping, because each fix looked obviously correct:
 //
-//   * Hover only ever OPENS, and only from a menu *button*. It is bound to the
-//     button and not to `.menu`, because `.menu` contains the popup -- which is
-//     wider than the button and overlaps its neighbours -- so binding there
-//     turns every trip in and out of the popup into a chance to change state.
-//     Reaching into an open menu cannot close it if hover cannot close
-//     anything at all.
-//   * Nothing closes on `pointerdown` inside a menu. Closing there hides the
-//     popup before the click is delivered, and the item silently does nothing.
+//   1. `pointerdown` on the window closed every menu, including the one being
+//      pressed. The popup went `display:none` before the click could be
+//      delivered, so items silently did nothing.
+//   2. Hover was bound to `.menu` and *toggled*, so travelling from the button
+//      down into the popup -- which leaves `.menu` and re-enters it, because
+//      the popup is positioned outside the button's box -- shut the menu you
+//      were reaching into.
+//   3. Hover was then bound to the button and made open-only, which is still
+//      not enough: `.menu-pop` is far wider than its button and overlaps its
+//      neighbours, so a pointer travelling towards an item can cross another
+//      menu's button and switch away from the one you opened.
 //
-// Every close records why, on `window.__menuLog`. A menu that vanishes on its
-// own is near-impossible to diagnose by watching it, and the reason is one
-// line of bookkeeping.
+// The switch-on-hover behaviour a desktop menu bar usually has is simply not
+// worth this. It is a convenience; being able to click an item is not.
 //
-// Takes a `root` and a `win` so a test can hand it a small document.
+// Closing is on `click`, not `pointerdown`: a click is what "clicked outside"
+// means, and it happens after any in-menu click has already been delivered.
+//
+// Every close records why, on `window.__menuLog` and as a console line. A
+// menu that shuts on its own cannot be diagnosed by watching it happen.
+//
+// `root` and `win` are injectable so a test can hand it a small document.
 
 export function wireMenus(root = document, win = window) {
   const menus = [...root.querySelectorAll('.menu')];
@@ -47,39 +56,31 @@ export function wireMenus(root = document, win = window) {
     if (!btn) continue;
 
     btn.addEventListener('click', (ev) => {
+      // Stops the document-level close below from seeing this click and
+      // shutting the menu we are in the middle of opening.
       ev.stopPropagation();
       const open = !m.classList.contains('open');
-      closeAll(open ? 'opening another menu' : 'its own button again');
+      menus.forEach((other) => setOpen(other, false));
       setOpen(m, open);
-      if (open) note('opened by click');
-    });
-
-    // Sliding along the bar with a menu already open moves to the next one.
-    // On the BUTTON, and open-only: hover must never be able to close
-    // anything, or travelling towards an item becomes a hazard.
-    btn.addEventListener('pointerenter', () => {
-      if (!anyOpen() || m.classList.contains('open')) return;
-      closeAll('slid onto another menu');
-      setOpen(m, true);
-      note('opened by hover');
+      note(open ? 'opened by click' : 'closed: its own button again');
     });
   }
 
-  // A press elsewhere closes up -- but never a press inside a menu, or the
-  // popup is gone before the click reaches the item.
-  win.addEventListener('pointerdown', (ev) => {
-    if (!ev.target?.closest?.('.menu')) closeAll('pressed outside');
-  });
-
-  // Once an item is clicked the menu has done its job. This runs after the
-  // item's own handler, because it is on an ancestor and click bubbles --
-  // which is the only reason closing here is safe.
   for (const pop of root.querySelectorAll('.menu-pop')) {
     pop.addEventListener('click', (ev) => {
-      // Checkboxes stay open: you usually want to flip two of them.
-      if (ev.target?.closest?.('button')) closeAll('an item was chosen');
+      // The item's own handler has already run -- this is an ancestor and
+      // click bubbles, which is the only reason closing here is safe.
+      // Checkboxes are left alone: you usually want to flip two of them.
+      if (ev.target?.closest?.('button')) {
+        ev.stopPropagation();
+        closeAll('an item was chosen');
+      }
     });
   }
+
+  win.addEventListener('click', (ev) => {
+    if (!ev.target?.closest?.('.menu')) closeAll('clicked outside');
+  });
 
   win.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape') closeAll('escape');
