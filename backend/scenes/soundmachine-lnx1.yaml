@@ -135,6 +135,6 @@ placements:
   sides:
   - side: +x
     cutout: open_to_edge
-    include: []
+    include: [usb_c]
     margin: 7.0
     span: full

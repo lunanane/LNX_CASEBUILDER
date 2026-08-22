@@ -424,8 +424,14 @@ clearer signal than a job id to poll.
 This needs **Mitsuba**, which is an optional install:
 
 ```
-pip install mitsuba
+.venv\Scripts\python -m pip install mitsuba
 ```
+
+About 50 MB, and it brings drjit with it. On startup it prints
+`jitc_llvm_init(): LLVM API initialization failed` — that is the GPU/JIT
+variant announcing it is unavailable, and it is harmless: the renderer asks
+for `scalar_rgb`, one ray at a time on the CPU. A 1100 x 825 frame at 96
+samples takes about 35 seconds on a laptop.
 
 Everything else works without it, and the button says so rather than failing
 when pressed. Mitsuba was picked over the alternatives because it is the only

@@ -124,7 +124,17 @@ def _triangulate(poly: Polygon) -> list[tuple]:
 
 
 def _extrude(polys: Iterable[Polygon], z0: float, z1: float):
-    """A closed-enough mesh for one slab: two caps and a wall per ring."""
+    """A closed-enough mesh for one slab: two caps and a wall per ring.
+
+    Rings are oriented before use -- exterior counter-clockwise, holes
+    clockwise -- so that one winding rule gives every wall an outward normal.
+    Shapely makes no promise about which way round a ring comes back, and a
+    wall whose normal points into the material renders pure black under a
+    one-sided BSDF, which is how a plywood case came out with a plywood lid
+    and coal-black sides.
+    """
+    from shapely.geometry.polygon import orient
+
     verts: list[tuple[float, float, float]] = []
     faces: list[tuple[int, int, int]] = []
 
@@ -133,6 +143,7 @@ def _extrude(polys: Iterable[Polygon], z0: float, z1: float):
         return len(verts) - 1
 
     for poly in polys:
+        poly = orient(poly, sign=1.0)
         for tri in _triangulate(poly):
             base = [add((x, y, z0)) for x, y in tri]
             faces.append((base[0], base[2], base[1]))       # bottom, wound down
@@ -236,16 +247,27 @@ def _bsdf(layer: Layer) -> dict:
         return {"type": "roughdielectric", "int_ior": 1.49,
                 "alpha": max(f["rough"], 0.001)}
 
+    # Wrapped two-sided. Mitsuba's BSDFs are one-sided by default, so a face
+    # the mesh happens to wind the other way is not merely mis-shaded, it is
+    # black. The winding is fixed in _extrude as well; this is the belt to that
+    # pair of braces, and for an opaque solid two-sided shading is what you
+    # want anyway. Not the dielectric: refraction needs to know which side of
+    # the glass it is on.
     if f["metal"] > 0.5:
-        return {"type": "roughconductor", "alpha": max(f["rough"] ** 2, 0.001),
-                "material": "Al"}
+        return _twosided({"type": "roughconductor",
+                          "alpha": max(f["rough"] ** 2, 0.001),
+                          "material": "Al"})
 
-    return {
+    return _twosided({
         "type": "roughplastic",
         "diffuse_reflectance": {"type": "rgb", "value": rgb},
         "alpha": max(f["rough"] ** 2, 0.002),
         "int_ior": 1.4,
-    }
+    })
+
+
+def _twosided(bsdf: dict) -> dict:
+    return {"type": "twosided", "material": bsdf}
 
 
 # ---------------------------------------------------------------------------
@@ -345,9 +367,9 @@ def build_scene_dict(res: Resolved, case: CaseModel, s: RenderSettings,
                                   everts, efaces)
                 scene[f"engrave{layer.index:02d}"] = {
                     "type": "ply", "filename": str(eply),
-                    "bsdf": {"type": "diffuse",
-                             "reflectance": {"type": "rgb",
-                                             "value": [0.05, 0.05, 0.06]}},
+                    "bsdf": _twosided({"type": "diffuse",
+                                       "reflectance": {"type": "rgb",
+                                                       "value": [0.05, 0.05, 0.06]}}),
                 }
 
     # The hardware, as blocks. Not pretty, but a picture of an empty box is
@@ -359,13 +381,33 @@ def build_scene_dict(res: Resolved, case: CaseModel, s: RenderSettings,
         ply = _write_ply(workdir / f"part{i:03d}.ply", verts, faces)
         scene[f"part{i:03d}"] = {
             "type": "ply", "filename": str(ply),
-            "bsdf": {"type": "roughplastic",
-                     "diffuse_reflectance": {"type": "rgb",
-                                             "value": [0.08, 0.13, 0.10]},
-                     "alpha": 0.09, "int_ior": 1.5},
+            "bsdf": _twosided({"type": "roughplastic",
+                               "diffuse_reflectance": {"type": "rgb",
+                                                       "value": [0.08, 0.13, 0.10]},
+                               "alpha": 0.09, "int_ior": 1.5}),
         }
 
     return scene
+
+
+def _with_transforms(scene: dict, mi) -> dict:
+    """Turn the plain 4x4s in a scene dict into Mitsuba transforms.
+
+    `build_scene_dict` deliberately emits nested lists so the translation can
+    be tested on a machine with no Mitsuba installed, which is most of them.
+    Mitsuba will not take a list for `to_world`, so the conversion happens
+    here -- at the point where Mitsuba is known to exist -- rather than
+    infecting the part that has to work without it.
+    """
+    out = {}
+    for key, value in scene.items():
+        if isinstance(value, dict):
+            out[key] = _with_transforms(value, mi)
+        elif key == "to_world" and isinstance(value, list):
+            out[key] = mi.ScalarTransform4f(value)
+        else:
+            out[key] = value
+    return out
 
 
 def _transform_look_at(origin, target) -> list[list[float]]:
@@ -431,8 +473,11 @@ def render(res: Resolved, case: CaseModel, out: Path,
 
     work = Path(workdir) if workdir else out.parent / f".{out.stem}-meshes"
     scene_dict = build_scene_dict(res, case, s, work)
-    image = mi.render(mi.load_dict(scene_dict))
+    image = mi.render(mi.load_dict(_with_transforms(scene_dict, mi)))
 
     out.parent.mkdir(parents=True, exist_ok=True)
-    mi.util.write_bitmap(str(out), image)
+    # write_async defaults to True and returns before the file exists, which
+    # is a race with anything that reads it back -- the API hands this straight
+    # to a FileResponse, and an empty PNG is a peculiar thing to debug.
+    mi.util.write_bitmap(str(out), image, write_async=False)
     return out

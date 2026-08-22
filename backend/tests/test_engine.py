@@ -2967,12 +2967,21 @@ def test_acrylic_renders_as_glass_not_as_alpha(lib):
     class _L:
         material = Material(name="acrylic-clear-3mm", thickness=3.0)
 
-    assert _bsdf(_L()).get("type") == "roughdielectric"
+    glass = _bsdf(_L())
+    assert glass.get("type") == "roughdielectric"
+    # Not wrapped two-sided: refraction has to know which side of the glass a
+    # ray is on, and a two-sided dielectric is a contradiction.
+    assert "material" not in glass
 
     class _P:
         material = Material(name="plywood-3mm", thickness=3.0)
 
-    assert _bsdf(_P()).get("type") == "roughplastic"
+    ply = _bsdf(_P())
+    # Opaque surfaces ARE wrapped. Mitsuba's BSDFs are one-sided, so a face the
+    # mesh winds the other way does not shade oddly -- it comes out pure black,
+    # which is how a plywood case rendered with a plywood lid and coal sides.
+    assert ply.get("type") == "twosided"
+    assert ply["material"]["type"] == "roughplastic"
 
 
 # ---------------------------------------------------------------------------
@@ -3558,3 +3567,32 @@ def test_turning_the_collar_off_is_respected(lib):
     plain_area = sum(l.geom.area for l in plain.layers)
     collar_area = sum(l.geom.area for l in collared.layers)
     assert collar_area > plain_area, "the collar added no material at all"
+
+
+@needs_cad
+def test_extruded_walls_face_outwards(lib):
+    """A wall wound the wrong way is invisible, not merely mis-shaded.
+
+    Mitsuba's BSDFs are one-sided, and shapely makes no promise about which
+    way round a ring comes back, so the winding has to be forced rather than
+    hoped for. Checked by the divergence theorem: for a closed mesh with
+    consistently outward normals the signed volume is positive.
+    """
+    import numpy as np
+    from shapely.geometry import box as shbox
+
+    from hwcase.raytrace import _extrude
+
+    ring = shbox(0, 0, 40, 25).difference(shbox(10, 8, 18, 16))
+    verts, faces = _extrude([ring], 0.0, 3.0)
+    assert len(faces) > 8
+
+    tri = verts[faces]
+    # sum over triangles of (a . (b x c)) / 6 -- positive when outward
+    volume = float(np.einsum("ij,ij->i",
+                             tri[:, 0], np.cross(tri[:, 1], tri[:, 2])).sum() / 6.0)
+    expected = ring.area * 3.0
+    assert volume > 0, "the mesh is inside out"
+    assert volume == pytest.approx(expected, rel=0.02), (
+        f"signed volume {volume:.1f} against {expected:.1f} -- some faces are "
+        f"wound the wrong way")
