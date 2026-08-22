@@ -11,3 +11,9 @@ vendor/catalog/
 
 # session state, not source: a lock naming a PID belongs to one machine
 .claude/scheduled_tasks.lock
+
+# Exports land wherever the save dialog was last pointed, and that is often
+# the repo root. They are generated from a scene, so they are never source.
+*-layers.svg
+*-layers.dxf
+*-render.png
