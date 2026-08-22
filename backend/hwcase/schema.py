@@ -541,6 +541,13 @@ class CaseSpec(Strict):
     case_screw_head: float = 6.5       # countersink in the outer plate
     #: `perimeter` only: roughly how far apart bolts sit along each edge
     case_screw_spacing: float = 80.0
+    #: Diameter of the collar of material carried around a case bolt, so it
+    #: has something to pass through on every layer. A bolt is only a bolt if
+    #: material touches it the whole way down; where a layer is hollow at that
+    #: point, cutting a hole in nothing achieves nothing. Set 0 to drill only
+    #: where material already happens to be.
+    case_screw_boss: float = 9.0
+
     #: One more bolt in the middle. A wide lid bows between its edge screws,
     #: and this pulls the centre down -- but only works if the middle of the
     #: case is actually empty, so the build warns when it lands on a board.

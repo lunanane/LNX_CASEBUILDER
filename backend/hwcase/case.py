@@ -400,6 +400,45 @@ def case_screw_points(spec: CaseSpec, outer: Polygon) -> list[tuple[float, float
     return pts
 
 
+def _case_screw_bosses(res: Resolved, spec: CaseSpec, outer: Polygon,
+                       slab: tuple[float, float], geom, notes: list[str]):
+    """Material to carry each case bolt through this layer.
+
+    The board supports have had this from the start; the case bolts did not,
+    and it shows the moment an interior mode hollows a corner out: the bolt
+    hole vanishes from that sheet entirely rather than being drilled somewhere
+    useless, which is a quieter failure and a worse one.
+
+    Clipped to the outline, so a collar never grows the case, and cut back from
+    any hardware at that height -- a collar is material, and material pressed
+    against a board is the same mistake as a bolt through one.
+    """
+    if spec.case_screw_boss <= 0:
+        return []
+
+    points = case_screw_points(spec, outer)
+    if not points:
+        return []
+
+    blocking = [s.poly for s in res.solids
+                if s.kind is VolumeKind.body and z_overlap(s.z, slab) > 0]
+    keepout = (unary_union(blocking).buffer(spec.part_clearance, join_style=2)
+               if blocking else None)
+
+    out = []
+    for cx, cy in points:
+        disc = Point(cx, cy).buffer(spec.case_screw_boss / 2.0, quad_segs=24)
+        disc = disc.intersection(outer)
+        if keepout is not None and not keepout.is_empty:
+            disc = disc.difference(keepout)
+        for piece in _pieces(disc):
+            # Keep only what still surrounds the bolt. A crescent left over on
+            # the far side of a board is material in the way, not a collar.
+            if piece.contains(Point(cx, cy)) or piece.distance(Point(cx, cy)) < 1e-9:
+                out.append(piece)
+    return out
+
+
 def _case_screws(spec: CaseSpec, outer: Polygon, role: Role):
     """Bolt holes for one layer: a countersink at the outer faces, a shank
     everywhere in between."""
@@ -726,6 +765,16 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
     if screw_holes:
         geom = geom.difference(unary_union(screw_holes))
     notes += support_notes
+
+    # A collar of material around each bolt, on every layer, before the hole
+    # is drilled through it. Without this a bolt crossing a hollowed layer --
+    # or one whose corner has been pocketed away -- passes through open air:
+    # the hole is simply absent from that sheet, because differencing a circle
+    # out of nothing leaves nothing, and the stack is not clamped there.
+    bolt_bosses = _case_screw_bosses(res, spec, outer, slab, geom, notes)
+    if bolt_bosses:
+        geom = geom.union(unary_union(bolt_bosses))
+        boss_discs += bolt_bosses
 
     bolt_holes, bolt_notes = _case_screws(spec, outer, role)
     if bolt_holes:

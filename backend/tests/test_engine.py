@@ -3423,3 +3423,138 @@ def test_the_import_map_stays_valid_json(client_app):
     raw = re.search(r'<script type="importmap">(.*?)</script>', html, re.S).group(1)
     data = json.loads(raw)
     assert data["imports"]["three"] == "./vendor/three.module.js"
+
+
+# ---------------------------------------------------------------------------
+# a case bolt has to have material to pass through
+# ---------------------------------------------------------------------------
+
+def _bolt_ring(spec, layer, at):
+    """A thin annulus just outside whatever hole this layer gets.
+
+    Sized off the role, because the outer plates are counterbored for the head
+    and the inner ones only take the shank -- probing at a single radius finds
+    "no material" inside a perfectly good countersink.
+    """
+    from shapely.geometry import Point
+
+    r = (spec.case_screw_head if layer.role in ("floor", "lid")
+         else spec.case_screw_d) / 2.0
+    return Point(*at).buffer(r + 1.2).difference(Point(*at).buffer(r + 0.15))
+
+
+def _unsupported_bolts(scene, lib):
+    """Bolt/layer pairs where the bolt passes through open air."""
+    from hwcase import case as C
+
+    res = resolve(scene, lib)
+    model = C.build(res, scene.case)
+    points = C.case_screw_points(scene.case, C.outer_shape(res, scene.case))
+
+    bad = []
+    for layer in model.layers:
+        for at in points:
+            ring = _bolt_ring(scene.case, layer, at)
+            if layer.geom.intersection(ring).area < 0.2 * ring.area:
+                bad.append((layer.index, at))
+    return bad, len(model.layers) * len(points)
+
+
+@pytest.mark.parametrize("interior", ["pocketed", "hollow", "ribs", "grown"])
+def test_every_case_bolt_has_material_on_every_layer(lib, interior):
+    """A bolt is only a bolt if material touches it the whole way down.
+
+    Cutting a circle out of a hollowed corner removes nothing and leaves no
+    hole at all in that sheet, which is a quieter failure than a hole in the
+    wrong place and a worse one: the stack simply is not clamped there, and
+    the drawing looks fine.
+    """
+    scene = load_scene(SCENE)
+    scene.case = scene.case.model_copy(update={
+        "case_screws": "perimeter", "interior": interior})
+    bad, total = _unsupported_bolts(scene, lib)
+    assert not bad, f"{len(bad)} of {total} bolt/layer pairs pass through air: {bad[:4]}"
+
+
+def test_without_a_collar_bolts_do_pass_through_air(lib):
+    """The test above has to be able to fail, or it is decoration. With the
+    collar switched off the very layers that prompted this come back."""
+    scene = load_scene(SCENE)
+    scene.case = scene.case.model_copy(update={
+        "case_screws": "perimeter", "interior": "grown", "case_screw_boss": 0.0})
+    bad, _total = _unsupported_bolts(scene, lib)
+    assert bad, "expected unsupported bolts with no collar"
+
+
+def test_a_collar_never_grows_the_case(lib):
+    """It is added to make a hole possible, not to change the outline -- a
+    bolt inset near a corner would otherwise bulge the wall outwards."""
+    from hwcase import case as C
+
+    scene = load_scene(SCENE)
+    scene.case = scene.case.model_copy(update={
+        "case_screws": "corners", "case_screw_inset": 3.0,
+        "case_screw_boss": 20.0})
+    res = resolve(scene, lib)
+    outer = C.outer_shape(res, scene.case)
+    for layer in C.build(res, scene.case).layers:
+        assert outer.buffer(1e-6).contains(layer.geom), (
+            f"layer {layer.index} spills outside the outline")
+
+
+def test_a_collar_is_not_pressed_into_a_board(lib):
+    """Material against a board is the same mistake as a bolt through one, and
+    a collar is material.
+
+    Measured as what the collar ADDS, not as total overlap: a layer resting
+    exactly on a board's top face shares that plane with it, and a `> 0` test
+    on the z spans reads the floating-point noise at the boundary as a
+    collision. Material on top of a board is the normal case.
+    """
+    from shapely.geometry import Point
+    from shapely.ops import unary_union
+
+    from hwcase import case as C
+    from hwcase.schema import VolumeKind
+
+    def inside_boards_near_bolts(boss: float) -> float:
+        scene = load_scene(SCENE)
+        scene.case = scene.case.model_copy(update={
+            "case_screws": "perimeter", "case_screw_boss": boss})
+        res = resolve(scene, lib)
+        model = C.build(res, scene.case)
+        points = C.case_screw_points(scene.case, C.outer_shape(res, scene.case))
+        near = unary_union([Point(*p).buffer(boss / 2.0 + 1.0) for p in points])
+
+        total = 0.0
+        for layer in model.layers:
+            bodies = [
+                s.poly for s in res.solids
+                if s.kind is VolumeKind.body
+                and min(s.z[1], layer.z1) - max(s.z[0], layer.z0) > 1e-6
+            ]
+            if not bodies:
+                continue
+            total += (layer.geom.intersection(unary_union(bodies))
+                      .intersection(near).area)
+        return total
+
+    assert inside_boards_near_bolts(9.0) == pytest.approx(0.0, abs=0.5)
+
+
+def test_turning_the_collar_off_is_respected(lib):
+    """Somebody who wants holes only where material already is should get
+    exactly that."""
+    from hwcase import case as C
+
+    scene = load_scene(SCENE)
+    scene.case = scene.case.model_copy(update={
+        "case_screws": "corners", "case_screw_boss": 0.0, "interior": "hollow"})
+    plain = C.build(resolve(scene, lib), scene.case)
+
+    scene.case = scene.case.model_copy(update={"case_screw_boss": 9.0})
+    collared = C.build(resolve(scene, lib), scene.case)
+
+    plain_area = sum(l.geom.area for l in plain.layers)
+    collar_area = sum(l.geom.area for l in collared.layers)
+    assert collar_area > plain_area, "the collar added no material at all"

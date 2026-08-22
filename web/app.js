@@ -802,6 +802,7 @@ const SCREW_FIELDS = {
   'cs-d': 'case_screw_d',
   'cs-head': 'case_screw_head',
   'cs-spacing': 'case_screw_spacing',
+  'cs-boss': 'case_screw_boss',
   'cs-min-seg': 'min_segment',
 };
 
@@ -817,7 +818,9 @@ function renderCaseScrews() {
   }
   // spacing only means anything when there are edge bolts to space
   $('cs-spacing').disabled = mode !== 'perimeter';
-  for (const id of ['cs-inset', 'cs-d', 'cs-head']) $(id).disabled = mode === 'none';
+  for (const id of ['cs-inset', 'cs-d', 'cs-head', 'cs-boss']) {
+    $(id).disabled = mode === 'none';
+  }
 
   // The build tells us if a bolt is about to go through a board; that is the
   // one thing here worth interrupting for.
@@ -2127,7 +2130,7 @@ let VERSION = '?';
 // a cached app.js will report an old stamp here while the server reports the
 // new version beside it, and that mismatch is the whole diagnosis -- "it does
 // nothing when I click it" is what stale UI code looks like from outside.
-const UI_BUILD = '2026-08-22e';
+const UI_BUILD = '2026-08-22f';
 
 function wireTabs() {
   const tabs = [...document.querySelectorAll('.tabs .tab')];

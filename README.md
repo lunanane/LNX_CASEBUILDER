@@ -565,6 +565,25 @@ Two details that matter and are tested:
 `support_boss`, `screw_clearance` and `screw_head` on the case spec set the post
 diameter, the slop on the through hole and the counterbore.
 
+### Case bolts carry their own material
+
+A bolt through the stack is only a bolt if material touches it the whole way
+down, and a hollowed or pocketed layer will happily have nothing at all at that
+point. Cutting a circle out of nothing removes nothing, so the hole is simply
+*absent* from that sheet — which looks fine on the drawing and leaves the stack
+unclamped there.
+
+So each bolt carries a **collar** (`case_screw_boss`, 9 mm) on every layer,
+added before the hole is drilled through it, exactly as a board support carries
+a boss. The collar is clipped to the outline so it can never grow the case, and
+cut back from any hardware at that height — material pressed against a board is
+the same mistake as a bolt through one. Set it to 0 to drill only where
+material already happens to be.
+
+On the demo scene that is the difference between 6 unsupported bolt/layer pairs
+and none — 24 with the `grown` interior, which routes cable space through
+exactly the corners the bolts want.
+
 ## Two connectivity guarantees
 
 Whatever the interior strategy carves, two things have to hold, and both are
