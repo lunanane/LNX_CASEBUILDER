@@ -40,7 +40,13 @@ testable with nothing attached. Feasibility verified: `lupa` 2.8 runs Lua
 - [ ] D3 touch UI shell (tabs, bookmarks, sliders, BPM, virtual grids)
 - [ ] E0 hardware preflight: enumerate COM ports / serialosc / Pi on LAN,
       probe for a MicroPython REPL, write findings to instrument/HARDWARE.md;
-      device tests from here on are real when present, skipped when not
+      device tests from here on are real when present, skipped when not.
+      Known at planning time: COM13 exists (generic USB-CDC, plausibly the
+      AMYboard's USB side, but held by another program — retry politely,
+      never fight over a port); the AMYboard is physically on the Pi's I2C
+      bus behind the TCA9548A mux. If the Pi answers on the LAN (ssh),
+      real I2C tests are possible TONIGHT by running the probe on the Pi:
+      scan mux channels, find the AMYboard's address, record both
 - [ ] E1 link transport research finding (stock-firmware I2C slave? serial?)
 - [ ] E2 framed protocol + codec shared with MicroPython, fuzz-tested
 - [ ] E3 mock round-trip (param set / encoder echo / preset chunking)
@@ -155,7 +161,13 @@ Decisions, with reasons:
   preset ops, encoder echoes. Build the protocol transport-agnostic
   (`link/transport.py`): `MockTransport` for tests; `I2CTransport` (Pi
   master via smbus2) — give the stock-firmware I2C-slave path a **solid
-  try**, it is the wiring the case was designed around; `SerialTransport`
+  try**, it is the wiring that now physically exists: **the AMYboard hangs
+  behind the TCA9548A multiplexer**, sharing it with the NeoTrellis tiles,
+  so the transport selects the mux channel (channel mask to the mux, usually
+  at 0x70) before every transaction, and one lock serialises the whole mux —
+  the pad driver and the link must never interleave mid-transaction. Which
+  channel and what slave address the AMYboard answers on are E0 findings,
+  not assumptions; `SerialTransport`
   over the USB/UART REPL channel as the proven-reliable fallback (talking
   to stock MicroPython over serial is bread and butter); `MidiTransport`
   last. The framed protocol is identical on all four, so swapping costs
