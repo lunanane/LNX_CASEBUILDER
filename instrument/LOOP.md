@@ -24,8 +24,11 @@ Each iteration:
 Hard rules (also in PLAN.md, repeated because they matter):
 - Never modify `backend/`, `web/`, `tools/`, `vendor/`, or
   `instrument/scripts/gridcomposer21.lua`.
-- No hardware or audio access; no network beyond localhost; no pip
-  installs beyond lupa / python-osc; nothing needing a compiler.
+- Hardware, audio, network and pip installs (into `.venv`) are all allowed
+  — real device tests are wanted where a device answers. But: every
+  hardware test skips cleanly when the device is absent; back up any
+  device file before overwriting it; never flash or erase firmware; never
+  kill processes by image name (PID only).
 - The virtual grid and mock link are shipping simulators, not test props.
 - If every item in a phase is `[x]` or `[!]`, continue to the next phase.
   If all phases are done, run the full case-tool suite once

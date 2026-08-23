@@ -11,10 +11,16 @@ This file is the work list for the overnight Ralph loop. Every task has a
 **Done when** — an executable criterion, because the loop has no taste, only
 tests. Guardrails are at the bottom and they are not optional.
 
-**Nothing in this plan requires hardware.** The dev machine has no Pi, no
-grid, no AMYboard and no audio; everything is built against simulators and
-mock transports, with the real backends as thin, import-guarded adapters to be
-verified on the device later. This is verified feasible: `lupa` 2.8 runs Lua
+**Hardware is allowed and wanted, but never required.** The loop should test
+against real devices wherever they are reachable from this Windows machine:
+the AMYboard over **USB serial** (MicroPython REPL / mpremote), a monome grid
+via **serialosc**, the Pi over the **network** if it answers. Real I2C is
+physically impossible from this laptop — that leg is verified on the Pi
+later; serial exercises the identical framed protocol. Every hardware test
+must **skip cleanly when the device is absent** (pytest skip, not failure):
+the loop runs unattended and must never stall on an unplugged cable.
+Simulators and mock transports remain first-class so everything is also
+testable with nothing attached. Feasibility verified: `lupa` 2.8 runs Lua
 5.5 in-process (tested, both call directions), and the whole host API that
 `gridcomposer21.lua` needs is six functions plus `metro`.
 
@@ -32,6 +38,9 @@ verified on the device later. This is verified feasible: `lupa` 2.8 runs Lua
 - [ ] D1 parameter registry
 - [ ] D2 script params (iii_params + gridcomposer21 companion map)
 - [ ] D3 touch UI shell (tabs, bookmarks, sliders, BPM, virtual grids)
+- [ ] E0 hardware preflight: enumerate COM ports / serialosc / Pi on LAN,
+      probe for a MicroPython REPL, write findings to instrument/HARDWARE.md;
+      device tests from here on are real when present, skipped when not
 - [ ] E1 link transport research finding (stock-firmware I2C slave? serial?)
 - [ ] E2 framed protocol + codec shared with MicroPython, fuzz-tested
 - [ ] E3 mock round-trip (param set / encoder echo / preset chunking)
@@ -39,6 +48,10 @@ verified on the device later. This is verified feasible: `lupa` 2.8 runs Lua
 - [ ] F2 amyboard pages module (encoder paging, LED/display model)
 - [ ] F3 amyboard bus (sidechain depths, fx macros, comp/limiter finding)
 - [ ] F4 amyboard main.py shell + MicroPython-subset lint
+- [ ] F5 (hardware-gated) load engine onto the real AMYboard via mpremote,
+      run the protocol handshake and a param round-trip over USB serial;
+      back up every pre-existing device file to amyboard/device-backup/
+      before writing anything
 - [ ] G1 preset schema, save/recall, bar-quantized apply
 - [ ] H1 clip model, quantized launch, atomic multi-lane
 - [ ] H2 param glide
@@ -401,11 +414,17 @@ structural tests for the session tab.
    real message. Full case-tool suite only at session end (it is 8 minutes).
 4. Stuck twice on the same item → write it into `instrument/BLOCKERS.md`
    with what was tried, mark `[!]` here, move on. No rabbit holes.
-5. No new pip installs beyond: lupa (installed), python-osc, websockets/
-   fastapi/uvicorn (present), smbus2 (import-guarded, install skipped).
-   Nothing that needs a compiler.
-6. No hardware access attempts, no audio output attempts, no network beyond
-   localhost.
+5. Install whatever is needed (into `.venv`, never the system Python) —
+   mpremote, pyserial, python-osc, python-rtmidi, whatever earns its place.
+   Prefer wheels; if something demands a compiler and fights back, it goes
+   to BLOCKERS.md rather than eating the night.
+6. Hardware, audio and network access are allowed and encouraged. Rules of
+   engagement: enumerate before assuming (COM ports change); every device
+   test skips cleanly when the device is absent; **back up any file read
+   from a device before overwriting it** (amyboard/device-backup/, dated);
+   never flash or erase firmware — stock firmware is a standing decision;
+   never kill processes by image name (kill by PID only — other Python
+   apps run on this machine).
 7. Simulators are first-class deliverables, not scaffolding — the virtual
    grid and mock link ship in the UI and stay.
 8. Style: this repo's voice — comments explain *why*, tests assert
@@ -413,7 +432,9 @@ structural tests for the session tab.
 
 ## Deferred by decision (do not build tonight)
 
-- Real NeoTrellis/serialosc/I2C device code beyond import-guarded stubs.
+- Real NeoTrellis and Pi-side I2C code beyond import-guarded stubs — those
+  need the Pi's bus, which this laptop does not have. (Serialosc and USB
+  serial to the AMYboard are NOT deferred: test them for real if present.)
 - Pad-controlled session view (seam reserved).
 - DX7/Juno patch *editing* UI (patch number select only).
 - Multi-grid-size auto-adaptation of gridcomposer21 (16x8 only, faithful).
