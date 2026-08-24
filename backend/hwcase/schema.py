@@ -528,6 +528,17 @@ class CaseSpec(Strict):
     link_cables: bool = True
     cable_channel: float = 6.0
 
+    #: The laser bed. Exports are split into one file per sheet, each part
+    #: placed inside this area minus the margin, rotated 90 degrees when that
+    #: packs better. 350 x 350 suits the common desktop machines; set it to
+    #: your bed.
+    sheet_width: float = 350.0
+    sheet_height: float = 350.0
+    #: keep-out from the sheet edge, where clamps live and focus drifts
+    sheet_margin: float = 5.0
+    #: air between neighbouring parts on a sheet
+    sheet_spacing: float = 4.0
+
     #: Material narrower than this snaps. Two cutouts that pass close to each
     #: other leave a sliver of plywood between them that will not survive being
     #: handled, let alone glued up -- so anything thinner is opened out and the

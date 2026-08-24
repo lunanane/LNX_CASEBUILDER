@@ -2,7 +2,7 @@
 rem ---------------------------------------------------------------------------
 rem  hwcase -- start the editor.
 rem
-rem    start.bat            first free port from 8765, opens a browser
+rem    start.bat            first free port from 8487, opens a browser
 rem    start.bat 9000       pick the port yourself
 rem    start.bat 9000 bare  no auto-reload, no browser
 rem
@@ -76,7 +76,11 @@ popd
 
 rem --- 4. pick a port that is actually free ----------------------------------
 set "PORT=%~1"
-if not defined PORT set "PORT=8765"
+rem 8487 is ours. It used to be 8765, until another app on this machine took
+rem that port and the editor's bookmark quietly started opening the wrong
+rem program -- the scan-upward logic kept the server running, on a port
+rem nobody was looking at. Distinctive beats conventional here.
+if not defined PORT set "PORT=8487"
 set /a "TRY=0"
 :portloop
 netstat -ano | findstr /r /c:":%PORT% .*LISTENING" >nul 2>&1

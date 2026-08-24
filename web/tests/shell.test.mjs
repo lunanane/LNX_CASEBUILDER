@@ -170,13 +170,21 @@ function handlerBody(id) {
 
 test('both exports report success and failure', () => {
   // "Nothing happened" was the actual bug report. Whatever an export does, it
-  // has to say so.
+  // has to say so. Both buttons delegate to one sheet-export function, so the
+  // reporting lives there.
   for (const id of ['btn-svg', 'btn-dxf']) {
-    const body = handlerBody(id);
-    assert.ok(body, `${id} has no async click handler`);
-    assert.match(body, /catch\s*\(/, `${id} swallows failures`);
-    assert.match(body, /status\(/, `${id} never reports anything`);
+    assert.match(js, new RegExp(
+      `\\$\\('${id}'\\)\\.onclick = async \\(\\) => exportSheets\\(`),
+      `${id} does not delegate to exportSheets`);
   }
+  const at = js.indexOf('async function exportSheets(');
+  assert.ok(at > 0, 'no exportSheets');
+  const body = js.slice(at, js.indexOf('\n}\n', at));
+  assert.match(body, /catch\s*\(/, 'exportSheets swallows failures');
+  assert.match(body, /status\(/, 'exportSheets never reports anything');
+  // Firefox has no directory picker; the zip fallback is not optional.
+  assert.match(body, /showDirectoryPicker/, 'no folder-picker path');
+  assert.match(body, /saveBlob\(/, 'no zip fallback for browsers without one');
 });
 
 test('saving falls back when there is no save dialog', () => {

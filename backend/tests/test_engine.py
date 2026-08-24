@@ -3596,3 +3596,191 @@ def test_extruded_walls_face_outwards(lib):
     assert volume == pytest.approx(expected, rel=0.02), (
         f"signed volume {volume:.1f} against {expected:.1f} -- some faces are "
         f"wound the wrong way")
+
+
+# ---------------------------------------------------------------------------
+# sheet packing: the cut split across bed-sized files
+# ---------------------------------------------------------------------------
+
+def _slab_case(sizes, sheet=(350.0, 350.0), margin=5.0, spacing=4.0):
+    """A CaseModel of plain rectangular layers, for exercising the packer."""
+    from shapely.geometry import box as shbox
+
+    from hwcase.case import CaseModel, Layer
+
+    spec = CaseSpec(sheet_width=sheet[0], sheet_height=sheet[1],
+                    sheet_margin=margin, sheet_spacing=spacing)
+    mat = Material(name="plywood-3mm", thickness=3.0, kerf=0.0)
+    layers = [Layer(i, i * 3.0, i * 3.0 + 3.0,
+                    "body", mat, shbox(0, 0, w, h))
+              for i, (w, h) in enumerate(sizes)]
+    return CaseModel(spec=spec, outer=shbox(0, 0, 10, 10), layers=layers,
+                     z0=0.0, z1=len(sizes) * 3.0)
+
+
+def test_every_part_lands_inside_the_margin():
+    from hwcase.export import pack_sheets
+
+    case = _slab_case([(240.0, 131.0)] * 11)
+    sheets = pack_sheets(case)
+    placed = 0
+    for sheet in sheets:
+        for pl in sheet.placements:
+            placed += 1
+            x0, y0, x1, y1 = pl.geom.bounds
+            assert x0 >= 5.0 - 1e-6 and y0 >= 5.0 - 1e-6
+            assert x1 <= 345.0 + 1e-6 and y1 <= 345.0 + 1e-6
+    assert placed == 11, "every layer is cut exactly once"
+
+
+def test_parts_on_a_sheet_never_overlap():
+    from itertools import combinations
+
+    from hwcase.export import pack_sheets
+
+    case = _slab_case([(160.0, 90.0)] * 9 + [(60.0, 60.0)] * 6)
+    for sheet in pack_sheets(case):
+        for a, b in combinations(sheet.placements, 2):
+            assert not a.geom.buffer(-0.01).intersects(b.geom.buffer(-0.01)), (
+                f"layers {a.layer.index} and {b.layer.index} overlap on "
+                f"sheet {sheet.index + 1}")
+
+
+def test_a_part_that_only_fits_sideways_is_rotated():
+    """100 x 340 does not fit a 340-usable sheet upright next to anything --
+    but the packer must also turn a part that fits NO way upright."""
+    from hwcase.export import pack_sheets
+
+    case = _slab_case([(80.0, 338.0)], sheet=(350.0, 100.0), margin=5.0)
+    sheets = pack_sheets(case)
+    assert len(sheets) == 1
+    pl = sheets[0].placements[0]
+    assert pl.rotated, "the only way this part fits is turned 90 degrees"
+    x0, y0, x1, y1 = pl.geom.bounds
+    assert (x1 - x0) > (y1 - y0), "and the geometry really is turned"
+
+
+def test_shelving_packs_more_than_one_row():
+    """Five 340 x 60 strips fit one sheet as five shelves; a packer that
+    opens a new sheet per part would use five."""
+    from hwcase.export import pack_sheets
+
+    case = _slab_case([(340.0, 60.0)] * 5)
+    assert len(pack_sheets(case)) == 1
+
+
+def test_a_layer_bigger_than_the_bed_is_a_clear_error():
+    """Silently dropping the floor plate is not an export."""
+    from hwcase.export import pack_sheets
+
+    case = _slab_case([(400.0, 380.0)])
+    with pytest.raises(ValueError) as err:
+        pack_sheets(case)
+    msg = str(err.value)
+    assert "layer 0" in msg and "either orientation" in msg
+    assert "340 x 340" in msg, "the usable area, not the raw bed size"
+
+
+def test_engraving_rides_with_its_rotated_layer(lib):
+    """A label on a rotated part has to turn with it, or the laser marks the
+    neighbouring part instead."""
+    from shapely.geometry import box as shbox
+
+    from hwcase.case import CaseModel, Layer
+    from hwcase.export import pack_sheets
+
+    spec = CaseSpec(sheet_width=350.0, sheet_height=100.0, sheet_margin=5.0)
+    mat = Material(name="plywood-3mm", thickness=3.0, kerf=0.0)
+    layer = Layer(0, 0.0, 3.0, "lid", mat, shbox(0, 0, 80.0, 338.0))
+    layer.engrave = shbox(10.0, 300.0, 70.0, 330.0)   # near the far end
+    case = CaseModel(spec=spec, outer=shbox(0, 0, 10, 10), layers=[layer],
+                     z0=0.0, z1=3.0)
+
+    sheet = pack_sheets(case)[0]
+    pl = sheet.placements[0]
+    assert pl.rotated
+    assert pl.engrave is not None
+    assert pl.geom.buffer(1e-6).contains(pl.engrave), (
+        "the mark left its own part behind")
+
+
+def test_sheet_files_are_one_per_sheet_plus_the_cutlist(lib):
+    import xml.etree.ElementTree as ET
+
+    from hwcase.export import pack_sheets, sheet_files
+
+    model = build(resolve(load_scene(SCENE), lib))
+    model.spec.sheet_width = 400.0          # the fixture is 353 wide
+    model.spec.sheet_height = 400.0
+    sheets = pack_sheets(model)
+    files = sheet_files(model, "svg", "fixture")
+    assert len(files) == len(sheets) + 1
+
+    names = [n for n, _ in files]
+    assert names[-1] == "fixture-cutlist.txt"
+    assert all(f"of-{len(sheets):02d}" in n for n in names[:-1])
+
+    # every sheet SVG parses and is exactly the bed size
+    for _name, content in files[:-1]:
+        root = ET.fromstring(content)
+        assert root.get("width") == "400.00mm"
+        assert 'data-role="sheet"' in content
+
+    manifest = files[-1][1]
+    assert "grey = sheet outline" in manifest
+    for layer in model.layers:
+        assert f"layer {layer.index:02d}" in manifest
+
+
+def test_the_sheets_zip_holds_every_file(lib):
+    import io
+    import zipfile
+
+    from hwcase.export import sheet_files, sheets_zip
+
+    model = build(resolve(load_scene(SCENE), lib))
+    model.spec.sheet_width = 400.0
+    model.spec.sheet_height = 400.0
+    raw = sheets_zip(model, "dxf", "fixture")
+    with zipfile.ZipFile(io.BytesIO(raw)) as z:
+        assert sorted(z.namelist()) == sorted(
+            n for n, _ in sheet_files(model, "dxf", "fixture"))
+        # a DXF in the zip really is a DXF
+        first = z.read(z.namelist()[0]).decode("utf-8", "replace")
+        assert "SECTION" in first and "LWPOLYLINE" in first
+
+
+def test_packing_is_deterministic():
+    """The same scene must produce the same files twice -- a cut list that
+    reshuffles between exports cannot be checked against the parts on the
+    bench."""
+    from hwcase.export import pack_sheets
+
+    case = _slab_case([(160.0, 90.0), (60.0, 200.0), (120.0, 120.0)] * 3)
+    a = [(p.layer.index, p.x, p.y, p.rotated)
+         for s in pack_sheets(case) for p in s.placements]
+    b = [(p.layer.index, p.x, p.y, p.rotated)
+         for s in pack_sheets(case) for p in s.placements]
+    assert a == b
+
+
+def test_write_all_emits_the_sheet_folder(lib, tmp_path):
+    """The CLI build has to hand over machine-ready files, not just the
+    endless strip -- and a case too big for the bed degrades to a printed
+    note rather than a failed build."""
+    from hwcase.export import write_all
+
+    scene = load_scene(SCENE)
+    scene.case = scene.case.model_copy(update={
+        "sheet_width": 400.0, "sheet_height": 400.0})
+    res = resolve(scene, lib)
+    model = build(res)
+    written = write_all(res, model, lib, tmp_path)
+
+    sheets = [p for p in written if p.parent.name.endswith("-sheets")]
+    assert sheets, "no sheet files from write_all"
+    assert any(p.name.endswith("cutlist.txt") for p in sheets)
+    svgs = [p for p in sheets if p.suffix == ".svg"]
+    assert len(svgs) == len(sheets) - 1
+    for p in sheets:
+        assert p.exists() and p.stat().st_size > 0

@@ -804,6 +804,10 @@ const SCREW_FIELDS = {
   'cs-spacing': 'case_screw_spacing',
   'cs-boss': 'case_screw_boss',
   'cs-min-seg': 'min_segment',
+  'cs-sheet-w': 'sheet_width',
+  'cs-sheet-h': 'sheet_height',
+  'cs-sheet-margin': 'sheet_margin',
+  'cs-sheet-gap': 'sheet_spacing',
 };
 
 function renderCaseScrews() {
@@ -1797,35 +1801,51 @@ async function saveBlob(blob, filename, description, mime) {
 // button on the bar. A menu is a nicety; exporting is the point.
 $('btn-svg-bar').onclick = () => $('btn-svg').click();
 
-$('btn-svg').onclick = async () => {
-  status('generating the SVG…');
+/** Export the cut, split into bed-sized sheets.
+ *
+ *  One file per sheet plus a cut list. Where the browser has a directory
+ *  picker (Chrome, Edge) the user chooses a folder and real files land in
+ *  it; Firefox has no such API, so there the same files arrive as one zip
+ *  through the ordinary save path. Both come from the same server-side
+ *  packing, so the files are identical either way.
+ */
+async function exportSheets(fmt) {
+  status('packing sheets…');
   try {
-    const svg = await api('/api/export/svg',
-      { method: 'POST', body: JSON.stringify(state.scene) });
-    const name = `${state.sceneName}-layers.svg`;
-    const blob = new Blob([svg], { type: 'image/svg+xml' });
-    const r = await saveBlob(blob, name, 'Cut layers', 'image/svg+xml');
-    status(r.message, r.ok ? 'ok' : '');
-  } catch (err) {
-    status(`export failed — ${err.message}`, 'err');
-  }
-};
-
-$('btn-dxf').onclick = async () => {
-  status('generating the DXF…');
-  try {
-    const r = await fetch('/api/export/dxf', {
+    if (window.showDirectoryPicker) {
+      const r = await api(`/api/export/sheets/${fmt}?as_json=true`,
+        { method: 'POST', body: JSON.stringify(state.scene) });
+      try {
+        const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+        for (const f of r.sheets) {
+          const handle = await dir.getFileHandle(f.name, { create: true });
+          const w = await handle.createWritable();
+          await w.write(f.content);
+          await w.close();
+        }
+        status(`${r.count} sheet${r.count === 1 ? '' : 's'} + cut list saved to ${dir.name}/`, 'ok');
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') { status('export cancelled'); return; }
+        // picker refused (expired gesture, permission) -- fall through to zip
+        console.warn('directory picker unavailable, falling back to zip', err);
+      }
+    }
+    const rz = await fetch(`/api/export/sheets/${fmt}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(state.scene),
     });
-    if (!r.ok) throw new Error(`${r.status}: ${(await r.text()).slice(0, 300)}`);
-    const saved = await saveBlob(await r.blob(),
-      `${state.sceneName}-layers.dxf`, 'Cut layers', 'image/vnd.dxf');
+    if (!rz.ok) throw new Error((await rz.text()).slice(0, 300));
+    const saved = await saveBlob(await rz.blob(),
+      `${state.sceneName}-sheets-${fmt}.zip`, 'Cut sheets', 'application/zip');
     status(saved.message, saved.ok ? 'ok' : '');
   } catch (err) {
     status(`export failed — ${err.message}`, 'err');
   }
-};
+}
+
+$('btn-svg').onclick = async () => exportSheets('svg');
+$('btn-dxf').onclick = async () => exportSheets('dxf');
 
 const turnSelection = (dir) => {
   const pl = movableRoot(state.selection);
@@ -2130,7 +2150,7 @@ let VERSION = '?';
 // a cached app.js will report an old stamp here while the server reports the
 // new version beside it, and that mismatch is the whole diagnosis -- "it does
 // nothing when I click it" is what stale UI code looks like from outside.
-const UI_BUILD = '2026-08-22f';
+const UI_BUILD = '2026-08-24a';
 
 function wireTabs() {
   const tabs = [...document.querySelectorAll('.tabs .tab')];

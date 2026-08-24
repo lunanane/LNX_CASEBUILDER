@@ -166,6 +166,20 @@
         <p class="note" id="cs-note"></p>
       </div>
 
+      <h2>sheet</h2>
+      <div id="case-sheet">
+        <div class="field"><label title="your laser bed. Exports are split into one file per sheet; parts are rotated 90&deg; when that packs tighter">bed</label>
+          <input type="number" id="cs-sheet-w" step="10" min="50">
+          <input type="number" id="cs-sheet-h" step="10" min="50"><span class="unit">mm</span></div>
+        <div class="field"><label title="keep-out from the sheet edge, where clamps live and focus drifts">margin</label>
+          <input type="number" id="cs-sheet-margin" step="1" min="0"><span class="unit">mm</span></div>
+        <div class="field"><label title="air between neighbouring parts on a sheet">spacing</label>
+          <input type="number" id="cs-sheet-gap" step="0.5" min="0"><span class="unit">mm</span></div>
+        <p class="note">Export produces one file per sheet plus a cut list.
+        A browser with a folder picker saves them where you choose; Firefox
+        has no folder picker, so there they arrive as one zip.</p>
+      </div>
+
       <h2>materials</h2>
       <div id="material-list"></div>
     </section>

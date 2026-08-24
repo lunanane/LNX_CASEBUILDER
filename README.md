@@ -65,7 +65,7 @@ start.bat
 
 That is the whole thing. It builds a `.venv` beside itself on first run
 (~2 minutes while shapely/trimesh/numpy download), installs the requirements,
-checks the engine imports, finds a free port from 8765 up, starts the server and
+checks the engine imports, finds a free port from 8487 up, starts the server and
 opens the browser. Later runs skip straight to the server in a few seconds —
 dependencies are only reinstalled when `backend/requirements.txt` actually
 changes. `start.bat 9000` picks the port; `start.bat 9000 bare` skips auto-reload
@@ -379,6 +379,30 @@ ribbed layer touches the wall, and another asserting no rib sits on a board.
 The floor and the lid are structural faces and keep their own rules whatever the
 interior is set to.
 
+## Exporting for the laser: sheets, not a strip
+
+The single endless strip the export used to produce is fine to look at and
+useless at the machine: a real bed is 350 x 350 mm with clamps at the edges,
+and eleven layers do not fit on it. Export now splits the cut into
+**bed-sized sheets** — one file per bed-load, plus a `cutlist.txt` naming
+which layer is on which sheet, its size, and whether it was rotated.
+
+The **sheet** section of the case pane sets the bed (350 x 350 default), the
+edge margin (5 mm — clamps live there and focus drifts), and the spacing
+between parts (4 mm). Parts are shelf-packed tallest-first and rotated 90°
+automatically when that fits better; a layer that fits the bed no way round
+is refused with its size and the usable area in the message, because
+silently dropping a floor plate is not an export.
+
+Each sheet file is exactly the bed size, with the sheet outline in **grey**
+in its own group/layer (align it, don't cut it), cuts in **red**, engraving
+in **blue** on its own DXF layer as before.
+
+Saving: a browser with a directory picker (Chrome, Edge) asks for a folder
+and writes the files into it. Firefox has no such API, so there the same
+files arrive as **one zip** through the normal save path — identical
+contents, one unzip more.
+
 ## Rendering it
 
 The `render` toggle in the header swaps the schematic view for a physically
@@ -671,8 +695,11 @@ Next:
    (drop the pad on a Trellis and have it click on as a child), snap to part
    edges and to a grid, and alignment guides. The 60 mm Trellis tiling is the
    case that needs it most.
-2. **Real nesting** — layers currently tile naively and overflow one sheet;
-   needs bin packing and multi-sheet output.
+2. **True irregular nesting** — export now shelf-packs layers onto
+   bed-sized sheets (350 x 350 default, margin, auto 90° rotation, one file
+   per sheet + a cut list; see the sheet section of the case pane). Shelf
+   packing is near-optimal for rectangles, which case layers are; nesting
+   odd shapes into each other's concavities is what remains.
 3. **Joinery** — finger joints between slabs, or the simpler standoff-and-rod
    stack. Kerf is modelled, joints are not.
 4. **Solid export** — optional build123d backend to emit STEP for milling, from

@@ -224,4 +224,301 @@ def write_all(res: Resolved, case: CaseModel, lib: PartLibrary, outdir: Path,
     cj = outdir / f"{res.scene.name}-case.json"
     cj.write_text(json.dumps(case_to_json(case), indent=2), encoding="utf-8")
     written.append(cj)
+
+    # The files that actually go to the machine: one per bed-load, in their
+    # own folder so the strip files above stay for looking at. A case too big
+    # for the configured bed is reported, not fatal -- the strip export still
+    # stands and the message says which layer will not fit.
+    sheets_dir = outdir / f"{res.scene.name}-sheets"
+    try:
+        files = sheet_files(case, "svg", res.scene.name)
+        sheets_dir.mkdir(parents=True, exist_ok=True)
+        for name, content in files:
+            target = sheets_dir / name
+            target.write_text(content, encoding="utf-8")
+            written.append(target)
+    except ValueError as exc:
+        print(f"  (no sheet files: {exc})")
     return written
+
+
+# ---------------------------------------------------------------------------
+# sheet packing: one file per bed-load
+# ---------------------------------------------------------------------------
+#
+# The single-file export lays every layer on one endless strip, which is fine
+# for looking at and useless at the machine: a real bed is 350 x 350, has
+# clamps at the edges, and eleven layers do not fit on it. So the cut is
+# split into sheets -- each one file, each guaranteed to fit the bed with the
+# margin respected, parts rotated 90 degrees when that packs tighter.
+#
+# The packer is a shelf packer (rows of parts, tallest-first), not a true
+# nesting solver. Layers are rectangles to within a few percent -- the case
+# outline IS the part -- so shelf packing is within spitting distance of
+# optimal here, deterministic, and simple enough to trust at 2 am. Real
+# irregular-shape nesting stays on the roadmap.
+
+from dataclasses import dataclass, field as _field
+
+
+@dataclass
+class SheetPlacement:
+    layer: Layer
+    x: float               # sheet coordinates of the part's min corner
+    y: float
+    rotated: bool          # turned 90 degrees counter-clockwise
+    geom: object           # the placed cut geometry (kerf applied)
+    engrave: object        # the placed engrave geometry, or None
+
+
+@dataclass
+class PackedSheet:
+    index: int
+    width: float
+    height: float
+    placements: list = _field(default_factory=list)
+
+
+def _placed(geom, rotated: bool, tx: float, ty: float):
+    """The geometry, rotated then moved so its min corner sits at (tx, ty)."""
+    from shapely.affinity import rotate as _rotate
+
+    if geom is None or geom.is_empty:
+        return None
+    if rotated:
+        geom = _rotate(geom, 90, origin=(0, 0))
+    x0, y0, _x1, _y1 = geom.bounds
+    return translate(geom, tx - x0, ty - y0)
+
+
+def pack_sheets(case: CaseModel, apply_kerf: bool = True) -> list[PackedSheet]:
+    """Split the layers across bed-sized sheets.
+
+    Tallest-part-first shelf packing with 90-degree rotation. Within a shelf
+    the orientation that wastes the least shelf height wins; a part that only
+    fits one way round is turned automatically. A layer that fits no way
+    round is a hard error naming the layer and the usable area -- silently
+    dropping a floor plate is not an export.
+    """
+    spec = case.spec
+    margin = max(0.0, spec.sheet_margin)
+    gap = max(0.0, spec.sheet_spacing)
+    usable_w = spec.sheet_width - 2 * margin
+    usable_h = spec.sheet_height - 2 * margin
+
+    parts = []
+    for layer in case.layers:
+        geom = (kerf_compensated(layer.geom, layer.material.kerf)
+                if apply_kerf else layer.geom)
+        if geom.is_empty:
+            continue
+        x0, y0, x1, y1 = geom.bounds
+        w, h = x1 - x0, y1 - y0
+        if not ((w <= usable_w and h <= usable_h)
+                or (h <= usable_w and w <= usable_h)):
+            raise ValueError(
+                f"layer {layer.index} ({layer.role}) is {w:.0f} x {h:.0f} mm "
+                f"and the usable sheet is only {usable_w:.0f} x {usable_h:.0f} "
+                f"({spec.sheet_width:.0f} x {spec.sheet_height:.0f} minus the "
+                f"{margin:.0f} mm margin) -- it cannot be cut on this bed in "
+                f"either orientation")
+        parts.append((layer, geom, w, h))
+
+    # Tallest first: shelf height is set by the tallest part in the row, so
+    # placing tall parts together keeps short rows short.
+    parts.sort(key=lambda p: (-max(p[2], p[3]), p[0].index))
+
+    # a shelf: [y, height, x-cursor]; a sheet: its list of shelves
+    sheets: list[list[list[float]]] = []
+    out: list[PackedSheet] = []
+
+    def orientations(w: float, h: float):
+        yield False, w, h
+        if abs(w - h) > 1e-9:
+            yield True, h, w
+
+    for layer, geom, w, h in parts:
+        best = None  # (waste, sheet_i, shelf_i | None, rotated, pw, ph)
+        for si, shelves in enumerate(sheets):
+            for hi, (sy, sh, sx) in enumerate(shelves):
+                for rotated, pw, ph in orientations(w, h):
+                    if ph <= sh + 1e-9 and sx + pw <= usable_w + 1e-9:
+                        cand = (sh - ph, si, hi, rotated, pw, ph)
+                        if best is None or cand < best:
+                            best = cand
+            # a new shelf on this sheet, below the existing ones
+            top = shelves[-1][0] + shelves[-1][1] + gap if shelves else 0.0
+            for rotated, pw, ph in orientations(w, h):
+                if pw <= usable_w + 1e-9 and top + ph <= usable_h + 1e-9:
+                    cand = (ph * 0.01, si, None, rotated, pw, ph)
+                    if best is None or cand < best:
+                        best = cand
+
+        if best is None:
+            # a fresh sheet; flattest orientation first so the shelf is short
+            rotated, pw, ph = min(
+                ((r, pw, ph) for r, pw, ph in orientations(w, h)
+                 if pw <= usable_w + 1e-9 and ph <= usable_h + 1e-9),
+                key=lambda o: o[2])
+            sheets.append([])
+            out.append(PackedSheet(len(out), spec.sheet_width,
+                                   spec.sheet_height))
+            best = (0.0, len(sheets) - 1, None, rotated, pw, ph)
+
+        _waste, si, hi, rotated, pw, ph = best
+        shelves = sheets[si]
+        if hi is None:
+            sy = shelves[-1][0] + shelves[-1][1] + gap if shelves else 0.0
+            shelves.append([sy, ph, 0.0])
+            hi = len(shelves) - 1
+        sy, sh, sx = shelves[hi]
+
+        tx, ty = margin + sx, margin + sy
+        out[si].placements.append(SheetPlacement(
+            layer, tx, ty, rotated,
+            _placed(geom, rotated, tx, ty),
+            _placed(layer.engrave, rotated, tx, ty)
+            if layer.engrave is not None and not layer.engrave.is_empty
+            else None))
+        shelves[hi][2] = sx + pw + gap
+
+    return out
+
+
+def _path_group(geom, indent: str = "  ") -> list[str]:
+    paths = []
+    for poly in _polys(geom):
+        for ring in _rings(poly):
+            d = "M " + " L ".join(f"{x:.3f},{y:.3f}" for x, y in ring) + " Z"
+            paths.append(f'{indent}<path d="{d}"/>')
+    return paths
+
+
+def sheet_to_svg(sheet: PackedSheet) -> str:
+    """One bed-load as one SVG, canvas exactly the physical sheet.
+
+    The sheet boundary is drawn in its own grey group so it can be aligned
+    against the bed and then ignored -- it is data-role="sheet", never red,
+    and a cutter set to cut red only will not touch it.
+    """
+    w, h = sheet.width, sheet.height
+    parts: list[str] = [
+        f'<g data-role="sheet" stroke="#bbbbbb">\n'
+        f'  <title>sheet outline -- align, do not cut</title>\n'
+        f'  <path d="M 0,0 L {w:.1f},0 L {w:.1f},{h:.1f} L 0,{h:.1f} Z"/>\n'
+        f'</g>'
+    ]
+    for pl in sheet.placements:
+        layer = pl.layer
+        label = (f"{layer.index:02d} {layer.role} {layer.material.name}"
+                 + (" (rotated)" if pl.rotated else ""))
+        parts.append(
+            f'<g id="layer-{layer.index}" data-role="{layer.role}" '
+            f'data-material="{layer.material.name}">\n'
+            f'  <title>{label}</title>\n'
+            + "\n".join(_path_group(pl.geom)) + "\n</g>")
+        if pl.engrave is not None:
+            parts.append(
+                f'<g id="engrave-{layer.index}" data-role="engrave" '
+                f'stroke="#0000ff">\n'
+                f'  <title>{label} -- ENGRAVE, do not cut</title>\n'
+                + "\n".join(_path_group(pl.engrave)) + "\n</g>")
+
+    body = "\n".join(parts)
+    # y flipped so the sheet reads the same way up as the 3D view
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w:.2f}mm" '
+        f'height="{h:.2f}mm" viewBox="0 0 {w:.2f} {h:.2f}">\n'
+        f'<g transform="translate(0,{h:.2f}) scale(1,-1)" fill="none" '
+        f'stroke="#ff0000" stroke-width="0.1">\n{body}\n</g>\n</svg>\n'
+    )
+
+
+def sheet_to_dxf_text(sheet: PackedSheet) -> str:
+    """One bed-load as DXF text, sheet boundary on its own SHEET layer."""
+    import io
+
+    import ezdxf
+
+    doc = ezdxf.new(setup=True)
+    doc.units = ezdxf.units.MM
+    msp = doc.modelspace()
+
+    doc.layers.add("SHEET", color=8)
+    w, h = sheet.width, sheet.height
+    msp.add_lwpolyline([(0, 0), (w, 0), (w, h), (0, h)], close=True,
+                       dxfattribs={"layer": "SHEET"})
+
+    for pl in sheet.placements:
+        name = f"L{pl.layer.index:02d}_{pl.layer.role}"
+        if name not in doc.layers:
+            doc.layers.add(name)
+        for poly in _polys(pl.geom):
+            for ring in _rings(poly):
+                msp.add_lwpolyline(list(ring), close=True,
+                                   dxfattribs={"layer": name})
+        if pl.engrave is not None:
+            ename = f"{name}_ENGRAVE"
+            if ename not in doc.layers:
+                doc.layers.add(ename, color=5)
+            for poly in _polys(pl.engrave):
+                for ring in _rings(poly):
+                    msp.add_lwpolyline(list(ring), close=True,
+                                       dxfattribs={"layer": ename})
+
+    buf = io.StringIO()
+    doc.write(buf)
+    return buf.getvalue()
+
+
+def sheet_manifest(sheets: list[PackedSheet], case: CaseModel) -> str:
+    """The paper that goes to the machine with the files."""
+    spec = case.spec
+    lines = [
+        f"cut list -- {len(sheets)} sheet(s) of "
+        f"{spec.sheet_width:.0f} x {spec.sheet_height:.0f} mm, "
+        f"{spec.sheet_margin:.0f} mm edge margin, "
+        f"{spec.sheet_spacing:.0f} mm between parts",
+        "red = cut, blue = engrave (mark only), grey = sheet outline "
+        "(align, do not cut)",
+        "",
+    ]
+    for sheet in sheets:
+        lines.append(f"sheet {sheet.index + 1}:")
+        for pl in sheet.placements:
+            layer = pl.layer
+            x0, y0, x1, y1 = pl.geom.bounds
+            lines.append(
+                f"  layer {layer.index:02d} {layer.role:<6} "
+                f"{layer.material.name:<20} {x1 - x0:6.1f} x {y1 - y0:6.1f} mm"
+                f"{'  (rotated 90)' if pl.rotated else ''}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def sheet_files(case: CaseModel, fmt: str, basename: str = "case"
+                ) -> list[tuple[str, str]]:
+    """(filename, content) per sheet, plus the manifest."""
+    if fmt not in ("svg", "dxf"):
+        raise ValueError(f"unknown sheet format {fmt!r}")
+    sheets = pack_sheets(case)
+    n = len(sheets)
+    files = []
+    for sheet in sheets:
+        name = f"{basename}-sheet-{sheet.index + 1:02d}-of-{n:02d}.{fmt}"
+        content = (sheet_to_svg(sheet) if fmt == "svg"
+                   else sheet_to_dxf_text(sheet))
+        files.append((name, content))
+    files.append((f"{basename}-cutlist.txt", sheet_manifest(sheets, case)))
+    return files
+
+
+def sheets_zip(case: CaseModel, fmt: str, basename: str = "case") -> bytes:
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, content in sheet_files(case, fmt, basename):
+            z.writestr(name, content)
+    return buf.getvalue()

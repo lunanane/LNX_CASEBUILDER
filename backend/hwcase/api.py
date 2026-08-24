@@ -243,6 +243,47 @@ def post_dxf(scene: Scene = Body(...)):
                         media_type="application/dxf")
 
 
+@app.post("/api/export/sheets/{fmt}")
+def export_sheets(fmt: str, scene: Scene = Body(...), as_json: bool = False):
+    """The cut, split into bed-sized files.
+
+    `as_json` returns {sheets: [{name, content}...], manifest} so a browser
+    with a directory picker can write real files into a chosen folder;
+    without it the same files come back as one zip, which is what a browser
+    without a picker (Firefox) can actually save.
+    """
+    if fmt not in ("svg", "dxf"):
+        raise HTTPException(400, "format is svg or dxf")
+    lib = library()
+    res = resolve(scene, lib)
+    model = case_mod.build(res, scene.case)
+    base = re.sub(r"[^A-Za-z0-9._-]+", "-", scene.name or "case").strip("-") or "case"
+
+    try:
+        files = export.sheet_files(model, fmt, base)
+    except ValueError as exc:
+        # a layer bigger than the bed is the user's problem to hear about,
+        # not a 500
+        raise HTTPException(422, str(exc))
+
+    if as_json:
+        return {
+            "sheets": [{"name": n, "content": c} for n, c in files],
+            "count": len(files) - 1,           # the manifest is not a sheet
+        }
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, content in files:
+            z.writestr(name, content)
+    from fastapi.responses import Response
+    return Response(buf.getvalue(), media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="{base}-sheets-{fmt}.zip"',
+    })
+
+
 @app.post("/api/case/freeze")
 def post_freeze(scene: Scene = Body(...)):
     """Turn the auto-derived case outline into a fixed one.
