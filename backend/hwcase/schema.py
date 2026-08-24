@@ -512,6 +512,15 @@ class CaseSpec(Strict):
     part_clearance: float = 0.6       # slop around each part pocket
     cable_clearance: float = 5.0      # min gap between parts for wiring
     #: diameter of the material column left standing around a mounting hole
+    #: Sink each support screw's head bore through every layer of its boss
+    #: column except the one directly under the board (over it, for
+    #: `from_lid`). The head then always bears on exactly one sheet, so ONE
+    #: screw length -- one layer plus the board engagement -- fits every
+    #: board in the case, however deep each one sits. Off, and the head sits
+    #: in the outer plate instead: each board then needs its own screw
+    #: length, measured stack by stack.
+    screw_wells: bool = True
+
     support_boss: float = 9.0
     #: added to a hole's own diameter to get the through hole in the case
     screw_clearance: float = 0.4

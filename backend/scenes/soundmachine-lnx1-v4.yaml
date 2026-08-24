@@ -1,0 +1,144 @@
+# First pass at the machine: Pi + square touchscreen as the fixed centre,
+# everything else hung around it.
+#
+# The Pi used to be the scene anchor, which pinned it to the origin on every
+# solve -- dragging it just slid everything else the other way. It is free now.
+# Its HEIGHT is still fixed (mount: manual), because the panel plane is derived
+# from the screen mated on top of it: that height is the cause, so it cannot
+# also be the effect. Its XY is yours to move.
+# The HyperPixel is *mated* rather than positioned: it snaps
+# onto the 40-way header, and mate_gap models the header stack (8.5 mm for the
+# plain socket, 17.0 mm with the bundled booster header, which is what you need
+# to clear the 16 mm tall USB/Ethernet block).
+#
+# Panel plane: the screen fixes it. Everything else says `on_panel: main` and
+# names the feature that has to sit flush, so nobody computes a z by hand -- and
+# if the header stack under the screen changes, the whole front follows.
+
+name: soundmachine-lnx1-v4
+
+panels:
+- name: main
+  from_ref: screen.active_area
+  note: >-
+    The face of the machine is wherever the screen glass ends up, which is the Pi board + mate_gap + the
+    display stack. Derived, never typed in.
+
+case:
+  style: layered
+  materials:
+  - {name: plywood-3mm, thickness: 3.5, kerf: 0.15, sheet: [600.0, 400.0], color: "#c8a165"}
+  wall: 8.0
+  floor_gap: 4.0
+  ceiling_gap: 1.0
+  part_clearance: 0.6
+  cable_clearance: 5.0
+  corner_radius: 8.0
+
+  interior: grown
+  outline:
+  case_screws: corners
+  sheet_margin: 2.0
+  sheet_spacing: 2.0
+placements:
+- id: pi
+  part: rpi-3b
+  label: Raspberry Pi 3B
+  pos: [-13.4, 28.2, 0.0]
+    # Turned 180 deg so the USB/Ethernet stack faces the LEFT wall. Facing it
+    # right put 45 mm of plug run straight through the button block -- the
+    # checker caught it, and rotating the anchor is the cheap fix.
+  rot_z: 180.0
+  mount: manual
+
+  sides:
+  - side: -y
+    cutout: open_side
+    include: [pwr_micro_usb, hdmi, av_jack]
+  - side: +x
+    include: [usb1, usb2, ethernet]
+    margin: 3.0
+  support: from_floor
+- id: screen
+  part: hyperpixel4-square-touch
+  label: HyperPixel 4.0 Square
+  parent: pi
+  parent_mate: gpio40
+  mate: gpio40
+  mate_gap: 17.0
+
+  # --- 4x8 of buttons, two NeoTrellis tiles side by side on the 60 mm grid ---
+- id: trellis_a
+  part: adafruit-3954-neotrellis
+  pos: [0.8, -59.1, 0.0]
+  on_panel: main
+  panel_ref: buttons          # the pad's button tops, not the PCB's
+  panel_offset: 2.5
+  support: from_floor
+- id: pad_a
+  part: adafruit-1611-keypad
+  parent: trellis_a
+  parent_mate: keypad
+  mate: pcb
+- id: trellis_b
+  part: adafruit-3954-neotrellis
+  pos: [60.8, -59.7, 0.0]
+  on_panel: main
+  panel_ref: buttons
+  panel_offset: 2.5
+  support: from_floor
+- id: pad_b
+  part: adafruit-1611-keypad
+  parent: trellis_b
+  parent_mate: keypad
+  mate: pcb
+
+  # --- four push encoders above the keypads ---
+- id: encoders
+  part: adafruit-5752-quad-encoder
+  pos: [120.8, 26.79, 0.0]
+  on_panel: main
+  panel_ref: bushings         # the threaded collar is what a panel clamps on;
+                              # the shaft is meant to stand proud for the knob
+
+  # --- the little OLED next to them ---
+  rot_z: 180.0
+  panel_offset: 4.0
+  support: from_lid
+- id: oled
+  part: adafruit-4741-oled-1v5
+  pos: [40.9, 55.737500000000004, 0.0]
+  on_panel: main
+  panel_ref: active_area
+
+  # --- I2C hub, buried inside where nobody has to see it ---
+  rot_z: 180.0
+  sides:
+  - side: +x
+    margin: 0.0
+    span: full
+  panel_offset: -2.5
+  support: from_lid
+- id: mux
+  part: seeed-grove-tca9548a
+  pos: [-3.9, -39.7, 0.5]
+  rot_z: 180.0
+  mount: manual
+  support: from_floor
+  sides:
+  - side: +y
+    span: full
+- id: amy
+  part: shorepine-amyboard
+  pos: [123.6, 5.2, 0.0]
+  on_panel: main
+  panel_ref: jack_threads
+  rot_z: 90.0
+  support: from_floor
+  sides:
+  - side: +x
+    cutout: open_to_edge
+    include: [usb_c]
+    margin: 7.0
+    span: full
+  panel_offset: -1.5

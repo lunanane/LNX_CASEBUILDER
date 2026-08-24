@@ -140,13 +140,22 @@ def build(res: Resolved, spec: Optional[CaseSpec] = None) -> CaseModel:
     # clearance rather than a lid floating above the surface.
     z0 = z1 - sum(m.thickness for m in materials)
 
+    # the full slab grid, computed up front: the screw wells need to know
+    # which layer is the LAST one before a board, and a layer working alone
+    # cannot tell
+    slab_grid: list[tuple[float, float]] = []
+    edge = z0
+    for mat in materials:
+        slab_grid.append((edge, edge + mat.thickness))
+        edge += mat.thickness
+
     layers: list[Layer] = []
     cursor = z0
     for i, mat in enumerate(materials):
         top = cursor + mat.thickness
         role: Role = "floor" if i == 0 else ("lid" if i == len(materials) - 1 else "body")
         geom, notes = _layer_geometry(res, spec, outer, (cursor, top), role,
-                                      (z0, z1))
+                                      (z0, z1), slab_grid)
         layers.append(Layer(i, cursor, top, role, mat, geom, notes))
         cursor = top
 
@@ -220,9 +229,35 @@ def _report_orphan_supports(res: Resolved, layers: list[Layer], notes_to) -> Non
     served = set()
     for layer in layers:
         for note in layer.notes:
-            for word in ("countersink for ", "boss for ", "clearance hole for "):
+            for word in ("countersink for ", "boss for ", "clearance hole for ",
+                         "screw well for ", "screw seat for "):
                 if note.startswith(word):
                     served.add(note[len(word):])
+
+    # Defence in depth: the notes say a seat was placed, the geometry says
+    # whether it survived. Everything after the seat is added -- cable
+    # channels, bolt holes, tie ribs -- is a chance to carve it away, and one
+    # of them did exactly that once: the note said "screw seat", the plate
+    # said see-through hole, and a screw dropped into the well fell out the
+    # bottom of the case.
+    for sp in res.supports:
+        if sp.mode == Support.none:
+            continue
+        ring = Point(sp.at).buffer(2.4).difference(Point(sp.at).buffer(1.7))
+        bears = False
+        for layer in layers:
+            if sp.mode == Support.from_floor and layer.z1 > sp.board_bottom + 1e-6:
+                continue
+            if sp.mode == Support.from_lid and layer.z0 < sp.board_top - 1e-6:
+                continue
+            if layer.geom.intersection(ring).area > 0.6 * ring.area:
+                bears = True
+                break
+        if not bears and sp.ref in served:
+            layers[0].notes.append(
+                f"{sp.ref}: the screw seat was placed and then cut away -- "
+                f"something (a cable channel, an opening) removed the material "
+                f"the head pulls against at ({sp.at[0]:.0f}, {sp.at[1]:.0f})")
 
     for sp in res.supports:
         if sp.mode == Support.none or sp.ref in served:
@@ -454,7 +489,8 @@ def _case_screws(spec: CaseSpec, outer: Polygon, role: Role):
 
 
 def _link_cable_void(res: Resolved, spec: CaseSpec, outer: Polygon, geom,
-                     slab: tuple[float, float], notes: list[str]):
+                     slab: tuple[float, float], notes: list[str],
+                     obstacles=None):
     """Make sure every internal lead can reach every other one.
 
     The mirror image of `_tie_loose_pieces`. That one guarantees the MATERIAL
@@ -467,6 +503,14 @@ def _link_cable_void(res: Resolved, spec: CaseSpec, outer: Polygon, geom,
     board its own recess and would happily leave them isolated. Rather than
     special-casing each strategy, the void is checked after the fact and a
     channel is cut wherever it is broken.
+
+    `obstacles` are the screw bosses and bolt collars, and they are sacred:
+    this pass runs AFTER they are added, and a straight channel used to carve
+    clean through them -- on a real scene that turned a screw seat into a
+    see-through hole, and a screw dropped into that well fell out the bottom
+    of the case. A cable cannot pass through a post any more than a channel
+    should, so a blocked run detours around the boss instead, and no channel
+    ever removes obstacle material.
     """
     if not spec.link_cables or spec.cable_channel <= 0:
         return geom
@@ -503,7 +547,7 @@ def _link_cable_void(res: Resolved, spec: CaseSpec, outer: Polygon, geom,
             reachable = unary_union([reachable, here])
             continue
         a, b = nearest_points(here, reachable)
-        run = LineString([a, b]).buffer(spec.cable_channel / 2.0, cap_style=1)
+        run = _route_past(a, b, spec, obstacles, notes)
         channels.append(run)
         reachable = unary_union([reachable, here, run])
         linked.append(ref)
@@ -511,7 +555,44 @@ def _link_cable_void(res: Resolved, spec: CaseSpec, outer: Polygon, geom,
     if not channels:
         return geom
     notes.append(f"cable channel to reach {', '.join(sorted(set(linked)))}")
-    return geom.difference(unary_union(channels))
+    carve = unary_union(channels)
+    if obstacles is not None and not obstacles.is_empty:
+        carve = carve.difference(obstacles)
+    return geom.difference(carve)
+
+
+def _route_past(a, b, spec: CaseSpec, obstacles, notes: list[str]):
+    """A cable run from a to b that goes around the screw bosses.
+
+    Straight when it can be; otherwise the midpoint steps sideways in growing
+    increments until the two-legged run clears the obstacles. If nothing
+    within a few boss-widths clears, the straight run is kept and the carve's
+    final difference() protects the boss -- the channel is then pinched there,
+    and the note says so rather than leaving it to be found with a cable in
+    hand.
+    """
+    line = LineString([a, b])
+    run = line.buffer(spec.cable_channel / 2.0, cap_style=1)
+    if obstacles is None or obstacles.is_empty or not run.intersects(obstacles):
+        return run
+
+    dx, dy = b.x - a.x, b.y - a.y
+    length = max((dx * dx + dy * dy) ** 0.5, 1e-9)
+    px, py = -dy / length, dx / length          # unit perpendicular
+    mx, my = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
+    step = spec.support_boss + spec.cable_channel
+
+    for k in (1, -1, 2, -2, 3, -3):
+        wx, wy = mx + px * step * k, my + py * step * k
+        detour = LineString([a, (wx, wy), b]).buffer(
+            spec.cable_channel / 2.0, cap_style=1)
+        if not detour.intersects(obstacles):
+            return detour
+
+    notes.append(
+        f"cable channel near ({mx:.0f}, {my:.0f}) is pinched by a screw boss "
+        f"-- the lead has to squeeze past the post there")
+    return run
 
 
 def _keep_a_wall(res: Resolved, spec: CaseSpec, outer: Polygon, geom,
@@ -608,16 +689,53 @@ def _open_out_slivers(geom, spec: CaseSpec, notes: list[str],
 MIN_HEAD_BEARING = 0.5
 
 
+def _bearing_slab(sp, slab_grid: list[tuple[float, float]],
+                  zspan: tuple[float, float]):
+    """The one layer the screw head pulls against: the layer directly under
+    the board for `from_floor`, directly over it for `from_lid`.
+
+    Found on the actual slab grid rather than inferred from thicknesses --
+    with mixed sheet sizes a guess picks the wrong layer, and a screw well
+    continued one layer too far leaves the head hanging in air under the
+    board with nothing to bear on.
+    """
+    if not slab_grid:
+        return None
+    if sp.mode == Support.from_floor:
+        below = [s for s in slab_grid
+                 if s[1] <= sp.board_bottom + 1e-6 and s[1] > zspan[0] - 1e-6]
+        return max(below, key=lambda s: s[1]) if below else None
+    if sp.mode == Support.from_lid:
+        above = [s for s in slab_grid
+                 if s[0] >= sp.board_top - 1e-6 and s[0] < zspan[1] + 1e-6]
+        return min(above, key=lambda s: s[0]) if above else None
+    return None
+
+
+def _proud(sp):
+    """The same support point, with the head on the outer plate."""
+    from dataclasses import replace
+
+    return replace(sp, inset=False)
+
+
 def _support_features(res: Resolved, spec: CaseSpec, slab: tuple[float, float],
                       role: Role, zspan: tuple[float, float],
-                      main: Polygon | MultiPolygon):
+                      main: Polygon | MultiPolygon,
+                      slab_grid: list[tuple[float, float]] | None = None):
     """Material to keep, and holes to punch, for the boards the case carries.
 
     A `from_floor` board gets a column of material from the bottom plate up to
     its underside -- that column has to be added back *after* the interior has
     been hollowed out, or the void would eat the very post that holds the board.
-    The plate at the far end gets the bigger countersink so a screw head
-    finishes flush with the outside.
+
+    With `screw_wells` on (the default), the head-diameter bore continues
+    through every layer of that column except the one directly under the
+    board; that single layer keeps the shank hole and is what the head pulls
+    against. One screw length -- one sheet plus the board engagement -- then
+    fits every board in the case, however deep each one sits. A board whose
+    `screw_inset` is explicitly False opts out: its head bears on the outer
+    plate the classic way, and its screw is measured to its own stack.
     """
     bosses: list[Polygon] = []
     holes: list[Polygon] = []
@@ -625,6 +743,11 @@ def _support_features(res: Resolved, spec: CaseSpec, slab: tuple[float, float],
     case_z0, case_z1 = zspan
 
     for sp in res.supports:
+        # A well is a head-sized hole, so its boss must be wider than the
+        # normal one by the same amount, or the ring of material around the
+        # head gets thinner than the ring the shank hole was designed with.
+        # Per support, because the shank diameter is the board's own hole.
+        well_boss = spec.screw_head + (spec.support_boss - sp.screw_d)
         # A boss may only occupy layers that are ENTIRELY clear of the board.
         # A layer straddling the board's underside contains the board itself, so
         # a post there would be driven straight through it.
@@ -643,6 +766,69 @@ def _support_features(res: Resolved, spec: CaseSpec, slab: tuple[float, float],
             continue
 
         centre = Point(sp.at)
+
+        # An EXPLICIT screw_inset=False is a request for the head on the
+        # outer plate, which is the opposite of a well. The resolved `inset`
+        # bool cannot be used here: it carries the mode default, and keying
+        # on it would quietly switch wells off for every from_lid board.
+        wells_here = spec.screw_wells and sp.inset_explicit is not False
+        bearing = _bearing_slab(sp, slab_grid or [], zspan) if wells_here else None
+        is_bearing = (bearing is not None
+                      and abs(bearing[0] - slab[0]) < 1e-6
+                      and abs(bearing[1] - slab[1]) < 1e-6)
+
+        # A board sitting directly on the bottom plate -- its seat is the
+        # very next layer -- would get a well through nothing but the plate
+        # itself. That inlet buys no screw-length uniformity worth having, it
+        # is just a bigger hole in the visible underside, so it is skipped:
+        # plain shank hole, head bears on the outside of the plate. (Explicit
+        # screw_inset=True still gets the classic countersink -- they asked.)
+        shallow = False
+        if wells_here and bearing is not None and slab_grid:
+            if sp.mode == Support.from_floor:
+                shallow = bearing[0] <= slab_grid[0][1] + 1e-6
+            else:
+                shallow = bearing[1] >= slab_grid[-1][0] - 1e-6
+        if shallow:
+            wells_here = False
+            if sp.inset_explicit is not True:
+                sp = _proud(sp)
+
+        if wells_here and bearing is not None:
+            if is_bearing:
+                # The one sheet the head pulls against. On an inner layer it
+                # still needs its boss; as the outer plate it IS the material,
+                # and the note says "clearance hole" because that is what a
+                # shank hole in an outer plate has always been called here --
+                # a board directly under the faceplate never had a well.
+                if not outer:
+                    bosses.append(centre.buffer(spec.support_boss / 2.0,
+                                                quad_segs=24))
+                holes.append(centre.buffer(
+                    (sp.screw_d + spec.screw_clearance) / 2.0, quad_segs=24))
+                if outer and sp.inset_explicit is True:
+                    # They asked for a flush head and physics says no: this
+                    # plate is the seat, and counterboring the seat leaves
+                    # the head nothing to pull against. Same refusal as the
+                    # classic path -- the well must not swallow it.
+                    notes.append(
+                        f"{sp.ref}: no inset -- this plate is all that is "
+                        f"between the screw head and the board, so "
+                        f"counterboring it would leave the head nothing to "
+                        f"pull against")
+                notes.append(f"clearance hole for {sp.ref}" if outer
+                             else f"screw seat for {sp.ref}")
+            else:
+                # part of the well: head-diameter bore, wider boss around it
+                if not outer:
+                    bosses.append(centre.buffer(well_boss / 2.0, quad_segs=24))
+                holes.append(centre.buffer(
+                    (spec.screw_head + spec.screw_clearance) / 2.0,
+                    quad_segs=24))
+                notes.append(f"screw well for {sp.ref}")
+            continue
+
+        # -- classic behaviour: wells off, or this board opted out ----------
         if outer:
             # A counterbore takes the full thickness of this plate. If it is
             # the only thing between the head and the board, the head drops
@@ -680,8 +866,13 @@ def _support_features(res: Resolved, spec: CaseSpec, slab: tuple[float, float],
 
 def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
                     slab: tuple[float, float], role: Role,
-                    zspan: tuple[float, float]):
-    """outer shape minus whatever occupies this slab."""
+                    zspan: tuple[float, float],
+                    slab_grid: list[tuple[float, float]] | None = None):
+    """outer shape minus whatever occupies this slab.
+
+    `slab_grid` is every layer's (z0, z1); the screw wells use it to find
+    the one layer directly under (or over) each supported board.
+    """
     notes: list[str] = []
     cuts: list[Polygon] = []
     under_panel = {p.id for p in res.scene.placements if p.under_panel}
@@ -758,7 +949,7 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
     # have to be drilled through it. `geom` at this point is what the boss has
     # to reach to stay attached.
     bosses, screw_holes, support_notes = _support_features(
-        res, spec, slab, role, zspan, geom)
+        res, spec, slab, role, zspan, geom, slab_grid)
     boss_discs = list(bosses)
     if bosses:
         geom = geom.union(unary_union(bosses).intersection(outer))
@@ -792,7 +983,9 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
 
     # Cable routes are carved before the material check, so anything the
     # carving strands can still be tied back.
-    geom = _link_cable_void(res, spec, outer, geom, slab, notes)
+    geom = _link_cable_void(res, spec, outer, geom, slab, notes,
+                            obstacles=unary_union(boss_discs)
+                            if boss_discs else None)
     geom = _tie_loose_pieces(geom, outer, spec, notes, boss_discs)
 
     if geom.is_empty:

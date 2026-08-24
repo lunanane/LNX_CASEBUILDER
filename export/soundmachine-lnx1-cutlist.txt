@@ -1,0 +1,23 @@
+cut list -- 5 sheet(s), plate stock 350 x 350 mm, 2 mm edge margin, 2 mm between parts
+pull from stock: 5 x 350 x 350 mm
+red = cut, blue = engrave (mark only), grey = sheet outline (align, do not cut)
+
+sheet 1 (350 x 350 mm):
+  layer 00 floor  plywood-3mm           233.8 x  131.2 mm
+  layer 01 body   plywood-3mm           233.8 x  131.2 mm
+
+sheet 2 (350 x 350 mm):
+  layer 02 body   plywood-3mm           233.8 x  131.2 mm
+  layer 03 body   plywood-3mm           233.8 x  131.2 mm
+
+sheet 3 (350 x 350 mm):
+  layer 04 body   plywood-3mm           233.8 x  131.2 mm
+  layer 05 body   plywood-3mm           233.8 x  131.2 mm
+
+sheet 4 (350 x 350 mm):
+  layer 06 body   plywood-3mm           233.8 x  131.2 mm
+  layer 07 body   plywood-3mm           233.8 x  131.2 mm
+
+sheet 5 (350 x 350 mm):
+  layer 08 body   plywood-3mm           233.8 x  131.2 mm
+  layer 09 lid    plywood-3mm           233.8 x  131.2 mm

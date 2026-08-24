@@ -101,6 +101,10 @@ class SupportPoint:
     screw: Optional[str] = None
     #: counterbore the outer plate for the head -- see Placement.screw_inset
     inset: bool = False
+    #: the user's own words, un-defaulted: None = "whatever is right", False
+    #: is an explicit request for the head on the outer plate -- which is the
+    #: opposite of a screw well, so wells respect it and defaults do not
+    inset_explicit: Optional[bool] = None
 
     @property
     def ref(self) -> str:
@@ -578,7 +582,8 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
                     supports.append(SupportPoint(
                         pl.id, h.name, (at[0], at[1]), pl.support,
                         h.diameter, bottom, top, h.screw,
-                        inset=_wants_inset(pl)))
+                        inset=_wants_inset(pl),
+                        inset_explicit=pl.screw_inset))
 
         by_side: dict[Face, SidePolicy] = {sp.side: sp for sp in pl.sides}
 

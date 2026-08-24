@@ -605,6 +605,43 @@ Two details that matter and are tested:
 `support_boss`, `screw_clearance` and `screw_head` on the case spec set the post
 diameter, the slop on the through hole and the counterbore.
 
+### One screw length: wells
+
+On by default (`screw_wells`). The head-diameter bore continues through every
+layer of a support's boss column except the **seat** — the one layer directly
+under the board (over it, for `from_lid`). The seat keeps the shank hole and
+is what the head pulls against, so every screw spans exactly one sheet plus
+the board engagement: **one screw length fits every board in the case**,
+however deep each one sits, and the shopping list stops needing a column for
+screw lengths.
+
+Details that matter: the well's boss is wider than the normal one by exactly
+what the hole grew, so the ring of material around the head keeps the wall
+the shank hole was designed with; the seat is found on the **actual slab
+grid**, not inferred from thicknesses, because with mixed sheet sizes a guess
+picks the wrong layer and leaves the head hanging in air under the board; and
+a board with `screw_inset: false` (an explicit ask for the head on the outer
+plate) opts out and gets the classic treatment with its own screw length. A
+board directly under the faceplate never had a well — its seat *is* the
+outer plate, and it reads as the plain clearance hole it is.
+
+A board **sitting directly on the bottom plate** — its seat on the very next
+layer — gets no inlet either: a well through nothing but the plate itself
+buys no uniformity worth having, it is just a bigger hole in the visible
+underside. Plain shank hole, head on the outside; `screw_inset: true` still
+gets the countersink, because an explicit ask wins over a default skip.
+
+The wells also forced two guarantees to stop lying to each other. The
+cable-linking pass runs *after* the bosses and used to carve a straight
+channel clean through a screw seat — the notes said "seat", the plate had a
+see-through hole, and a screw dropped into the well fell out the bottom of
+the case. Bosses and bolt collars are now routing **obstacles**: a blocked
+channel detours around them, a channel that cannot detour is pinched at the
+post and says so, and no channel ever removes boss material. After the full
+pipeline every seat is **re-checked geometrically** — anything that carves
+one away in future produces a "placed and then cut away" note with
+coordinates instead of a hole you find with a screwdriver.
+
 ### Case bolts carry their own material
 
 A bolt through the stack is only a bolt if material touches it the whole way

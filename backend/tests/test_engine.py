@@ -1388,17 +1388,25 @@ def test_from_floor_posts_up_to_the_board(lib):
     holes = lib["adafruit-3954-neotrellis"].holes
     assert len(res.supports) == len(holes) == 8
 
+    # With wells (the default) the column notes read "screw well" and the
+    # top of the column "screw seat"; the intent -- a post under every hole,
+    # nothing past the board -- is unchanged.
+    served = ("boss for", "screw well for", "screw seat for")
     board_bottom = min(s.z[0] for s in res.solids if s.placement == "trellis_a")
     for layer in model.layers:
-        bosses = [n for n in layer.notes if n.startswith("boss")]
+        posts = [n for n in layer.notes
+                 if n.startswith(served) and "trellis_a" in n]
         if layer.z0 >= board_bottom:
-            assert not bosses, f"layer {layer.index} posts past the board"
+            assert not posts, f"layer {layer.index} posts past the board"
         elif layer.role != "floor":
-            assert len(bosses) == 8, f"layer {layer.index} is missing bosses"
+            assert len(posts) == 8, f"layer {layer.index} is missing posts"
 
 
 def test_the_bottom_plate_is_countersunk_not_bossed(lib):
+    # the classic path: wells (the default) replace the countersink with a
+    # head-bore well, so this pins the behaviour behind the switch
     scene = _supported(load_scene(SCENE), "from_floor", "trellis_a")
+    scene.case = scene.case.model_copy(update={"screw_wells": False})
     model = build(resolve(scene, lib))
     floor = model.layers[0]
     assert len([n for n in floor.notes if n.startswith("countersink")]) == 8
@@ -1406,10 +1414,12 @@ def test_the_bottom_plate_is_countersunk_not_bossed(lib):
 
 
 def test_the_countersink_is_wider_than_the_screw(lib):
-    """So a head finishes flush with the outside instead of standing proud."""
+    """So a head finishes flush with the outside instead of standing proud.
+    Classic path: wells are switched off here, they have their own tests."""
     from shapely.geometry import Polygon
 
     scene = _supported(load_scene(SCENE), "from_floor", "trellis_a")
+    scene.case = scene.case.model_copy(update={"screw_wells": False})
     spec = scene.case
     res = resolve(scene, lib)
     model = build(res)
@@ -1587,13 +1597,18 @@ def test_support_measures_the_board_not_its_knobs(lib):
     shaft_top = max(s.z[1] for s in res.solids if s.placement == "encoders")
     assert sp.board_top < shaft_top - 10.0, "the shafts are not the board"
 
-    # Every mounting hole gets drilled through the faceplate. A clearance hole
-    # rather than a counterbore, because the board is directly under the plate
-    # and the head has to bear on its outside face -- see screw_inset.
-    lid = build(res).layers[-1]
-    drilled = [n for n in lid.notes if n.startswith("clearance hole for encoders")]
-    assert len(drilled) == len(part.holes)
-    assert not [n for n in lid.notes if n.startswith("countersink for encoders")]
+    # Every mounting hole is served. The encoder board sits well below the
+    # faceplate, so with wells (the default) each screw gets a head-sized
+    # bore down through the lid and a seat on the layer directly above the
+    # board -- short uniform screws instead of 13 mm specials.
+    model = build(res)
+    all_notes = [n for l in model.layers for n in l.notes]
+    seats = [n for n in all_notes if n.startswith("screw seat for encoders")]
+    assert len(seats) == len(part.holes)
+    lid = model.layers[-1]
+    assert len([n for n in lid.notes
+                if n.startswith("screw well for encoders")]) == len(part.holes)
+    assert not [n for n in all_notes if n.startswith("cannot support encoders")]
 
 
 # --------------------------------------------------------------------------
@@ -1965,7 +1980,9 @@ def test_opening_runs_before_the_bosses(demo):
     scene = _supported(load_scene(SCENE), "from_floor", "trellis_a")
     scene.case.min_segment = 6.0          # wider than the 9 mm boss's 3.1 mm ring
     model = build(resolve(scene, lib_for(scene)))
-    assert _notes(model, "boss for"), "the bosses must survive"
+    survived = (_notes(model, "boss for") + _notes(model, "screw well for")
+                + _notes(model, "screw seat for"))
+    assert survived, "the bosses must survive"
 
 
 def lib_for(_scene):
@@ -3273,15 +3290,20 @@ def test_a_front_mounted_board_gets_no_inset_by_default(lib):
 
 def test_a_back_mounted_board_gets_an_inset_by_default(lib):
     """The other end of the case, and the opposite answer: a screw head
-    standing proud of the bottom plate makes the whole thing rock."""
-    notes = _outer_notes(build(resolve(_mounted("from_floor"), lib)), "from_floor")
+    standing proud of the bottom plate makes the whole thing rock.
+    Classic path (wells off); with wells the head sits inside the well and
+    the floor carries the head-bore instead, which is flush-er still."""
+    scene = _mounted("from_floor")
+    scene.case = scene.case.model_copy(update={"screw_wells": False})
+    notes = _outer_notes(build(resolve(scene, lib)), "from_floor")
     assert notes
     assert all(n.startswith("countersink") for n in notes), notes
 
 
 def test_the_default_can_be_overridden_either_way(lib):
     """There are real reasons for both -- heads flush with a faceplate look
-    better when there is a layer to sink them into."""
+    better when there is a layer to sink them into. (inset=False also opts
+    out of the wells, so no switch is needed here.)"""
     proud = _outer_notes(build(resolve(_mounted("from_floor", inset=False), lib)),
                          "from_floor")
     assert all(n.startswith("clearance hole") for n in proud), proud
@@ -3866,3 +3888,238 @@ def test_an_empty_plate_list_is_refused():
     case.spec.plates = []
     with pytest.raises(ValueError, match="no cutting plates"):
         pack_sheets(case)
+
+
+# ---------------------------------------------------------------------------
+# screw wells: one screw length for every board
+# ---------------------------------------------------------------------------
+
+def _well_profile(model, sp):
+    """Per layer under (or over) the board: the hole radius at the support."""
+    from shapely.geometry import Point
+
+    pt = Point(sp.at)
+    out = []
+    for layer in model.layers:
+        r = 0.0
+        for probe in (1.0, 1.2, 1.45, 1.7, 2.0, 2.6, 3.0, 3.45, 4.0):
+            ring = pt.buffer(probe).difference(pt.buffer(probe - 0.1))
+            if layer.geom.intersection(ring).area < 0.05 * ring.area:
+                r = max(r, probe)
+        out.append((layer, r))
+    return out
+
+
+def _seat_layers(model, ref):
+    return [l for l in model.layers
+            if any(n == f"screw seat for {ref}" for n in l.notes)]
+
+
+def test_the_screw_seat_is_the_layer_directly_under_the_board(lib):
+    scene = _supported(load_scene(SCENE), "from_floor", "oled")
+    res = resolve(scene, lib)
+    model = build(res)
+    sp = res.supports[0]
+
+    seats = _seat_layers(model, sp.ref)
+    assert len(seats) == 1, "exactly one layer bears the head"
+    seat = seats[0]
+    assert seat.z1 == pytest.approx(sp.board_bottom, abs=0.51), (
+        "the seat has to touch the board's underside")
+    # everything below the seat is well: head-sized, not shank-sized
+    for layer, r in _well_profile(model, sp):
+        if layer.z1 <= seat.z0 + 1e-6:
+            assert r > model.spec.screw_head / 2.0 - 0.2, (
+                f"layer {layer.index} blocks the head on its way up")
+
+
+def test_one_screw_length_fits_boards_at_different_heights(lib):
+    """The point of the whole feature. The screw spans the seat layer plus
+    the board engagement; with wells on, that is the same number for a board
+    5 mm up and a board 25 mm up."""
+    scene = _supported(load_scene(SCENE), "from_floor", "oled", "encoders")
+    res = resolve(scene, lib)
+    model = build(res)
+
+    lengths = set()
+    for pid in ("oled", "encoders"):
+        sp = next(s for s in res.supports if s.placement == pid)
+        seats = _seat_layers(model, sp.ref)
+        assert seats, f"{pid} has no seat layer"
+        lengths.add(round(seats[0].thickness, 2))
+
+    # boards sit at genuinely different heights...
+    bottoms = {round(s.board_bottom, 1) for s in res.supports}
+    assert len(bottoms) > 1, "the fixture no longer varies board height"
+    # ...and still need the same screw
+    assert len(lengths) == 1, f"different screw lengths required: {lengths}"
+
+
+def test_wells_off_restores_the_countersink(lib):
+    scene = _supported(load_scene(SCENE), "from_floor", "oled")
+    scene.case = scene.case.model_copy(update={"screw_wells": False})
+    model = build(resolve(scene, lib))
+    floor = model.layers[0]
+    assert any(n.startswith("countersink for oled") for n in floor.notes)
+    assert not any("screw well" in n for l in model.layers for n in l.notes)
+
+
+def test_a_board_can_opt_out_of_the_well(lib):
+    """screw_inset=False is an explicit ask for the head on the outer plate,
+    which is the opposite of a well -- that board gets the classic treatment
+    and its own screw length, the others keep the well."""
+    scene = _supported(load_scene(SCENE), "from_floor", "oled", "encoders")
+    next(p for p in scene.placements if p.id == "oled").screw_inset = False
+    model = build(resolve(scene, lib))
+
+    all_notes = [n for l in model.layers for n in l.notes]
+    assert any(n.startswith("clearance hole for oled") for n in all_notes)
+    assert not any(n.startswith("screw well for oled") for n in all_notes)
+    assert any(n.startswith("screw well for encoders") for n in all_notes)
+
+
+def test_the_well_boss_keeps_the_ring_wall(lib):
+    """A head-sized hole through the normal 9 mm boss leaves a 1 mm ring of
+    plywood, which is not a boss, it is a splinter waiting to happen. The
+    well's boss grows by exactly what the hole grew."""
+    from shapely.geometry import Point
+
+    scene = _supported(load_scene(SCENE), "from_floor", "oled")
+    res = resolve(scene, lib)
+    model = build(res)
+    sp = res.supports[0]
+    pt = Point(sp.at)
+
+    spec = model.spec
+    hole_r = (spec.screw_head + spec.screw_clearance) / 2.0
+    want_wall = (spec.support_boss - sp.screw_d) / 2.0 - spec.screw_clearance / 2.0
+
+    for layer in model.layers:
+        if not any(n == f"screw well for {sp.ref}" for n in layer.notes):
+            continue
+        if layer.role == "floor":
+            continue                      # the floor plate is its own material
+        ring = pt.buffer(hole_r + want_wall * 0.8).difference(
+            pt.buffer(hole_r + 0.05))
+        cover = layer.geom.intersection(ring).area / ring.area
+        assert cover > 0.9, (
+            f"layer {layer.index}: only {cover:.0%} of the well wall is there")
+
+
+def test_a_well_served_board_is_not_reported_unsupported(lib):
+    scene = _supported(load_scene(SCENE), "from_floor", "oled")
+    model = build(resolve(scene, lib))
+    assert not [n for l in model.layers for n in l.notes
+                if n.startswith("cannot support oled")]
+
+
+# ---------------------------------------------------------------------------
+# a screw seat, once placed, must survive to the finished plates
+# ---------------------------------------------------------------------------
+
+def _seat_survives(model, sp):
+    from shapely.geometry import Point
+
+    from hwcase.schema import Support
+
+    ring = Point(sp.at).buffer(2.2).difference(Point(sp.at).buffer(1.6))
+    for layer in model.layers:
+        if sp.mode == Support.from_floor and layer.z1 > sp.board_bottom + 1e-6:
+            continue
+        if sp.mode == Support.from_lid and layer.z0 < sp.board_top - 1e-6:
+            continue
+        if layer.geom.intersection(ring).area > 0.6 * ring.area:
+            return True
+    return False
+
+
+@pytest.mark.parametrize("interior", ["pocketed", "hollow", "ribs", "grown"])
+def test_every_screw_has_somewhere_to_bear(lib, interior):
+    """The bug this pins: the cable-linking pass ran after the bosses and
+    carved a straight channel through a screw seat. The notes said "screw
+    seat", the plate had a see-through hole, and a screw dropped into the
+    well fell out the bottom of the case. Channels now route around bosses
+    and never carve them, whatever the interior mode."""
+    scene = _supported(load_scene(SCENE), "from_floor",
+                       "pi", "mux", "trellis_a", "trellis_b", "amy")
+    scene.case = scene.case.model_copy(update={"interior": interior})
+    res = resolve(scene, lib)
+    model = build(res)
+
+    lost = [sp.ref for sp in res.supports if not _seat_survives(model, sp)]
+    assert not lost, f"screws that fall straight through: {lost}"
+
+
+def test_a_cable_channel_never_carves_a_boss(lib):
+    """The mechanism behind the guarantee above: obstacles are subtracted
+    from the carve, so no channel can remove boss material -- at worst it is
+    pinched, and the pinch is a note rather than a discovery."""
+    from shapely.geometry import Point as ShPoint
+
+    from hwcase.case import _route_past
+    from hwcase.schema import CaseSpec
+
+    spec = CaseSpec()
+    boss = ShPoint(50.0, 0.0).buffer(spec.support_boss / 2.0)
+
+    notes: list = []
+    run = _route_past(ShPoint(0, 0), ShPoint(100, 0), spec, boss, notes)
+    assert not run.intersects(boss), "the detour still crosses the boss"
+    assert not notes, "a clean detour needs no apology"
+
+    # a wall of bosses too wide to detour past: the run is kept, the pinch
+    # is reported, and the CARVE (not tested here) subtracts the obstacles
+    from shapely.ops import unary_union as uu
+    wall = uu([ShPoint(50.0, y).buffer(spec.support_boss / 2.0)
+               for y in range(-80, 81, 9)])
+    notes2: list = []
+    _run2 = _route_past(ShPoint(0, 0), ShPoint(100, 0), spec, wall, notes2)
+    assert any("pinched" in n for n in notes2)
+
+
+def test_a_board_on_the_bottom_plate_gets_no_inlet(lib):
+    """A well through nothing but the plate itself buys no screw-length
+    uniformity worth having -- it is just a bigger hole in the visible
+    underside. The pi sits with its seat on the very next layer, so its
+    floor hole is the plain shank, head on the outside."""
+    import math
+
+    from shapely.geometry import Point as ShPoint
+    from shapely.geometry import Polygon as ShPolygon
+
+    scene = _supported(load_scene(SCENE), "from_floor", "pi", "trellis_a")
+    res = resolve(scene, lib)
+    model = build(res)
+    floor = model.layers[0]
+
+    assert any(n.startswith("clearance hole for pi") for n in floor.notes)
+    assert not any("screw well for pi" in n for l in model.layers for n in l.notes)
+    # the board one layer up still has its boss to pull against
+    assert any(n.startswith("boss for pi") for n in model.layers[1].notes)
+
+    # and the hole in the plate really is shank-sized
+    sp = next(s for s in res.supports if s.ref == "pi.h1")
+    polys = ([floor.geom] if not hasattr(floor.geom, "geoms")
+             else list(floor.geom.geoms))
+    dia = None
+    for poly in polys:
+        for ring in poly.interiors:
+            rp = ShPolygon(ring)
+            if rp.centroid.distance(ShPoint(sp.at)) < 3.0:
+                dia = 2.0 * math.sqrt(rp.area / math.pi)
+    assert dia is not None
+    assert dia == pytest.approx(sp.screw_d + model.spec.screw_clearance,
+                                abs=0.15)
+
+    # while a board genuinely deep in the stack keeps its well
+    assert any(n.startswith("screw well for trellis_a") for n in floor.notes)
+
+
+def test_an_explicit_flush_head_still_wins_on_the_bottom_plate(lib):
+    """Asking for screw_inset=True is asking for the countersink, shallow
+    well or not -- the skip is a default, not a veto."""
+    scene = _supported(load_scene(SCENE), "from_floor", "pi")
+    next(p for p in scene.placements if p.id == "pi").screw_inset = True
+    model = build(resolve(scene, lib))
+    floor = model.layers[0]
+    assert any(n.startswith("countersink for pi") for n in floor.notes)

@@ -867,6 +867,7 @@ function renderCaseScrews() {
   const mode = c.case_screws || 'none';
   $('cs-mode').value = mode;
   $('cs-center').checked = !!c.case_screw_center;
+  $('cs-wells').checked = c.screw_wells !== false;   // default on
   for (const [id, key] of Object.entries(SCREW_FIELDS)) {
     const el = $(id);
     if (document.activeElement !== el) el.value = c[key] ?? '';
@@ -906,6 +907,11 @@ function wireCaseScrews() {
   $('cs-center').onchange = () => {
     edit();
     state.scene.case.case_screw_center = $('cs-center').checked;
+    push();
+  };
+  $('cs-wells').onchange = () => {
+    edit();
+    state.scene.case.screw_wells = $('cs-wells').checked;
     push();
   };
   for (const [id, key] of Object.entries(SCREW_FIELDS)) {
@@ -2202,7 +2208,7 @@ let VERSION = '?';
 // a cached app.js will report an old stamp here while the server reports the
 // new version beside it, and that mismatch is the whole diagnosis -- "it does
 // nothing when I click it" is what stale UI code looks like from outside.
-const UI_BUILD = '2026-08-24b';
+const UI_BUILD = '2026-08-24c';
 
 function wireTabs() {
   const tabs = [...document.querySelectorAll('.tabs .tab')];
