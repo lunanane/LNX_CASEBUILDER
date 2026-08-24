@@ -20,3 +20,8 @@ vendor/catalog/
 *-layers*.dxf
 *-render*.png
 *-photo*.png
+# ...and the sheet-split exports, whose names the patterns above miss
+*-sheet-*.svg
+*-sheet-*.dxf
+*-cutlist.txt
+export/
