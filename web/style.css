@@ -329,3 +329,18 @@ body:not(.rendering) .sunctl { opacity: .35; }
   border: 1px solid var(--line); border-radius: 3px; padding: 2px 5px;
 }
 #engrave-panel .eng-font, #engrave-panel .eng-align { width: auto; flex: 1; }
+
+
+/* the plate stock list in the case pane */
+#plate-list { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.plate-row { display: flex; gap: 5px; align-items: center; }
+.plate-row input {
+  width: 58px; background: var(--panel-2); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 3px; padding: 2px 5px; font: inherit;
+}
+.plate-row .pl-del {
+  padding: 0 6px; line-height: 1.4; border: 1px solid var(--line);
+  background: none; color: var(--dim);
+}
+.plate-row .pl-del:hover { color: var(--err); border-color: var(--err); }
+#btn-add-plate { margin: 2px 0 8px 62px; }

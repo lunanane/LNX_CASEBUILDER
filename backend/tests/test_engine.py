@@ -3608,8 +3608,8 @@ def _slab_case(sizes, sheet=(350.0, 350.0), margin=5.0, spacing=4.0):
 
     from hwcase.case import CaseModel, Layer
 
-    spec = CaseSpec(sheet_width=sheet[0], sheet_height=sheet[1],
-                    sheet_margin=margin, sheet_spacing=spacing)
+    plates = sheet if isinstance(sheet, list) else [sheet]
+    spec = CaseSpec(plates=plates, sheet_margin=margin, sheet_spacing=spacing)
     mat = Material(name="plywood-3mm", thickness=3.0, kerf=0.0)
     layers = [Layer(i, i * 3.0, i * 3.0 + 3.0,
                     "body", mat, shbox(0, 0, w, h))
@@ -3678,7 +3678,7 @@ def test_a_layer_bigger_than_the_bed_is_a_clear_error():
         pack_sheets(case)
     msg = str(err.value)
     assert "layer 0" in msg and "either orientation" in msg
-    assert "340 x 340" in msg, "the usable area, not the raw bed size"
+    assert "350 x 350" in msg, "the plate stock is named in the error"
 
 
 def test_engraving_rides_with_its_rotated_layer(lib):
@@ -3689,7 +3689,7 @@ def test_engraving_rides_with_its_rotated_layer(lib):
     from hwcase.case import CaseModel, Layer
     from hwcase.export import pack_sheets
 
-    spec = CaseSpec(sheet_width=350.0, sheet_height=100.0, sheet_margin=5.0)
+    spec = CaseSpec(plates=[(350.0, 100.0)], sheet_margin=5.0)
     mat = Material(name="plywood-3mm", thickness=3.0, kerf=0.0)
     layer = Layer(0, 0.0, 3.0, "lid", mat, shbox(0, 0, 80.0, 338.0))
     layer.engrave = shbox(10.0, 300.0, 70.0, 330.0)   # near the far end
@@ -3710,8 +3710,7 @@ def test_sheet_files_are_one_per_sheet_plus_the_cutlist(lib):
     from hwcase.export import pack_sheets, sheet_files
 
     model = build(resolve(load_scene(SCENE), lib))
-    model.spec.sheet_width = 400.0          # the fixture is 353 wide
-    model.spec.sheet_height = 400.0
+    model.spec.plates = [(400.0, 400.0)]    # the fixture is 353 wide
     sheets = pack_sheets(model)
     files = sheet_files(model, "svg", "fixture")
     assert len(files) == len(sheets) + 1
@@ -3739,8 +3738,7 @@ def test_the_sheets_zip_holds_every_file(lib):
     from hwcase.export import sheet_files, sheets_zip
 
     model = build(resolve(load_scene(SCENE), lib))
-    model.spec.sheet_width = 400.0
-    model.spec.sheet_height = 400.0
+    model.spec.plates = [(400.0, 400.0)]
     raw = sheets_zip(model, "dxf", "fixture")
     with zipfile.ZipFile(io.BytesIO(raw)) as z:
         assert sorted(z.namelist()) == sorted(
@@ -3771,8 +3769,7 @@ def test_write_all_emits_the_sheet_folder(lib, tmp_path):
     from hwcase.export import write_all
 
     scene = load_scene(SCENE)
-    scene.case = scene.case.model_copy(update={
-        "sheet_width": 400.0, "sheet_height": 400.0})
+    scene.case = scene.case.model_copy(update={"plates": [(400.0, 400.0)]})
     res = resolve(scene, lib)
     model = build(res)
     written = write_all(res, model, lib, tmp_path)
@@ -3784,3 +3781,88 @@ def test_write_all_emits_the_sheet_folder(lib, tmp_path):
     assert len(svgs) == len(sheets) - 1
     for p in sheets:
         assert p.exists() and p.stat().st_size > 0
+
+
+# ---------------------------------------------------------------------------
+# a stock of mixed plate sizes
+# ---------------------------------------------------------------------------
+
+def test_one_plate_size_serves_every_sheet():
+    """The default and the common case: one entry, taken for all."""
+    from hwcase.export import pack_sheets
+
+    case = _slab_case([(240.0, 131.0)] * 4)
+    sheets = pack_sheets(case)
+    assert {(s.width, s.height) for s in sheets} == {(350.0, 350.0)}
+
+
+def test_a_small_part_takes_the_offcut_not_a_fresh_sheet():
+    """The point of declaring the stock: the 60 mm ring goes on the offcut
+    from the last job instead of breaking a full plate for it."""
+    from hwcase.export import pack_sheets
+
+    case = _slab_case([(60.0, 60.0)],
+                      sheet=[(350.0, 350.0), (100.0, 100.0)])
+    sheets = pack_sheets(case)
+    assert len(sheets) == 1
+    assert (sheets[0].width, sheets[0].height) == (100.0, 100.0)
+
+
+def test_a_big_part_skips_the_offcut_it_cannot_fit():
+    from hwcase.export import pack_sheets
+
+    case = _slab_case([(300.0, 300.0), (60.0, 60.0)],
+                      sheet=[(350.0, 350.0), (100.0, 100.0)])
+    sheets = pack_sheets(case)
+    sizes = sorted((s.width, s.height) for s in sheets)
+    # the big part opened a full plate; the small one still fits beside it
+    # on the SAME open sheet, which beats opening the offcut
+    assert (350.0, 350.0) in sizes
+
+
+def test_minimising_consumed_area_can_prefer_many_small_plates():
+    """Material saving means area, not sheet count. Eleven offcuts of
+    150 x 150 are less material than two 350 x 350 sheets, and if the user
+    says they have that size available, using it is the optimisation they
+    asked for -- the cut list says how many to pull."""
+    from hwcase.export import pack_sheets, sheet_manifest
+
+    case = _slab_case([(120.0, 120.0)] * 4,
+                      sheet=[(350.0, 350.0), (150.0, 150.0)])
+    sheets = pack_sheets(case)
+    assert all((s.width, s.height) == (150.0, 150.0) for s in sheets)
+    assert len(sheets) == 4
+    manifest = sheet_manifest(sheets, case)
+    assert "pull from stock: 4 x 150 x 150 mm" in manifest
+
+
+def test_a_part_fitting_no_plate_names_the_whole_stock():
+    from hwcase.export import pack_sheets
+
+    case = _slab_case([(400.0, 380.0)],
+                      sheet=[(350.0, 350.0), (200.0, 300.0)])
+    with pytest.raises(ValueError) as err:
+        pack_sheets(case)
+    msg = str(err.value)
+    assert "350 x 350" in msg and "200 x 300" in msg
+    assert "fits none of the plates" in msg
+
+
+def test_plate_order_breaks_ties():
+    """Two plates of equal area: the one the user listed first wins, so the
+    stock order is meaningful and the output deterministic."""
+    from hwcase.export import pack_sheets
+
+    case = _slab_case([(80.0, 80.0)],
+                      sheet=[(200.0, 100.0), (100.0, 200.0)])
+    sheets = pack_sheets(case)
+    assert (sheets[0].width, sheets[0].height) == (200.0, 100.0)
+
+
+def test_an_empty_plate_list_is_refused():
+    from hwcase.export import pack_sheets
+
+    case = _slab_case([(60.0, 60.0)])
+    case.spec.plates = []
+    with pytest.raises(ValueError, match="no cutting plates"):
+        pack_sheets(case)

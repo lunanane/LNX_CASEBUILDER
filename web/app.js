@@ -49,6 +49,7 @@ async function applyScene(scene) {
   shellFor = placementsSig = issuesSig = null;
   $('sel-interior').value = state.scene.case?.interior || 'pocketed';
   renderCaseScrews();
+  renderPlates();
   renderRenderPanel();
   renderEngravePanel();
   await doResolve();
@@ -804,11 +805,61 @@ const SCREW_FIELDS = {
   'cs-spacing': 'case_screw_spacing',
   'cs-boss': 'case_screw_boss',
   'cs-min-seg': 'min_segment',
-  'cs-sheet-w': 'sheet_width',
-  'cs-sheet-h': 'sheet_height',
   'cs-sheet-margin': 'sheet_margin',
   'cs-sheet-gap': 'sheet_spacing',
 };
+
+/** The cutting plates you actually have.
+ *
+ *  One row is the ordinary case and is not removable -- a stock of zero
+ *  plates cuts nothing. `+ plate` adds a row seeded from the last one,
+ *  because the second entry is usually "same stock, and also this offcut".
+ */
+function renderPlates() {
+  const box = $('plate-list');
+  const c = state.scene?.case;
+  if (!box || !c) return;
+  if (!Array.isArray(c.plates) || !c.plates.length) c.plates = [[350, 350]];
+
+  box.innerHTML = '';
+  c.plates.forEach((plate, i) => {
+    const row = document.createElement('div');
+    row.className = 'plate-row';
+    row.innerHTML =
+      `<input type="number" class="pl-w" step="10" min="20" value="${plate[0]}">` +
+      `<span class="unit">x</span>` +
+      `<input type="number" class="pl-h" step="10" min="20" value="${plate[1]}">` +
+      `<span class="unit">mm</span>` +
+      (c.plates.length > 1
+        ? `<button class="pl-del" title="remove this plate size">&times;</button>`
+        : '');
+    const setDim = (idx, el) => {
+      const v = parseFloat(el.value);
+      if (!Number.isFinite(v) || v < 20) { renderPlates(); return; }
+      edit();
+      c.plates[i][idx] = v;
+    };
+    row.querySelector('.pl-w').onchange = (ev) => setDim(0, ev.target);
+    row.querySelector('.pl-h').onchange = (ev) => setDim(1, ev.target);
+    row.querySelector('.pl-del')?.addEventListener('click', () => {
+      edit();
+      c.plates.splice(i, 1);
+      renderPlates();
+    });
+    box.appendChild(row);
+  });
+}
+
+function wirePlates() {
+  $('btn-add-plate').onclick = () => {
+    const c = state.scene?.case;
+    if (!c) return;
+    edit();
+    const last = c.plates[c.plates.length - 1] ?? [350, 350];
+    c.plates.push([...last]);
+    renderPlates();
+  };
+}
 
 function renderCaseScrews() {
   const c = state.scene?.case;
@@ -1644,6 +1695,7 @@ async function loadScene(name) {
   history.clear();
   $('sel-interior').value = state.scene.case?.interior || 'pocketed';
   renderCaseScrews();
+  renderPlates();
   renderRenderPanel();
   renderEngravePanel();
   state.selection = null;
@@ -2150,7 +2202,7 @@ let VERSION = '?';
 // a cached app.js will report an old stamp here while the server reports the
 // new version beside it, and that mismatch is the whole diagnosis -- "it does
 // nothing when I click it" is what stale UI code looks like from outside.
-const UI_BUILD = '2026-08-24a';
+const UI_BUILD = '2026-08-24b';
 
 function wireTabs() {
   const tabs = [...document.querySelectorAll('.tabs .tab')];
@@ -2755,6 +2807,7 @@ function buildEngravings(caseModel) {
   wireMenus();
   wireTabs();
   wireHelp();
+  wirePlates();
   renderRenderPanel();
   renderEngravePanel();
   try {

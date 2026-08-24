@@ -528,12 +528,14 @@ class CaseSpec(Strict):
     link_cables: bool = True
     cable_channel: float = 6.0
 
-    #: The laser bed. Exports are split into one file per sheet, each part
-    #: placed inside this area minus the margin, rotated 90 degrees when that
-    #: packs better. 350 x 350 suits the common desktop machines; set it to
-    #: your bed.
-    sheet_width: float = 350.0
-    sheet_height: float = 350.0
+    #: The cutting plates you actually have, as (width, height) in mm.
+    #: Exports are split into one file per plate-load: each part goes inside a
+    #: plate minus the margin, rotated 90 degrees when that packs better.
+    #: One entry means "any number of plates of this size"; several entries
+    #: describe a real stock of mixed sizes -- full sheets and the offcuts
+    #: from the last job -- and the packer opens whichever size wastes least.
+    #: 350 x 350 suits the common desktop machines.
+    plates: list[Vec2] = Field(default_factory=lambda: [(350.0, 350.0)])
     #: keep-out from the sheet edge, where clamps live and focus drifts
     sheet_margin: float = 5.0
     #: air between neighbouring parts on a sheet

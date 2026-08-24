@@ -387,12 +387,22 @@ and eleven layers do not fit on it. Export now splits the cut into
 **bed-sized sheets** — one file per bed-load, plus a `cutlist.txt` naming
 which layer is on which sheet, its size, and whether it was rotated.
 
-The **sheet** section of the case pane sets the bed (350 x 350 default), the
-edge margin (5 mm — clamps live there and focus drifts), and the spacing
-between parts (4 mm). Parts are shelf-packed tallest-first and rotated 90°
-automatically when that fits better; a layer that fits the bed no way round
-is refused with its size and the usable area in the message, because
-silently dropping a floor plate is not an export.
+The **sheet** section of the case pane holds the **plate stock**: the sizes
+you actually have on the shelf. One entry (350 x 350 default) is the
+ordinary case — every sheet that size. `+ plate` adds more: full sheets plus
+the offcuts from the last job. When a part needs a fresh plate the packer
+starts the **smallest one that holds it**; parts are placed largest-first,
+so offcuts get consumed by exactly the work that fits them instead of a
+full sheet being broken for a 60 mm ring. Material saving means *area*, not
+sheet count — with a small size declared available, many small plates can
+legitimately beat few big ones, and the cut list opens with a
+`pull from stock:` line saying how many of each size to fetch.
+
+Margin (5 mm — clamps live there and focus drifts) and part spacing (4 mm)
+apply to every plate. Parts are shelf-packed tallest-first and rotated 90°
+automatically when that fits better; a layer that fits **no plate** either
+way round is refused with its size and the whole stock in the message,
+because silently dropping a floor plate is not an export.
 
 Each sheet file is exactly the bed size, with the sheet outline in **grey**
 in its own group/layer (align it, don't cut it), cuts in **red**, engraving

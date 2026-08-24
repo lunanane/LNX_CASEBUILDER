@@ -168,9 +168,9 @@
 
       <h2>sheet</h2>
       <div id="case-sheet">
-        <div class="field"><label title="your laser bed. Exports are split into one file per sheet; parts are rotated 90&deg; when that packs tighter">bed</label>
-          <input type="number" id="cs-sheet-w" step="10" min="50">
-          <input type="number" id="cs-sheet-h" step="10" min="50"><span class="unit">mm</span></div>
+        <div class="field"><label title="the cutting plates you actually have. One entry: every sheet is that size. More entries: full sheets plus the offcuts from the last job, and the packer uses whichever wastes least material">plates</label>
+          <div id="plate-list"></div></div>
+        <button id="btn-add-plate" title="add another available plate size">+ plate</button>
         <div class="field"><label title="keep-out from the sheet edge, where clamps live and focus drifts">margin</label>
           <input type="number" id="cs-sheet-margin" step="1" min="0"><span class="unit">mm</span></div>
         <div class="field"><label title="air between neighbouring parts on a sheet">spacing</label>

@@ -292,19 +292,36 @@ def _placed(geom, rotated: bool, tx: float, ty: float):
 
 
 def pack_sheets(case: CaseModel, apply_kerf: bool = True) -> list[PackedSheet]:
-    """Split the layers across bed-sized sheets.
+    """Split the layers across the available cutting plates.
 
     Tallest-part-first shelf packing with 90-degree rotation. Within a shelf
     the orientation that wastes the least shelf height wins; a part that only
-    fits one way round is turned automatically. A layer that fits no way
-    round is a hard error naming the layer and the usable area -- silently
-    dropping a floor plate is not an export.
+    fits one way round is turned automatically.
+
+    `spec.plates` lists the plate sizes actually on the shelf -- one entry is
+    the ordinary "a stack of 350 x 350" case, several describe a mixed stock
+    of full sheets and offcuts. When a part fits no open sheet, a new plate is
+    started: the SMALLEST usable area that still holds the part. Parts arrive
+    largest first, so the part being placed is the biggest still unplaced,
+    and the small offcuts get consumed by exactly the work that fits them
+    instead of a full sheet being broken for a 60 mm boss ring.
+
+    A layer that fits no plate in either orientation is a hard error naming
+    the layer and every plate -- silently dropping a floor plate is not an
+    export.
     """
     spec = case.spec
     margin = max(0.0, spec.sheet_margin)
     gap = max(0.0, spec.sheet_spacing)
-    usable_w = spec.sheet_width - 2 * margin
-    usable_h = spec.sheet_height - 2 * margin
+    if not spec.plates:
+        raise ValueError("no cutting plates defined -- add at least one size")
+    #: (plate_w, plate_h, usable_w, usable_h), as declared
+    plates = [(pw, ph, pw - 2 * margin, ph - 2 * margin)
+              for pw, ph in spec.plates]
+
+    def fits_plate(w: float, h: float, uw: float, uh: float) -> bool:
+        return (w <= uw + 1e-9 and h <= uh + 1e-9) or \
+               (h <= uw + 1e-9 and w <= uh + 1e-9)
 
     parts = []
     for layer in case.layers:
@@ -314,22 +331,21 @@ def pack_sheets(case: CaseModel, apply_kerf: bool = True) -> list[PackedSheet]:
             continue
         x0, y0, x1, y1 = geom.bounds
         w, h = x1 - x0, y1 - y0
-        if not ((w <= usable_w and h <= usable_h)
-                or (h <= usable_w and w <= usable_h)):
+        if not any(fits_plate(w, h, uw, uh) for _pw, _ph, uw, uh in plates):
+            stock = ", ".join(f"{pw:.0f} x {ph:.0f}" for pw, ph, _u, _v in plates)
             raise ValueError(
                 f"layer {layer.index} ({layer.role}) is {w:.0f} x {h:.0f} mm "
-                f"and the usable sheet is only {usable_w:.0f} x {usable_h:.0f} "
-                f"({spec.sheet_width:.0f} x {spec.sheet_height:.0f} minus the "
-                f"{margin:.0f} mm margin) -- it cannot be cut on this bed in "
-                f"either orientation")
+                f"and fits none of the plates ({stock}, each minus the "
+                f"{margin:.0f} mm margin) in either orientation -- it cannot "
+                f"be cut from this stock")
         parts.append((layer, geom, w, h))
 
     # Tallest first: shelf height is set by the tallest part in the row, so
     # placing tall parts together keeps short rows short.
     parts.sort(key=lambda p: (-max(p[2], p[3]), p[0].index))
 
-    # a shelf: [y, height, x-cursor]; a sheet: its list of shelves
-    sheets: list[list[list[float]]] = []
+    # a shelf: [y, height, x-cursor]; a sheet: its shelves + its usable size
+    sheets: list[dict] = []
     out: list[PackedSheet] = []
 
     def orientations(w: float, h: float):
@@ -339,34 +355,41 @@ def pack_sheets(case: CaseModel, apply_kerf: bool = True) -> list[PackedSheet]:
 
     for layer, geom, w, h in parts:
         best = None  # (waste, sheet_i, shelf_i | None, rotated, pw, ph)
-        for si, shelves in enumerate(sheets):
+        for si, sheet in enumerate(sheets):
+            shelves, uw, uh = sheet["shelves"], sheet["uw"], sheet["uh"]
             for hi, (sy, sh, sx) in enumerate(shelves):
                 for rotated, pw, ph in orientations(w, h):
-                    if ph <= sh + 1e-9 and sx + pw <= usable_w + 1e-9:
+                    if ph <= sh + 1e-9 and sx + pw <= uw + 1e-9:
                         cand = (sh - ph, si, hi, rotated, pw, ph)
                         if best is None or cand < best:
                             best = cand
             # a new shelf on this sheet, below the existing ones
             top = shelves[-1][0] + shelves[-1][1] + gap if shelves else 0.0
             for rotated, pw, ph in orientations(w, h):
-                if pw <= usable_w + 1e-9 and top + ph <= usable_h + 1e-9:
+                if pw <= uw + 1e-9 and top + ph <= uh + 1e-9:
                     cand = (ph * 0.01, si, None, rotated, pw, ph)
                     if best is None or cand < best:
                         best = cand
 
         if best is None:
-            # a fresh sheet; flattest orientation first so the shelf is short
+            # No open sheet takes it: start the smallest plate that does.
+            # Ties (same area) break towards the earlier list entry, so the
+            # order the user wrote their stock in is meaningful and the result
+            # stays deterministic.
+            pw_, ph_, uw, uh = min(
+                (p for p in plates if fits_plate(w, h, p[2], p[3])),
+                key=lambda p: (p[2] * p[3], plates.index(p)))
+            # flattest orientation first so the opening shelf is short
             rotated, pw, ph = min(
-                ((r, pw, ph) for r, pw, ph in orientations(w, h)
-                 if pw <= usable_w + 1e-9 and ph <= usable_h + 1e-9),
+                ((r, ow, oh) for r, ow, oh in orientations(w, h)
+                 if ow <= uw + 1e-9 and oh <= uh + 1e-9),
                 key=lambda o: o[2])
-            sheets.append([])
-            out.append(PackedSheet(len(out), spec.sheet_width,
-                                   spec.sheet_height))
+            sheets.append({"shelves": [], "uw": uw, "uh": uh})
+            out.append(PackedSheet(len(out), pw_, ph_))
             best = (0.0, len(sheets) - 1, None, rotated, pw, ph)
 
         _waste, si, hi, rotated, pw, ph = best
-        shelves = sheets[si]
+        shelves = sheets[si]["shelves"]
         if hi is None:
             sy = shelves[-1][0] + shelves[-1][1] + gap if shelves else 0.0
             shelves.append([sy, ph, 0.0])
@@ -474,17 +497,26 @@ def sheet_to_dxf_text(sheet: PackedSheet) -> str:
 def sheet_manifest(sheets: list[PackedSheet], case: CaseModel) -> str:
     """The paper that goes to the machine with the files."""
     spec = case.spec
+    # what to actually pull from the shelf, per size
+    counts: dict[tuple[float, float], int] = {}
+    for sheet in sheets:
+        counts[(sheet.width, sheet.height)] =             counts.get((sheet.width, sheet.height), 0) + 1
+    pull = ", ".join(f"{n} x {pw:.0f} x {ph:.0f} mm"
+                     for (pw, ph), n in sorted(counts.items(), reverse=True))
+
     lines = [
-        f"cut list -- {len(sheets)} sheet(s) of "
-        f"{spec.sheet_width:.0f} x {spec.sheet_height:.0f} mm, "
-        f"{spec.sheet_margin:.0f} mm edge margin, "
+        f"cut list -- {len(sheets)} sheet(s), plate stock "
+        + " / ".join(f"{pw:.0f} x {ph:.0f}" for pw, ph in spec.plates)
+        + f" mm, {spec.sheet_margin:.0f} mm edge margin, "
         f"{spec.sheet_spacing:.0f} mm between parts",
+        f"pull from stock: {pull}",
         "red = cut, blue = engrave (mark only), grey = sheet outline "
         "(align, do not cut)",
         "",
     ]
     for sheet in sheets:
-        lines.append(f"sheet {sheet.index + 1}:")
+        lines.append(f"sheet {sheet.index + 1} "
+                     f"({sheet.width:.0f} x {sheet.height:.0f} mm):")
         for pl in sheet.placements:
             layer = pl.layer
             x0, y0, x1, y1 = pl.geom.bounds
