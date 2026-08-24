@@ -12,7 +12,17 @@ parts:
       spec and the 60 mm tiling grid -- two of these are exactly 120 x 60, with
       the button pitch continuous across the seam. The elastomer pad
       (adafruit-1611-keypad) mates on top.
-      Mounting hole positions are still guessed; the mesh has no holes modelled.
+      The underside is measured off the mesh by body-splitting, and it is NOT
+      a slab: sixteen 3.5 x 3.5 x 1.2 mm solder-tail bumps on the button grid
+      and bare PCB everywhere else. The board is meant to be sandwiched -- the
+      elastomer pressed by the faceplate, the PCB resting on the layer below
+      -- so the bare regions are the seating surface and each bump gets its
+      own pocket. The eight M2.5 holes hold the ELASTOMER, they are not case
+      mounting points.
+      The i2c_plugs volume is the one thing the mesh cannot know: connectors
+      hand-soldered in the centre of the board, with their mated plugs. Its
+      footprint and depth are estimates -- measure the real soldered pair and
+      tighten it.
     src:
       confidence: datasheet
       url: https://github.com/adafruit/Adafruit_CAD_Parts
@@ -43,12 +53,31 @@ parts:
         size: [60.0, 60.0]
         z: [1.6, 7.57]
         src: {confidence: datasheet, note: "from Adafruit NeoTrellis 4x4 v2.stl"}
-      - name: underside
+      # The measured truth of the underside: sixteen solder-tail bumps on the
+      # 15 mm button grid, one pocket each, and NOTHING else cut -- the bare
+      # PCB between them rests on the layer below, which is what keeps a
+      # tightly-packed board flat instead of hanging on its tallest bump.
+      - name: tails
+        kind: body
+        at: [7.5, 7.5]
+        size: [3.5, 3.5]
+        z: [-1.2, 0.0]
+        repeat: {count: [4, 4], pitch: [15.0, 15.0]}
+        src: {confidence: datasheet, note: "16 bodies in the vendor mesh, 3.5 x 3.5 x 1.2 at the button pitch"}
+      # Hand-soldered I2C connectors in the centre, with their mated plugs.
+      # Deep enough to need the next layer down as well, so the build gives
+      # them their own pocket one layer deeper than the seating surface.
+      - name: i2c_plugs
         kind: body
         at: [30.0, 30.0]
-        size: [60.0, 60.0]
-        z: [-2.5, 0.0]
-        src: {confidence: estimated, note: "seesaw MCU + solder tails"}
+        size: [16.0, 9.0]
+        z: [-4.8, 0.0]
+        src:
+          confidence: estimated
+          note: >-
+            MEASURE ME: the vendor mesh is the bare board, these are soldered
+            on. Sized for a side-entry JST-PH pair with plugs; the depth is
+            what makes the pocket go one layer deeper.
 
     connectors:
       - name: i2c_left

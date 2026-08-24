@@ -4123,3 +4123,77 @@ def test_an_explicit_flush_head_still_wins_on_the_bottom_plate(lib):
     model = build(resolve(scene, lib))
     floor = model.layers[0]
     assert any(n.startswith("countersink for pi") for n in floor.notes)
+
+
+# ---------------------------------------------------------------------------
+# the trellis seats on its bare underside, plugs one layer deeper
+# ---------------------------------------------------------------------------
+
+def test_the_trellis_underside_is_bodies_not_a_slab(lib):
+    """The vendor mesh shows sixteen 3.5 mm solder tails and bare PCB, not
+    the 60 x 60 x 2.5 estimated slab the model used to claim. A tightly
+    packed board rests on the layer below it, so the bare regions are the
+    seating surface -- a blanket volume was throwing all of it away."""
+    part = lib["adafruit-3954-neotrellis"]
+    names = [v.name for v in part.volumes]
+    assert "underside" not in names, "the blanket slab is back"
+    tails = next(v for v in part.volumes if v.name == "tails")
+    assert tails.repeat is not None
+    assert tuple(tails.repeat.count) == (4, 4)
+    assert tuple(tails.repeat.pitch) == (15.0, 15.0)
+    plugs = next(v for v in part.volumes if v.name == "i2c_plugs")
+    assert min(plugs.z) < -3.0, "the plugs must need the next layer down"
+
+
+def test_the_trellis_seats_on_real_material(lib):
+    """The point of the remodel: the layer directly under the PCB carries
+    most of the board instead of being hollowed to nothing."""
+    from shapely.ops import unary_union
+
+    scene = load_scene(SCENE)
+    res = resolve(scene, lib)
+    model = build(res)
+
+    pcb = unary_union([s.poly for s in res.solids
+                       if s.placement == "trellis_a" and s.name == "pcb"])
+    board_bottom = min(s.z[0] for s in res.solids
+                       if s.placement == "trellis_a" and s.name == "pcb")
+    seat = max((l for l in model.layers if l.z1 <= board_bottom + 1e-6),
+               key=lambda l: l.z1)
+    frac = seat.geom.intersection(pcb).area / pcb.area
+    assert frac > 0.6, (
+        f"only {frac:.0%} of the seating layer is there -- the board would "
+        f"hang on its bumps instead of resting flat")
+
+
+def test_the_plug_pocket_reaches_exactly_as_deep_as_the_plug(lib):
+    """Separate cutout, with clearance, exactly as deep as the plug needs --
+    and no further, or the pocket is just a hole to lose a plug in.
+
+    Not "one layer" by count: how many layers a 4.8 mm plug needs depends on
+    where the board lands on the slab grid, and the fixture and the live
+    scene land differently. The property is the depth, not the count.
+    """
+    from shapely.geometry import Point as ShPoint
+
+    scene = load_scene(SCENE)
+    res = resolve(scene, lib)
+    model = build(res)
+
+    frame = res.frames["trellis_a"]
+    cx, cy, _ = frame.point((30.0, 30.0, 0.0))
+    plug = next(s for s in res.solids
+                if s.placement == "trellis_a" and s.name == "i2c_plugs")
+    disc = ShPoint(cx, cy).buffer(1.5)
+
+    for layer in model.layers:
+        if layer.z0 >= plug.z[1] - 1e-6:
+            continue                          # at or above the board: not ours
+        covered = layer.geom.intersection(disc).area / disc.area
+        if min(layer.z1, plug.z[1]) - max(layer.z0, plug.z[0]) > 1e-6:
+            assert covered < 0.2, (
+                f"layer {layer.index} blocks the plug at its own depth")
+        elif layer.z1 <= plug.z[0] + 1e-6:
+            assert covered > 0.8, (
+                f"layer {layer.index} is open below the plug -- the pocket "
+                f"does not bottom out")

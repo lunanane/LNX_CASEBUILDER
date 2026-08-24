@@ -102,6 +102,7 @@ placements:
   rot_z: 180.0
   panel_offset: 3.0
   support: from_lid
+  screw_inset: false
 - id: oled
   part: adafruit-4741-oled-1v5
   pos: [54.8, 53.1, 0.0]
@@ -125,6 +126,7 @@ placements:
   sides:
   - side: +y
     span: full
+  screw_inset: true
 - id: amy
   part: shorepine-amyboard
   pos: [124.1, 5.2, 0.0]
@@ -138,3 +140,4 @@ placements:
     include: [usb_c]
     margin: 7.0
     span: full
+  screw_inset: false
