@@ -558,6 +558,36 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
                 poly, zi = frame.place(box_polygon(v, inst_at), (v.z_min(), v.z_max()))
                 solids.append(Solid(pl.id, part.id, inst_name, v.kind, poly, zi, v.src))
 
+        # The space between a mated child and its parent is unbuildable: the
+        # two boards are plugged together BEFORE the unit goes into the case,
+        # so no sheet can ever be slid between them -- or under the child's
+        # overhang inside the shared footprint, since the unit is lowered in
+        # as one piece. Modelled as a keepout over the union of both
+        # outlines, it cuts pockets like any solid and keeps tie ribs out.
+        # A flush mate (the silicone pad glued straight onto the trellis)
+        # has no gap and gets none.
+        if pl.parent:
+            parent_pl = by_id[pl.parent]
+            parent_part = lib[parent_pl.part]
+            p_poly, p_z = frames[pl.parent].place(
+                outline_polygon(parent_part.outline),
+                (0.0, parent_part.pcb_thickness))
+            c_poly, c_z = frame.place(outline_polygon(part.outline),
+                                      (0.0, part.pcb_thickness))
+            if c_z[0] >= p_z[1] - 1e-6:
+                gap = (p_z[1], c_z[0])
+            elif p_z[0] >= c_z[1] - 1e-6:
+                gap = (c_z[1], p_z[0])
+            else:
+                gap = None
+            if gap and gap[1] - gap[0] > 0.5:
+                solids.append(Solid(
+                    pl.id, part.id, "mate_space", VolumeKind.keepout,
+                    unary_union([p_poly, c_poly]), gap,
+                    Source(confidence=Confidence.measured,
+                           note="derived: nothing can be assembled between "
+                                "mated boards")))
+
         if pl.support != Support.none:
             if not part.holes:
                 issues.append(Issue(

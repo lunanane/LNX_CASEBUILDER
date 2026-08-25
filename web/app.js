@@ -805,6 +805,7 @@ const SCREW_FIELDS = {
   'cs-spacing': 'case_screw_spacing',
   'cs-boss': 'case_screw_boss',
   'cs-min-seg': 'min_segment',
+  'cs-cable': 'cable_channel',
   'cs-sheet-margin': 'sheet_margin',
   'cs-sheet-gap': 'sheet_spacing',
 };
@@ -2208,7 +2209,7 @@ let VERSION = '?';
 // a cached app.js will report an old stamp here while the server reports the
 // new version beside it, and that mismatch is the whole diagnosis -- "it does
 // nothing when I click it" is what stale UI code looks like from outside.
-const UI_BUILD = '2026-08-24c';
+const UI_BUILD = '2026-08-25a';
 
 function wireTabs() {
   const tabs = [...document.querySelectorAll('.tabs .tab')];

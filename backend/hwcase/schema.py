@@ -528,14 +528,20 @@ class CaseSpec(Strict):
     screw_head: float = 6.5
     #: width of the strut tying an otherwise free-standing boss back to
     #: material -- a ring floating in a hollow layer is an offcut, not a post
-    support_rib: float = 4.0
+    #: A whisker above min_segment on purpose: a rib at exactly the minimum
+    #: is mathematically zero after the width check's erosion, and a tie that
+    #: the width rules cannot vouch for defeats its own purpose.
+    support_rib: float = 5.0
 
     #: Every internal lead has to be able to get from its board to the next
     #: one. Whatever the interior strategy carves, the empty space around the
     #: internal connectors is checked for connectivity, and a channel this wide
     #: is cut wherever a board would otherwise be walled in on its own.
     link_cables: bool = True
-    cable_channel: float = 6.0
+    #: Width of the channels carved so internal leads can reach each other.
+    #: 5 mm passes an I2C/STEMMA lead with its plug; wider just costs more
+    #: material and more thin-neck trouble beside the pockets.
+    cable_channel: float = 5.0
 
     #: The cutting plates you actually have, as (width, height) in mm.
     #: Exports are split into one file per plate-load: each part goes inside a

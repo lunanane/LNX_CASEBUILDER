@@ -2241,7 +2241,8 @@ def test_every_hole_in_the_wall_is_deliberate(demo, interior):
 
         from shapely.geometry import box as _box
         for n in layer.notes:
-            m = _re.search(r"falls away \[([-\d.]+),([-\d.]+),"
+            m = _re.search(r"(?:falls away|thinner than [\d.]+ mm) "
+                           r"\[([-\d.]+),([-\d.]+),"
                            r"([-\d.]+),([-\d.]+)\]", n)
             if m:
                 x0, y0, x1, y1 = map(float, m.groups())
@@ -4182,19 +4183,23 @@ def test_an_explicit_flush_head_still_wins_on_the_bottom_plate(lib):
 # the trellis seats on its bare underside, plugs one layer deeper
 # ---------------------------------------------------------------------------
 
-def test_the_trellis_underside_is_bodies_not_a_slab(lib):
-    """The vendor mesh shows sixteen 3.5 mm solder tails and bare PCB, not
-    the 60 x 60 x 2.5 estimated slab the model used to claim. A tightly
-    packed board rests on the layer below it, so the bare regions are the
-    seating surface -- a blanket volume was throwing all of it away."""
+def test_the_trellis_underside_is_flat_plus_plugs(lib):
+    """The board's underside is FLAT apart from the hand-soldered centre
+    plugs. It was briefly modelled with sixteen 'solder tail' bumps read out
+    of the vendor mesh -- but that mesh includes the elastomer pad assembly
+    built component-side toward negative z, and the bumps are the silicone
+    pad's contact pills sitting on TOP of the PCB. The owner of the physical
+    boards caught it: mesh orientation has to be checked, not assumed, which
+    is the same lesson the 1.5-inch OLED taught and this un-learned."""
     part = lib["adafruit-3954-neotrellis"]
     names = [v.name for v in part.volumes]
     assert "underside" not in names, "the blanket slab is back"
-    tails = next(v for v in part.volumes if v.name == "tails")
-    assert tails.repeat is not None
-    assert tuple(tails.repeat.count) == (4, 4)
-    assert tuple(tails.repeat.pitch) == (15.0, 15.0)
-    plugs = next(v for v in part.volumes if v.name == "i2c_plugs")
+    assert "tails" not in names, "the phantom elastomer pills are back"
+
+    below = [v for v in part.volumes if min(v.z) < -1e-6]
+    assert [v.name for v in below] == ["i2c_plugs"], (
+        "nothing hangs under this board but the plugs the user soldered")
+    plugs = below[0]
     assert min(plugs.z) < -3.0, "the plugs must need the next layer down"
 
 
@@ -4286,10 +4291,12 @@ def test_no_big_piece_ships_loose_silently(lib, interior):
         assert len(big) - 1 <= len(loose_notes), (
             f"layer {layer.index} ships {len(big)} big pieces with only "
             f"{len(loose_notes)} LOOSE notes -- something is adrift silently")
-    if interior == "pocketed":
-        # the common mode has no such bind and must come out whole
-        for layer in model.layers:
-            assert len(_big_pieces(layer, scene.case.min_island)) <= 1
+    # There is no interior mode that guarantees zero loose pieces: the bind
+    # is scene topology, not hollowing strategy. This fixture's mate-gap
+    # keepout (nothing assembles between the pi and its screen) strands the
+    # wall strip beside the screen's overhang in EVERY mode -- a claim that
+    # "pocketed always comes out whole" lasted less than an hour against it.
+    # Accountability is the invariant; wholeness is a property of a layout.
 
 
 def test_scrap_between_openings_falls_away(lib):
@@ -4408,3 +4415,126 @@ def test_real_interference_is_still_an_error(lib):
     issues = _two_boards_overlapping_by(lib, 1.5)
     assert any(i.code == "collision" and i.level == "error" for i in issues)
     assert not any(i.code == "graze" for i in issues)
+
+
+# ---------------------------------------------------------------------------
+# nothing can be assembled between mated boards
+# ---------------------------------------------------------------------------
+
+def test_mated_boards_get_an_unbuildable_gap_keepout(lib):
+    """The pi and its screen are plugged together BEFORE the unit goes in, so
+    no sheet can ever be slid between them. The old tie pass hid this by
+    dropping the impossible islands; the new one dutifully ribbed them back
+    in -- a staircase of plywood between the pi and the touch screen,
+    reachable only through the port cutout. The gap is a keepout now."""
+    scene = load_scene(SCENE)
+    res = resolve(scene, lib)
+
+    gaps = [s for s in res.solids if s.name == "mate_space"]
+    assert gaps, "no mate gaps resolved"
+    screen_gap = next(s for s in gaps if s.placement == "screen")
+    assert screen_gap.kind is VolumeKind.keepout
+    # spans from the pi's pcb top to the screen's pcb bottom
+    pi_top = max(s.z[1] for s in res.solids
+                 if s.placement == "pi" and s.name == "pcb")
+    screen_bottom = min(s.z[0] for s in res.solids
+                        if s.placement == "screen" and s.name == "pcb")
+    assert screen_gap.z[0] == pytest.approx(pi_top, abs=1e-6)
+    assert screen_gap.z[1] == pytest.approx(screen_bottom, abs=1e-6)
+
+    # and the build honours it: no material anywhere in the gap
+    model = build(res)
+    worst = 0.0
+    for layer in model.layers:
+        if min(layer.z1, screen_gap.z[1]) - max(layer.z0, screen_gap.z[0]) <= 1e-6:
+            continue
+        worst = max(worst, layer.geom.intersection(screen_gap.poly).area)
+    assert worst < 1.0, (
+        f"{worst:.0f} mm2 of material between the pi and its screen -- "
+        f"that cannot be assembled")
+
+
+def test_a_flush_mate_gets_no_gap_keepout(lib):
+    """The silicone pad sits straight on the trellis buttons with next to no
+    gap between the relevant faces -- a keepout there would be noise. Only
+    real gaps (deeper than half a millimetre) count."""
+    scene = load_scene(SCENE)
+    res = resolve(scene, lib)
+    for s in res.solids:
+        if s.name == "mate_space":
+            assert s.z[1] - s.z[0] > 0.5
+
+
+def test_tie_ribs_stay_out_of_keepouts(lib):
+    """A keepout is reserved space -- an antenna, a flex loop, the mate gap.
+    The pockets cut it out; the ties must not put it back."""
+    from shapely.ops import unary_union
+
+    scene = load_scene(SCENE)
+    res = resolve(scene, lib)
+    model = build(res)
+    for layer in model.layers:
+        keeps = [s.poly for s in res.solids
+                 if s.kind is VolumeKind.keepout
+                 and min(s.z[1], layer.z1) - max(s.z[0], layer.z0) > 1e-6]
+        if not keeps:
+            continue
+        inside = layer.geom.intersection(unary_union(keeps)).area
+        assert inside < 1.0, (
+            f"layer {layer.index}: {inside:.0f} mm2 of material in keepouts")
+
+
+# ---------------------------------------------------------------------------
+# the minimum width holds on the FINISHED plates
+# ---------------------------------------------------------------------------
+
+def _significant_thin_necks(model, res, w):
+    """Sub-minimum material in the final geometry, excluding what is thin on
+    purpose: boss rings and collars (protected), button-grid webs and other
+    sub-60 mm2 fragments between specified openings."""
+    from shapely.geometry import Point as ShPoint
+
+    guards = [ShPoint(sp.at) for sp in res.supports]
+    out = []
+    for layer in model.layers:
+        opened = (layer.geom.buffer(-w / 2, join_style=1)
+                  .buffer(w / 2, join_style=1).intersection(layer.geom))
+        lost = layer.geom.difference(opened)
+        for piece in (lost.geoms if hasattr(lost, "geoms") else [lost]):
+            if piece.area <= 60.0:
+                continue
+            if any(piece.distance(pt) < 8.0 for pt in guards):
+                continue
+            if piece.buffer(0.05).intersects(model.outer.exterior):
+                # the perimeter ring is deliberately whatever thickness the
+                # user chose -- the engine exempts it, and so does this check
+                continue
+            out.append((layer.index, piece.area))
+    return out
+
+
+@pytest.mark.parametrize("interior", ["pocketed", "hollow", "ribs", "grown"])
+def test_the_finished_plates_carry_no_snappable_necks(lib, interior):
+    """The first opening pass runs before breaches, bolt holes and the cable
+    carve, so every one of them could leave a neck thinner than min_segment
+    that nothing re-checked -- the shipped sheets had dozens, visible as
+    hairlines in the export. A second pass now runs on the final carved
+    geometry, and the web rule only spares material between SPECIFIED
+    openings: every neck lies between two voids of some kind, and treating
+    them all as webs kept a hundred snappable hairlines per case."""
+    scene = load_scene(SCENE)
+    scene.case = scene.case.model_copy(update={"interior": interior})
+    res = resolve(scene, lib)
+    model = build(res)
+    necks = _significant_thin_necks(model, res, scene.case.min_segment)
+    assert not necks, f"snappable necks remain: {necks[:6]}"
+
+
+def test_button_webs_still_survive_the_late_pass(lib):
+    """The keypad's 3.8 mm webs between 32 specified button holes are the
+    reason the web rule exists; the late pass must not eat them."""
+    scene = load_scene(SCENE)
+    model = build(resolve(scene, lib))
+    lid = model.layers[-1]
+    webs = [n for n in lid.notes if "web between" in n]
+    assert webs, "the button grid webs went missing"

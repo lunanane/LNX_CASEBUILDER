@@ -570,7 +570,8 @@ def _case_screw_bosses(res: Resolved, spec: CaseSpec, outer: Polygon,
         return []
 
     blocking = [s.poly for s in res.solids
-                if s.kind is VolumeKind.body and z_overlap(s.z, slab) > 0]
+                if s.kind in (VolumeKind.body, VolumeKind.keepout)
+                and z_overlap(s.z, slab) > 0]
     keepout = (unary_union(blocking).buffer(spec.part_clearance, join_style=2)
                if blocking else None)
 
@@ -748,8 +749,17 @@ def _keep_a_wall(res: Resolved, spec: CaseSpec, outer: Polygon, geom,
     return geom.union(band)
 
 
+#: An opening bigger than this is hollowing, not a specified hole. The
+#: biggest hole anyone drills on purpose here is a display window; the
+#: things this protects webs between -- button holes, port cutouts, screw
+#: seats -- are all far smaller.
+SPECIFIED_OPENING = 500.0
+
+
 def _open_out_slivers(geom, spec: CaseSpec, notes: list[str],
-                      cuts: list[Polygon] | None = None):
+                      cuts: list[Polygon] | None = None,
+                      protect: list[Polygon] | None = None,
+                      wall=None):
     """Remove material too narrow to survive -- but never by reshaping a hole.
 
     A morphological opening finds anything thinner than `min_segment`. What is
@@ -781,14 +791,38 @@ def _open_out_slivers(geom, spec: CaseSpec, notes: list[str],
     if lost.is_empty:
         return opened
 
-    openings = _pieces(unary_union(cuts)) if cuts else []
+    # Only SPECIFIED openings earn a web between them: a button hole or a
+    # port cutout has a designed dimension, and two of them too close is a
+    # layout fact to report. A hollowed pocket or a cable carve has no such
+    # dignity -- every thin neck in a layer lies between two voids of some
+    # kind, and treating them all as webs kept a hundred snappable hairlines
+    # per case. The size is the discriminator: specified holes are small.
+    openings = [o for o in (_pieces(unary_union(cuts)) if cuts else [])
+                if o.area < SPECIFIED_OPENING]
+    guarded = unary_union(protect) if protect else None
     keep: list[Polygon] = []
     removed = 0.0
     for piece in _pieces(lost):
         if piece.area < 1e-9:
             continue
+        if guarded is not None and piece.intersects(guarded):
+            # a boss ring or bolt collar: legitimately narrower than the
+            # minimum, and the very thing holding a board up
+            keep.append(piece)
+            continue
+        if wall is not None and piece.buffer(0.05).intersects(wall):
+            # the perimeter ring is deliberate geometry at whatever thickness
+            # the user chose -- a 3 mm wall is thinner than a 4 mm minimum
+            # segment on every layer, and is not the pass's to eat. Scrap
+            # between two ports still falls via its own blessed path.
+            keep.append(piece)
+            continue
         between = [o for o in openings if piece.buffer(0.05).intersects(o)]
-        if len(between) >= 2:
+        # ...and short: the webs worth keeping are the stubs between two
+        # neighbouring holes (a button web is 11 mm long, perimeter ~30).
+        # A 46 mm hairline that happens to touch two screw wells snaps just
+        # like any other long thin thing, and was being kept on a technicality.
+        if len(between) >= 2 and piece.length < 10.0 * w:
             width = 2.0 * piece.area / piece.length if piece.length else 0.0
             keep.append(piece)
             notes.append(
@@ -796,6 +830,13 @@ def _open_out_slivers(geom, spec: CaseSpec, notes: list[str],
                 f"the {w:.1f} mm minimum, so move them apart or lower it")
         else:
             removed += piece.area
+            if piece.area >= 5.0:
+                # with bounds, so a removed thin WALL fragment shows up as a
+                # deliberate gap in the coverage check rather than a mystery
+                x0, y0, x1, y1 = piece.bounds
+                notes.append(
+                    f"opened out {piece.area:.0f} mm2 thinner than {w:.1f} mm "
+                    f"[{x0:.1f},{y0:.1f},{x1:.1f},{y1:.1f}]")
 
     if removed > 0.5:
         notes.append(f"opened out {removed:.0f} mm2 thinner than {w:.1f} mm")
@@ -1060,7 +1101,7 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
     if cuts:
         geom = outer.difference(unary_union(cuts))
 
-    geom = _open_out_slivers(geom, spec, notes, cuts)
+    geom = _open_out_slivers(geom, spec, notes, cuts, wall=outer.exterior)
     geom = _keep_a_wall(res, spec, outer, geom, slab, notes)
     if breaches:
         geom = geom.difference(unary_union(breaches))
@@ -1113,9 +1154,14 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
     # breach seals the port it exists to open. The cable channels just
     # carved are soft: crossing one pinches a tunnel, which is survivable
     # and gets said.
+    # Bodies AND keepouts: a keepout is reserved space (a wifi antenna, a
+    # flex loop, the unbuildable gap between mated boards), and a rib built
+    # into one is exactly as wrong as a rib through a board -- the pockets
+    # cut it out, and the ties must not put it back.
     hard = [s_.poly.buffer(spec.part_clearance, join_style=2)
             for s_ in res.solids
-            if s_.kind is VolumeKind.body and z_overlap(s_.z, slab) > 0]
+            if s_.kind in (VolumeKind.body, VolumeKind.keepout)
+            and z_overlap(s_.z, slab) > 0]
     if breaches:
         hard += breaches
     # A connector's emergence spot is harder than a running channel: a rib
@@ -1125,6 +1171,21 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
              for c in res.connectors
              if not c.conn.external and c.included is not None
              and z_overlap(c.corridor_z, slab) > 0]
+    # The minimum-width guarantee, enforced where it is finally true. The
+    # first opening pass runs before the wall restore because its web logic
+    # keys on the interior cuts -- but breaches, bolt holes and the cable
+    # carve are all cut AFTER it, and every one of them can leave a neck
+    # thinner than min_segment that nothing re-checked. The finished plates
+    # shipped with dozens of them. This pass sees the final carved geometry;
+    # boss rings and collars are protected (legitimately narrow, and the
+    # very reason the first pass runs early), and the ties below reattach
+    # anything the opening severs.
+    late_cuts = list(cuts) + breaches + bolt_holes
+    if cable_carve is not None and not cable_carve.is_empty:
+        late_cuts.append(cable_carve)
+    geom = _open_out_slivers(geom, spec, notes, late_cuts,
+                             protect=boss_discs, wall=outer.exterior)
+
     tie_mouths = [(c.ref, Point(c.at[0], c.at[1])) for c in res.connectors
                   if not c.conn.external and c.included is not None
                   and z_overlap(c.corridor_z, slab) > 0]

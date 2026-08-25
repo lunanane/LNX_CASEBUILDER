@@ -697,6 +697,19 @@ itself — two cutouts passing close together leave a thread of plywood that wil
 not survive being handled, and merging them into one opening is both stronger
 and easier to cut.
 
+This check runs twice: once on the part cutouts, and again on the *final*
+carved geometry, because breaches, bolt holes and the cable groove each arrive
+later and each can pinch a neck that nothing re-measured. Three things are
+exempt on purpose: boss rings and bolt collars (legitimately narrow, and the
+very thing holding a board up), short webs between two specified openings (the
+keypad's 3.8 mm button webs — a *long* hairline that merely touches two holes
+still goes), and the perimeter wall, which is deliberately whatever thickness
+you chose. Anything a removal sets adrift is tied back in by the connectivity
+pass. The cable groove itself defaults to `cable_channel: 5` — a millimetre
+under the old 6 so the groove and a neighbouring cutout stop conspiring to
+leave threads between them — and support ribs default to `support_rib: 5`,
+comfortably over the minimum.
+
 ## Coordinate conventions
 
 Part-local: X and Y in the board plane, +Z out of the component side, **z = 0 at
