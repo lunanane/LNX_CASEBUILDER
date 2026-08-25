@@ -345,60 +345,174 @@ def _pieces(geom) -> list[Polygon]:
 
 
 def _tie_loose_pieces(geom, outer: Polygon, spec: CaseSpec, notes: list[str],
-                      must_keep: list[Polygon] | None = None):
-    """Nothing may come off the cutting bed as a separate part.
+                      must_keep: list[Polygon] | None = None,
+                      hard_obstacles=None, soft_obstacles=None,
+                      mouths=None):
+    """Nothing big may come off the cutting bed as a separate part.
 
-    Pruning ribs when they are generated is not enough: a rib can be severed
-    later by a part pocket, and a boss can attach to a fragment that is itself
-    adrift. So this runs last, on the finished layer, where the truth is
-    finally known.
+    This used to treat "touches the outer wall" as "connected", which was
+    true while the wall was one ring -- but a breach (an open side, a
+    channel) cuts the ring into arcs, and two chunks anchored to different
+    arcs are mutually adrift while both counting as safe. Whole quarters of
+    a layer shipped as loose parts that way. Connectivity is a property of
+    the piece graph, not of wall contact: there is ONE main piece (the
+    biggest), and everything else either joins it or is deliberate scrap.
 
-    What happens to an island depends on what it is. One holding a board up --
-    a boss, whose DISC is listed in `must_keep` -- has to stay and is tied
-    back. The disc, not its centre: drilling the screw hole turns a boss into a
-    ring, and a ring does not contain its own centroid. Anything
-    else is a severed stiffener or boolean debris, and gets dropped: bridging
-    it back would run a strip of plywood straight across the hardware, which is
-    worse than losing a fragment of stiffener.
+    Below `min_island` a piece IS scrap -- the sliver between two
+    neighbouring port openings -- and falls away by design, noted. Anything
+    bigger gets a rib routed back, and the routing has tiers because the
+    obstacles differ in kind:
+
+      * `hard_obstacles` -- hardware in this slab, and the breaches. A rib
+        through a board is a collision and a rib across a port seals the
+        port; neither is ever acceptable, so a rib that cannot avoid them is
+        not built.
+      * `soft_obstacles` -- the cable channels carved earlier this layer.
+        Crossing one pinches a cable tunnel, which is survivable and noted,
+        so it is allowed only when nothing cleaner exists.
+
+    A piece carrying a screw boss is tied even at the soft tier; a big piece
+    with no route at all is KEPT and loudly flagged rather than dropped --
+    a gaping hole in the case is worse than a piece the user must attach by
+    hand, and the note tells them exactly that.
     """
     pieces = _pieces(geom)
     if len(pieces) <= 1:
         return geom
 
-    # A tolerance, not an exact touch: the boolean chain leaves the wall a
-    # hair inside `outer`, and at 1e-6 nothing counted as anchored at all, so
-    # this bailed out and tied nothing.
-    edge = outer.boundary.buffer(0.05)
-    anchored = [p for p in pieces if p.intersects(edge)]
-    adrift = [p for p in pieces if not p.intersects(edge)]
-    if not adrift:
-        return geom
-    if not anchored:
-        # nothing reaches the wall: anchor everything to the biggest piece
-        anchored = [max(pieces, key=lambda p: p.area)]
-        adrift = [p for p in pieces if p is not anchored[0]]
-
     needed = must_keep or []
-    keep = list(anchored)
+    pieces = sorted(pieces, key=lambda p: -p.area)
+    attached = [pieces[0]]
     ribs: list[Polygon] = []
-    for piece in sorted(adrift, key=lambda p: -p.area):
-        if piece.area < 1.0:
-            continue                       # numerical crumbs, not material
-        if not any(piece.intersects(disc) for disc in needed):
-            notes.append(f"dropped a loose {piece.area:.0f} mm2 offcut")
-            continue
-        here, there = nearest_points(piece, unary_union(keep))
-        if here.distance(there) > 1e-9:
-            # Round caps, deliberately: a flat cap ends exactly on the two
-            # boundaries, and a zero-area touch is a hairline gap once floating
-            # point is involved -- the union then leaves both pieces separate,
-            # which is the very thing this is here to prevent.
-            ribs.append(LineString([here, there]).buffer(
-                spec.support_rib / 2.0, cap_style=1))
-            notes.append(f"rib tying a {piece.area:.0f} mm2 island back to the wall")
-        keep.append(piece)
-    return unary_union(keep + ribs).intersection(outer)
+    step = spec.support_boss + spec.support_rib
 
+    def void_survives(rib, piece):
+        """Would this rib leave every cable mouth in one void piece?
+
+        The real constraint, computed directly. Approximating it by avoiding
+        the carved channels missed the corridors that were naturally open --
+        a rib across one of those severs the void just as thoroughly.
+        """
+        if len({m[0].split(".")[0] for m in (mouths or [])}) < 2:
+            return True
+        after = outer.difference(unary_union(attached + ribs + [piece, rib]))
+        vparts = [v for v in _pieces(after) if v.area > 1.0]
+        homes = set()
+        for _ref, pt in mouths:
+            home = next((i for i, v in enumerate(vparts)
+                         if v.intersects(pt.buffer(0.05))), None)
+            if home is not None:
+                homes.add(home)
+        return len(homes) <= 1
+
+    def attach_pairs(piece, target, cap=20):
+        """Places a rib could run, best first.
+
+        The single nearest pair fails whenever that one line happens to cross
+        a board -- a 3000 mm2 corner chunk was declared LOOSE that way while
+        half its boundary faced open routes. So the boundary is sampled and
+        every sample offers its own crossing.
+        """
+        pairs = [nearest_points(piece, target)]
+        ring = piece.exterior
+        n = max(8, min(32, int(ring.length / 15.0)))
+        for i in range(n):
+            a = ring.interpolate(ring.length * i / n)
+            pairs.append((a, nearest_points(a, target)[1]))
+
+        seen = set()
+        unique = []
+        for a, b in pairs:
+            key = (round(a.x), round(a.y), round(b.x), round(b.y))
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append((a, b))
+
+        # Half the budget goes to the shortest crossings, half to a spread
+        # around the whole boundary. A 350 mm wall strip's nearest crossings
+        # all run mid-case through the hardware field and every one fails;
+        # the crossing that works is a short hop at the far corner, which a
+        # purely nearest-first list never reaches.
+        by_len = sorted(unique, key=lambda ab: ab[0].distance(ab[1]))
+        head = by_len[:cap // 2]
+        rest = [x for x in unique if x not in head]
+        spread = rest[:: max(1, len(rest) // max(1, cap - len(head)))]
+        return (head + spread)[:cap]
+
+    for piece in pieces[1:]:
+        has_boss = any(piece.intersects(disc) for disc in needed)
+        if piece.area < 1.0 and not has_boss:
+            continue                        # numerical crumbs, not material
+        if piece.area < spec.min_island and not has_boss:
+            # With its bounds, because a dropped wall sliver leaves a gap in
+            # the wall, and both the coverage check and the person reading
+            # the cut list deserve to know exactly which gap is deliberate.
+            x0, y0, x1, y1 = piece.bounds
+            notes.append(
+                f"{piece.area:.0f} mm2 of scrap between openings falls away "
+                f"[{x0:.1f},{y0:.1f},{x1:.1f},{y1:.1f}]")
+            continue
+
+        target = unary_union(attached + ribs)
+        if piece.distance(target) < 1e-9:
+            attached.append(piece)          # already touching a tied piece
+            continue
+
+        placed = None
+        pinched = None
+        for here, there in attach_pairs(piece, target):
+            rib = _detour(here, there, spec.support_rib, hard_obstacles, step)
+            if rib is None:
+                continue
+            if not void_survives(rib, piece):
+                continue
+            crosses = (soft_obstacles is not None
+                       and not soft_obstacles.is_empty
+                       and rib.intersects(soft_obstacles))
+            if not crosses:
+                placed = rib
+                break
+            if pinched is None:
+                pinched = (rib, here)
+
+        if placed is None and pinched is not None:
+            placed, at = pinched
+            notes.append(
+                f"rib near ({at.x:.0f}, {at.y:.0f}) crosses a cable channel "
+                f"-- the tunnel is pinched there")
+        if placed is None:
+            here, there = nearest_points(piece, target)
+            if has_boss:
+                # a supported board outranks a clean tunnel: tie the shortest
+                # way that clears the hardware, or straight if nothing does,
+                # and say so either way
+                placed = _detour(here, there, spec.support_rib,
+                                 hard_obstacles, step)
+                if placed is None:
+                    placed = LineString([here, there]).buffer(
+                        spec.support_rib / 2.0, cap_style=1)
+                notes.append(
+                    f"boss island at ({here.x:.0f}, {here.y:.0f}) tied "
+                    f"through the cable run -- check it")
+            else:
+                notes.append(
+                    f"LOOSE: a {piece.area:.0f} mm2 piece at "
+                    f"({here.x:.0f}, {here.y:.0f}) has no rib route past "
+                    f"the hardware and the ports -- it will fall off the "
+                    f"cut unless attached by hand")
+                attached.append(piece)
+                continue
+
+        # Round caps, deliberately: a flat cap ends exactly on the two
+        # boundaries, and a zero-area touch is a hairline gap once floating
+        # point is involved -- the union then leaves both pieces separate,
+        # which is the very thing this is here to prevent.
+        ribs.append(placed)
+        notes.append(f"rib tying a {piece.area:.0f} mm2 island back on")
+        attached.append(piece)
+
+    return unary_union(attached + ribs).intersection(outer)
 
 def case_screw_points(spec: CaseSpec, outer: Polygon) -> list[tuple[float, float]]:
     """Where the bolts through the stack go.
@@ -513,14 +627,14 @@ def _link_cable_void(res: Resolved, spec: CaseSpec, outer: Polygon, geom,
     ever removes obstacle material.
     """
     if not spec.link_cables or spec.cable_channel <= 0:
-        return geom
+        return geom, None
 
     mouths = [(c.ref, Point(c.at[0], c.at[1])) for c in res.connectors
               if not c.conn.external and c.included is not None
               and z_overlap(c.corridor_z, slab) > 0]
     # one board's worth of leads cannot be isolated from itself
     if len({ref.split(".")[0] for ref, _ in mouths}) < 2:
-        return geom
+        return geom, None
 
     void = outer.difference(geom)
     parts = _pieces(void)
@@ -553,12 +667,32 @@ def _link_cable_void(res: Resolved, spec: CaseSpec, outer: Polygon, geom,
         linked.append(ref)
 
     if not channels:
-        return geom
+        return geom, None
     notes.append(f"cable channel to reach {', '.join(sorted(set(linked)))}")
     carve = unary_union(channels)
     if obstacles is not None and not obstacles.is_empty:
         carve = carve.difference(obstacles)
-    return geom.difference(carve)
+    return geom.difference(carve), carve
+
+
+def _detour(a, b, width: float, obstacles, step: float):
+    """A straight run from a to b, or a two-legged detour that clears
+    `obstacles`, or None when nothing within a few steps does."""
+    line = LineString([a, b])
+    run = line.buffer(width / 2.0, cap_style=1)
+    if obstacles is None or obstacles.is_empty or not run.intersects(obstacles):
+        return run
+
+    dx, dy = b.x - a.x, b.y - a.y
+    length = max((dx * dx + dy * dy) ** 0.5, 1e-9)
+    px, py = -dy / length, dx / length
+    mx, my = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
+    for k in (1, -1, 2, -2, 3, -3):
+        wx, wy = mx + px * step * k, my + py * step * k
+        cand = LineString([a, (wx, wy), b]).buffer(width / 2.0, cap_style=1)
+        if not cand.intersects(obstacles):
+            return cand
+    return None
 
 
 def _route_past(a, b, spec: CaseSpec, obstacles, notes: list[str]):
@@ -571,28 +705,15 @@ def _route_past(a, b, spec: CaseSpec, obstacles, notes: list[str]):
     and the note says so rather than leaving it to be found with a cable in
     hand.
     """
-    line = LineString([a, b])
-    run = line.buffer(spec.cable_channel / 2.0, cap_style=1)
-    if obstacles is None or obstacles.is_empty or not run.intersects(obstacles):
+    run = _detour(a, b, spec.cable_channel,
+                  obstacles, spec.support_boss + spec.cable_channel)
+    if run is not None:
         return run
-
-    dx, dy = b.x - a.x, b.y - a.y
-    length = max((dx * dx + dy * dy) ** 0.5, 1e-9)
-    px, py = -dy / length, dx / length          # unit perpendicular
     mx, my = (a.x + b.x) / 2.0, (a.y + b.y) / 2.0
-    step = spec.support_boss + spec.cable_channel
-
-    for k in (1, -1, 2, -2, 3, -3):
-        wx, wy = mx + px * step * k, my + py * step * k
-        detour = LineString([a, (wx, wy), b]).buffer(
-            spec.cable_channel / 2.0, cap_style=1)
-        if not detour.intersects(obstacles):
-            return detour
-
     notes.append(
         f"cable channel near ({mx:.0f}, {my:.0f}) is pinched by a screw boss "
         f"-- the lead has to squeeze past the post there")
-    return run
+    return LineString([a, b]).buffer(spec.cable_channel / 2.0, cap_style=1)
 
 
 def _keep_a_wall(res: Resolved, spec: CaseSpec, outer: Polygon, geom,
@@ -983,10 +1104,34 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
 
     # Cable routes are carved before the material check, so anything the
     # carving strands can still be tied back.
-    geom = _link_cable_void(res, spec, outer, geom, slab, notes,
-                            obstacles=unary_union(boss_discs)
-                            if boss_discs else None)
-    geom = _tie_loose_pieces(geom, outer, spec, notes, boss_discs)
+    geom, cable_carve = _link_cable_void(
+        res, spec, outer, geom, slab, notes,
+        obstacles=unary_union(boss_discs) if boss_discs else None)
+
+    # What a tie rib must respect, in tiers. Hardware and open ports are
+    # inviolable -- a rib through a board is a collision, a rib across a
+    # breach seals the port it exists to open. The cable channels just
+    # carved are soft: crossing one pinches a tunnel, which is survivable
+    # and gets said.
+    hard = [s_.poly.buffer(spec.part_clearance, join_style=2)
+            for s_ in res.solids
+            if s_.kind is VolumeKind.body and z_overlap(s_.z, slab) > 0]
+    if breaches:
+        hard += breaches
+    # A connector's emergence spot is harder than a running channel: a rib
+    # may pinch a channel and the cable squeezes past, but a rib over a
+    # mouth seals it, and the lead then has nowhere to leave its own board.
+    hard += [Point(c.at[0], c.at[1]).buffer(spec.cable_channel / 2.0)
+             for c in res.connectors
+             if not c.conn.external and c.included is not None
+             and z_overlap(c.corridor_z, slab) > 0]
+    tie_mouths = [(c.ref, Point(c.at[0], c.at[1])) for c in res.connectors
+                  if not c.conn.external and c.included is not None
+                  and z_overlap(c.corridor_z, slab) > 0]
+    geom = _tie_loose_pieces(
+        geom, outer, spec, notes, boss_discs,
+        hard_obstacles=unary_union(hard) if hard else None,
+        soft_obstacles=cable_carve, mouths=tie_mouths)
 
     if geom.is_empty:
         notes.append("nothing left of this layer -- it is pure air")

@@ -550,6 +550,12 @@ class CaseSpec(Strict):
     #: air between neighbouring parts on a sheet
     sheet_spacing: float = 4.0
 
+    #: An island smaller than this may fall off the cut as scrap -- the
+    #: slivers between two neighbouring port openings are the usual case, and
+    #: nobody wants them tied back. Anything bigger is real case material and
+    #: gets a rib routed back to the main piece.
+    min_island: float = 150.0
+
     #: Material narrower than this snaps. Two cutouts that pass close to each
     #: other leave a sliver of plywood between them that will not survive being
     #: handled, let alone glued up -- so anything thinner is opened out and the

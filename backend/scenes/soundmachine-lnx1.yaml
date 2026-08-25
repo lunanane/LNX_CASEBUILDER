@@ -27,7 +27,7 @@ panels:
 case:
   style: layered
   materials:
-  - {name: plywood-3mm, thickness: 3.0, kerf: 0.15, sheet: [600.0, 400.0], color: "#c8a165"}
+  - {name: plywood-3mm, thickness: 3.5, kerf: 0.15, sheet: [600.0, 400.0], color: "#c8a165"}
   wall: 8.0
   floor_gap: 4.0
   ceiling_gap: 1.0
@@ -55,6 +55,7 @@ placements:
     include: [pwr_micro_usb, hdmi, av_jack]
   - side: +x
     include: [usb1, usb2, ethernet]
+    margin: 4.0
   support: from_floor
 - id: screen
   part: hyperpixel4-square-touch
@@ -67,11 +68,11 @@ placements:
   # --- 4x8 of buttons, two NeoTrellis tiles side by side on the 60 mm grid ---
 - id: trellis_a
   part: adafruit-3954-neotrellis
-  pos: [4.1, -59.7, 0.0]
+  pos: [-0.5, -56.8, 0.0]
   on_panel: main
   panel_ref: buttons          # the pad's button tops, not the PCB's
   panel_offset: 2.5
-  support: from_floor
+  support: none
 - id: pad_a
   part: adafruit-1611-keypad
   parent: trellis_a
@@ -79,11 +80,11 @@ placements:
   mate: pcb
 - id: trellis_b
   part: adafruit-3954-neotrellis
-  pos: [64.1, -59.7, 0.0]
+  pos: [59.5, -56.5, 0.0]
   on_panel: main
   panel_ref: buttons
   panel_offset: 2.5
-  support: from_floor
+  support: none
 - id: pad_b
   part: adafruit-1611-keypad
   parent: trellis_b
@@ -105,7 +106,7 @@ placements:
   screw_inset: false
 - id: oled
   part: adafruit-4741-oled-1v5
-  pos: [54.8, 53.1, 0.0]
+  pos: [39.7, 55.7, 0.0]
   on_panel: main
   panel_ref: active_area
 
@@ -115,7 +116,7 @@ placements:
   - side: +x
     margin: 0.0
     span: full
-  panel_offset: -2.0
+  panel_offset: -2.5
   support: from_lid
 - id: mux
   part: seeed-grove-tca9548a
@@ -129,7 +130,7 @@ placements:
   screw_inset: true
 - id: amy
   part: shorepine-amyboard
-  pos: [124.1, 5.2, 0.0]
+  pos: [116.41744376395226, 5.2, 0.0]
   on_panel: main
   panel_ref: jack_threads
   rot_z: 90.0
