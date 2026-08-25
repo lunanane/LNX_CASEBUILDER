@@ -123,17 +123,25 @@ parts:
       # last attempt it fits: the module is 33.8 x 36.5. Where exactly it sits
       # inside that module is the guess -- centred is the sane default, and
       # the bezel is generous enough that being a millimetre out is survivable.
+      # Deliberately larger than the 26.9 mm lit panel: the owner sized the
+      # window off the real board for off-axis viewing, so the faceplate
+      # does not block the eye when looking from the side. Full board width;
+      # vertically 3.5 mm clear of the upper screw centres (y 44.45) and
+      # 4.96 mm clear of the lower ones (y 2.54). Not a physical feature:
+      # this is the cut region the faceplate opens, so it may cross the
+      # module box (wider in x, shorter in y).
       - name: active_area
         kind: display
-        at: [17.65, 23.75]
-        size: [26.9, 26.9]
+        at: [17.78, 24.225]
+        size: [35.56, 33.45]
         z: [2.57, 2.67]
         src:
-          confidence: estimated
+          confidence: measured
           note: >-
-            26.9 mm square is the datasheet 1.5" 128x128 panel; the module it
-            sits in is measured. Assumed centred in the module -- MEASURE the
-            lit area before cutting a tight bezel.
+            Viewing window sized by eye on the real board, not the lit area:
+            full board width, y 7.50..40.95. The lit 128x128 panel itself is
+            26.9 mm square, centred in the 33.8 x 36.5 module, and must stay
+            inside this window.
       # Underneath: the QT connectors stand furthest proud, so they set how
       # much room the board needs below the PCB.
       - name: qt_left_body

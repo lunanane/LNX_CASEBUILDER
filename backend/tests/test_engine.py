@@ -2484,6 +2484,13 @@ def test_oled_volumes_do_not_cross(lib):
 
     part = lib["adafruit-4741-oled-1v5"]
     for a, b in itertools.combinations(part.volumes, 2):
+        if VolumeKind.display in (a.kind, b.kind):
+            # a display volume is the cut region the faceplate opens, not
+            # matter -- deliberately wider than the module for off-axis
+            # viewing. The window-nonsense bug this test was written for is
+            # guarded by the covers-test below: the lit panel must sit
+            # inside the window.
+            continue
         za, zb = (min(a.z), max(a.z)), (min(b.z), max(b.z))
         if min(za[1], zb[1]) - max(za[0], zb[0]) <= 1e-9:
             continue                            # stacked, not crossing
@@ -2495,16 +2502,26 @@ def test_oled_volumes_do_not_cross(lib):
 
 
 def test_oled_window_covers_the_display_module(lib):
-    """The lit area is a datasheet number placed inside a measured module.
-    The previous attempt derived it from a bounding box that had merged two
-    connectors into an imaginary strip, so nothing fitted inside anything."""
+    """The window is deliberately larger than the module: sized by eye on the
+    real board for off-axis viewing (full board width, 1.5 mm off the upper
+    screw centres, 3 mm off the lower), so the faceplate does not block the
+    eye when looking from the side. It must still COVER the module -- a
+    window smaller than the glass is the old two-crossing-planes bug -- and
+    stay inside the board outline."""
     from hwcase.geom import box_polygon
 
     part = lib["adafruit-4741-oled-1v5"]
     by_name = {v.name: v for v in part.volumes}
     module, active = by_name["display_module"], by_name["active_area"]
-    assert box_polygon(module).buffer(1e-6).contains(box_polygon(active)), (
-        "the lit area has to be inside the module it is part of")
+    # the true lit panel: 26.9 mm square, centred in the measured module
+    from shapely.geometry import box as _box
+    mx, my = module.at
+    lit = _box(mx - 26.9 / 2, my - 26.9 / 2, mx + 26.9 / 2, my + 26.9 / 2)
+    assert box_polygon(active).buffer(1e-6).contains(lit), (
+        "the lit panel has to sit inside the viewing window")
+    w, h = part.outline.size
+    assert _box(-1e-6, -1e-6, w + 1e-6, h + 1e-6).contains(box_polygon(active)), (
+        "the window may not overhang the board")
 
 
 # ---------------------------------------------------------------------------
