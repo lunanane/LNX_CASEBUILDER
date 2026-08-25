@@ -29,7 +29,7 @@ from shapely.ops import nearest_points
 from .geom import outline_polygon, rounded_rect, z_overlap
 from .schema import (CaseScrews, CaseSpec, Interior, Material, Pattern,
                      Support, VolumeKind)
-from .scene import Resolved
+from .scene import GRAZE, Resolved
 
 Role = Literal["floor", "body", "lid"]
 
@@ -1056,7 +1056,22 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
     under_panel = {p.id for p in res.scene.placements if p.under_panel}
 
     for s in res.solids:
-        if z_overlap(s.z, slab) <= 0:
+        if s.kind is VolumeKind.display:
+            # A display has to be SEEN: its window is cut through the layer
+            # holding the glass and every layer above it, so a screen
+            # recessed under the faceplate gets a viewing well instead of
+            # vanishing behind solid material.
+            if slab[1] <= s.z[0] + 1e-6:
+                continue
+        elif z_overlap(s.z, slab) <= GRAZE:
+            # Sub-tolerance overlap is the graze tier, same as the collision
+            # check: a bezel poking a tenth of a millimetre into the
+            # faceplate slab is not a licence to cut its whole outline
+            # through the plate.
+            ov = z_overlap(s.z, slab)
+            if s.kind is VolumeKind.body and ov > 0:
+                notes.append(f"{s.ref} grazes this layer by {ov:.2f} mm; "
+                             f"left uncut (build tolerance)")
             continue
         if s.kind is VolumeKind.body:
             if role == "floor" and s.z[0] >= slab[1] - 1e-6:

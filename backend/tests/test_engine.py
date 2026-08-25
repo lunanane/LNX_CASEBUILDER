@@ -274,6 +274,32 @@ def test_layers_span_the_whole_stack(demo):
         assert b.z0 == pytest.approx(a.z1), "gap or overlap between layers"
 
 
+def test_a_recessed_display_gets_a_window_not_a_blank_plate(lib):
+    """Sinking the OLED just under the faceplate used to make it vanish: the
+    window was only cut for volumes OVERLAPPING a slab, so a glass 0.1 mm
+    below the lid got no opening at all -- and a bezel grazing the slab by
+    less than build tolerance got its whole outline cut instead. Now a
+    display's window projects up through every plate above the glass, and
+    sub-GRAZE overlaps do not cut."""
+    scene = load_scene(SCENE)
+    pl = next(p for p in scene.placements if p.id == "oled")
+    pl.panel_offset = -(scene.case.materials[0].thickness + 0.01)
+    res = resolve(scene, lib)
+    model = build(res)
+    lid = model.layers[-1]
+
+    sol = {s.name: s for s in res.solids if s.placement == "oled"}
+    aa, pcb = sol["active_area"], sol["pcb"]
+    assert aa.z[1] < lid.z0, "fixture drift: the glass should sit below the lid"
+
+    # the window is open over the glass...
+    assert lid.geom.intersection(aa.poly).area < aa.poly.area * 0.1
+    assert any("opening for oled.active_area" in n for n in lid.notes)
+    # ...and the plate stays solid over the rest of the board
+    ring = pcb.poly.difference(aa.poly.buffer(1.0))
+    assert lid.geom.intersection(ring).area > ring.area * 0.9,         "the faceplate cut the whole board outline instead of just the window"
+
+
 def test_the_base_plate_sits_directly_under_the_boards(lib):
     """The stack is sized from the lowest BOARD, not the lowest thing in the
     scene. The pi's SD card and pin row hang below the pcb; sizing the case to
@@ -2347,6 +2373,8 @@ def test_hardware_inside_the_band_is_not_buried(lib):
     worse than an honest gap."""
     from hwcase.geom import z_overlap
 
+    from hwcase.scene import GRAZE
+
     scene = lab()
     scene.case.wall = 1.0                 # squeeze the outline onto the hardware
     scene.case.min_segment = 6.0
@@ -2355,7 +2383,9 @@ def test_hardware_inside_the_band_is_not_buried(lib):
     for layer in model.layers:
         slab = (layer.z0, layer.z1)
         for s in res.solids:
-            if s.kind.value != "body" or z_overlap(s.z, slab) <= 0:
+            # sub-GRAZE overlap is deliberately left uncut (and noted):
+            # interference below build tolerance is a graze, not a burial
+            if s.kind.value != "body" or z_overlap(s.z, slab) <= GRAZE:
                 continue
             assert layer.geom.intersection(s.poly).area < s.poly.area * 0.05, \
                 f"layer {layer.index} has material inside {s.ref}"

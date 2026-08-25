@@ -331,6 +331,15 @@ one you want to reach.
 `under_panel: true` on a placement means the faceplate passes over that board
 unbroken: no window, no actuator hole. The checker errors if the board is too
 tall to actually fit under the plate.
+The opposite also holds: a `display` volume gets its window cut through the
+layer holding the glass **and every layer above it**, so a screen recessed
+under the faceplate (a negative panel `offset`) looks out through a viewing
+well instead of vanishing behind solid material. And a body that merely
+grazes a slab — overlap below the same 0.2 mm build tolerance the collision
+check uses — no longer cuts its outline through that plate, so sinking a
+board by exactly one plate thickness works without hunting for the extra
+hundredth of a millimetre.
+
 
 ## Features that repeat
 
