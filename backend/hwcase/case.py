@@ -781,7 +781,8 @@ SPECIFIED_OPENING = 500.0
 def _open_out_slivers(geom, spec: CaseSpec, notes: list[str],
                       cuts: list[Polygon] | None = None,
                       protect: list[Polygon] | None = None,
-                      wall=None):
+                      wall=None,
+                      spare: list[Polygon] | None = None):
     """Remove material too narrow to survive -- but never by reshaping a hole.
 
     A morphological opening finds anything thinner than `min_segment`. What is
@@ -822,6 +823,7 @@ def _open_out_slivers(geom, spec: CaseSpec, notes: list[str],
     openings = [o for o in (_pieces(unary_union(cuts)) if cuts else [])
                 if o.area < SPECIFIED_OPENING]
     guarded = unary_union(protect) if protect else None
+    spared = unary_union(spare) if spare else None
     keep: list[Polygon] = []
     removed = 0.0
     for piece in _pieces(lost):
@@ -851,6 +853,18 @@ def _open_out_slivers(geom, spec: CaseSpec, notes: list[str],
                 f"kept a {width:.1f} mm web between two openings -- thinner than "
                 f"the {w:.1f} mm minimum, so move them apart or lower it")
         else:
+            if spared is not None and piece.intersects(spared):
+                # The bearing ring around a screw is deliberate narrow
+                # material -- the very thing the head pulls against -- but
+                # unlike a boss it is only sacred within the screw's own
+                # disc: keeping the WHOLE piece would resurrect the long
+                # well-to-well hairlines this pass exists to remove.
+                kept_part = piece.intersection(spared)
+                if not kept_part.is_empty and kept_part.area > 1e-6:
+                    keep.append(kept_part)
+                    piece = piece.difference(spared)
+                    if piece.is_empty or piece.area <= 1e-6:
+                        continue
             removed += piece.area
             if piece.area >= 5.0:
                 # with bounds, so a removed thin WALL fragment shows up as a
@@ -1225,8 +1239,12 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
     late_cuts = list(cuts) + breaches + bolt_holes
     if cable_carve is not None and not cable_carve.is_empty:
         late_cuts.append(cable_carve)
+    screw_guard = [Point(sp.at).buffer(
+                       max(spec.support_boss, spec.screw_head) / 2.0)
+                   for sp in res.supports]
     geom = _open_out_slivers(geom, spec, notes, late_cuts,
-                             protect=boss_discs, wall=outer.exterior)
+                             protect=boss_discs, wall=outer.exterior,
+                             spare=screw_guard)
 
     tie_mouths = [(c.ref, Point(c.at[0], c.at[1])) for c in res.connectors
                   if not c.conn.external and c.included is not None
