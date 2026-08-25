@@ -132,13 +132,29 @@ def build(res: Resolved, spec: Optional[CaseSpec] = None) -> CaseModel:
         z1 = max(res.panels.values())
     else:
         z1 = zmax + spec.ceiling_gap
-    z0 = zmin - spec.floor_gap
+    # The bottom of the case is measured from the lowest BOARD, not the
+    # lowest thing in the scene. An SD card, a pin row or a component on a
+    # board's back hangs below the pcb, and sizing the case to those grew a
+    # whole empty spacer layer under everything: the base plate should be the
+    # layer directly under the boards, and the protrusions pierce it as
+    # through holes (they are recessed from the outside by the quantisation
+    # slack, and z0 is still kept at or below the deepest of them so nothing
+    # pokes out under the case).
+    pcb_bottoms = [s.z[0] for s in res.solids if s.name == "pcb"]
+    board_floor = min(pcb_bottoms) if pcb_bottoms else zmin
+    z0 = min(board_floor - spec.floor_gap, zmin)
     materials = _materials_for(spec, z1 - z0)
 
     # A sheet stack rarely divides the height exactly. Land the top face on the
     # panel plane and let the slack fall under the floor, where it is just extra
     # clearance rather than a lid floating above the surface.
     z0 = z1 - sum(m.thickness for m in materials)
+    # ...but the floor slab may never contain a board: quantisation with a
+    # small floor_gap could land the first boundary above a pcb bottom, and
+    # a board inside the solid base plate is not a case, it is a lamination.
+    while z0 + materials[0].thickness > board_floor + 1e-6:
+        materials = _materials_for(spec, sum(m.thickness for m in materials) + 1e-3)
+        z0 = z1 - sum(m.thickness for m in materials)
 
     # the full slab grid, computed up front: the screw wells need to know
     # which layer is the LAST one before a board, and a layer working alone
@@ -1043,8 +1059,13 @@ def _layer_geometry(res: Resolved, spec: CaseSpec, outer: Polygon,
         if z_overlap(s.z, slab) <= 0:
             continue
         if s.kind is VolumeKind.body:
-            if role == "floor":
+            if role == "floor" and s.z[0] >= slab[1] - 1e-6:
                 continue      # hardware rests ON the floor; it does not cut it
+            if role == "floor":
+                # an underside protrusion dipping below the boards' resting
+                # plane pierces the base plate rather than costing an entire
+                # spacer layer under the whole case
+                notes.append(f"opening for the underside of {s.ref}")
             if role == "lid" and s.placement in under_panel:
                 continue      # this one asked for the plate to pass over it
             # Otherwise the lid is cut like any other layer. It used to skip

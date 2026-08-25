@@ -379,6 +379,15 @@ ribbed layer touches the wall, and another asserting no rib sits on a board.
 The floor and the lid are structural faces and keep their own rules whatever the
 interior is set to.
 
+The stack is sized from the lowest **board**, not the lowest thing in the
+scene: the base plate is the layer directly under the boards, and anything
+hanging below a pcb — an SD card, a pin row, components on a board's back —
+pierces it as a through opening (noted per part) rather than costing a whole
+empty spacer layer under the case. `floor_gap` measures depth below the lowest
+board; the bottom face still always ends at or below the deepest protrusion,
+so nothing pokes out underneath, and the floor slab is never allowed to
+contain a board.
+
 ## Exporting for the laser: sheets, not a strip
 
 The single endless strip the export used to produce is fine to look at and

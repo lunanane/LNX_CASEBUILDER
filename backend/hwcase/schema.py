@@ -507,7 +507,7 @@ class CaseSpec(Strict):
     #: material stack from bottom to top; the last entry repeats as needed
     materials: list[Material] = Field(default_factory=lambda: [Material()])
     wall: float = 6.0                 # material around the parts, in XY
-    floor_gap: float = 3.0            # air under the lowest part
+    floor_gap: float = 3.0            # depth under the lowest BOARD (underside protrusions pierce the base plate)
     ceiling_gap: float = 2.0
     part_clearance: float = 0.6       # slop around each part pocket
     cable_clearance: float = 5.0      # min gap between parts for wiring

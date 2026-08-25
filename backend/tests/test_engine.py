@@ -274,6 +274,33 @@ def test_layers_span_the_whole_stack(demo):
         assert b.z0 == pytest.approx(a.z1), "gap or overlap between layers"
 
 
+def test_the_base_plate_sits_directly_under_the_boards(lib):
+    """The stack is sized from the lowest BOARD, not the lowest thing in the
+    scene. The pi's SD card and pin row hang below the pcb; sizing the case to
+    them bought a completely empty spacer layer under everything. Now the
+    floor is the layer directly under the boards, the protrusions pierce it as
+    noted through holes, and the bottom face still clears the deepest of them
+    so nothing pokes out underneath."""
+    res = resolve(lab(), lib)
+    model = build(res)
+    floor = model.layers[0]
+
+    board_floor = min(s.z[0] for s in res.solids if s.name == "pcb")
+    zmin = min(s.z[0] for s in res.solids)
+    assert zmin < board_floor, "fixture lost its underside protrusion"
+
+    # no board inside the floor slab, and no empty spacer layer below it
+    assert floor.z1 <= board_floor + 1e-6
+    assert board_floor - floor.z1 < model.layers[1].thickness - 1e-6,         "an entire empty layer sits between the base plate and the boards"
+    # nothing pokes out under the case
+    assert model.z0 <= zmin + 1e-6
+
+    # the SD card's underside pierces the plate as a noted through hole
+    sd = next(s for s in res.solids if s.ref == "pi.microsd_body")
+    assert floor.geom.intersection(sd.poly).area < sd.poly.area * 0.1,         "the base plate still runs under the SD card instead of opening for it"
+    assert any("underside of pi.microsd_body" in n for n in floor.notes)
+
+
 def test_layer_count_follows_material_thickness(demo):
     thin = build(demo, CaseSpec(materials=[Material(name="ply-3", thickness=3.0)]))
     thick = build(demo, CaseSpec(materials=[Material(name="ply-6", thickness=6.0)]))
