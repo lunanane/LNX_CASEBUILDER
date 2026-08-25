@@ -2209,7 +2209,7 @@ let VERSION = '?';
 // a cached app.js will report an old stamp here while the server reports the
 // new version beside it, and that mismatch is the whole diagnosis -- "it does
 // nothing when I click it" is what stale UI code looks like from outside.
-const UI_BUILD = '2026-08-25a';
+const UI_BUILD = '2026-08-25b';
 
 function wireTabs() {
   const tabs = [...document.querySelectorAll('.tabs .tab')];
@@ -2642,8 +2642,9 @@ function renderEngravePanel() {
     </div>
     <div id="eng-list"></div>
     ${list.length ? '' : `<p class="note">Nothing engraved yet. Marks go on
-      the top face of the lid and are exported as their own pass, in blue,
-      on their own DXF layer — a cutter must never run them as cuts.</p>`}
+      the faceplate or the backplate and are exported as their own pass, in
+      blue, on their own DXF layer — a cutter must never run them as cuts.
+      "Cut right through" turns a pattern into real holes: a vent grill.</p>`}
   `;
 
   $('eng-add').onchange = () => {
@@ -2664,6 +2665,11 @@ function renderEngravePanel() {
       <div class="field"><label>pattern</label>
         <select class="eng-pattern">${Object.keys(PATTERNS).map((k) =>
           `<option value="${k}"${k === e.pattern ? ' selected' : ''}>${k}</option>`).join('')}
+        </select></div>
+      <div class="field"><label title="which outer plate carries it">on</label>
+        <select class="eng-face">
+          <option value="lid"${(e.face ?? 'lid') === 'lid' ? ' selected' : ''}>faceplate</option>
+          <option value="floor"${e.face === 'floor' ? ' selected' : ''}>backplate</option>
         </select></div>
       <div class="field"><label>centre</label>
         <input type="number" class="eng-x" step="1" value="${e.at[0]}">
@@ -2706,6 +2712,9 @@ function renderEngravePanel() {
         cut right through</label>
       ${e.through ? `<p class="note warn">This one is cut, not engraved — it
         comes out of the plate. Check the panel still holds together.</p>` : ''}
+      ${!e.through && e.face === 'floor' ? `<p class="note">Backplate marks are
+        exported mirrored, plate and all — engrave the sheet as drawn, then
+        install that plate engraved face down.</p>` : ''}
       ${engraveWarning(e)}
     `;
 
@@ -2719,6 +2728,10 @@ function renderEngravePanel() {
       refreshCase();
     };
     el.querySelector('.eng-name').onchange = (ev) => set(() => { e.name = ev.target.value; });
+    el.querySelector('.eng-face').onchange = (ev) => {
+      set(() => { e.face = ev.target.value; });
+      renderEngravePanel();
+    };
     el.querySelector('.eng-pattern').onchange = (ev) => {
       // Switching pattern brings its preset with it, otherwise a hex mesh
       // inherits fin spacing and looks like a mistake.

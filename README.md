@@ -86,7 +86,7 @@ search underneath. Middle: the 3D view. Right: four panes —
 - **layout** — placements and the selected part's numbers
 - **case** — size, the bolts that hold the stack together, minimum web,
   and the materials with their colours
-- **look** — lighting, contact shading, engraving, and the final render
+- **look** — lighting, contact shading, and the final render
 - **issues** — the live list, badged so a problem is visible from any pane
 
 The case settings used to live below everything about the selected board, so

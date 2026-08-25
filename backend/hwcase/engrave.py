@@ -91,7 +91,9 @@ def _slots(w: float, h: float, e: Engraving) -> list[Polygon]:
 
 
 def _rings(w: float, h: float, e: Engraving) -> list[Polygon]:
-    outer = min(w, h) / 2.0
+    # half a stroke in from the box, or the outermost ring pokes out and the
+    # crop flattens its top and bottom
+    outer = min(w, h) / 2.0 - e.stroke / 2.0
     out = []
     r = outer
     while r > e.stroke:

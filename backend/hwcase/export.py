@@ -269,6 +269,9 @@ class SheetPlacement:
     rotated: bool          # turned 90 degrees counter-clockwise
     geom: object           # the placed cut geometry (kerf applied)
     engrave: object        # the placed engrave geometry, or None
+    #: cut mirrored so its surface marks end up on the OUTSIDE face: the
+    #: plate is installed engraved side down (only the floor does this)
+    mirrored: bool = False
 
 
 @dataclass
@@ -279,15 +282,25 @@ class PackedSheet:
     placements: list = _field(default_factory=list)
 
 
-def _placed(geom, rotated: bool, tx: float, ty: float):
-    """The geometry, rotated then moved so its min corner sits at (tx, ty)."""
+def _placed(geom, rotated: bool, tx: float, ty: float, anchor=None):
+    """The geometry, rotated then moved so the min corner of `anchor` (the
+    geometry itself when not given) sits at (tx, ty).
+
+    `anchor` exists for the engrave pass: marks must ride the SAME transform
+    as the cut outline they sit on. Normalising them by their own bounds --
+    the old behaviour -- pinned every grill and label to the plate's corner.
+    """
     from shapely.affinity import rotate as _rotate
 
     if geom is None or geom.is_empty:
         return None
     if rotated:
         geom = _rotate(geom, 90, origin=(0, 0))
-    x0, y0, _x1, _y1 = geom.bounds
+    if anchor is not None and not anchor.is_empty:
+        ref = _rotate(anchor, 90, origin=(0, 0)) if rotated else anchor
+    else:
+        ref = geom
+    x0, y0, _x1, _y1 = ref.bounds
     return translate(geom, tx - x0, ty - y0)
 
 
@@ -338,11 +351,24 @@ def pack_sheets(case: CaseModel, apply_kerf: bool = True) -> list[PackedSheet]:
                 f"and fits none of the plates ({stock}, each minus the "
                 f"{margin:.0f} mm margin) in either orientation -- it cannot "
                 f"be cut from this stock")
-        parts.append((layer, geom, w, h))
+        engrave = layer.engrave
+        mirrored = False
+        if (layer.role == "floor" and engrave is not None
+                and not engrave.is_empty):
+            # Surface marks on the floor belong on its OUTSIDE (bottom) face.
+            # A laser engraves the face looking up at it, so the whole plate
+            # is cut mirrored -- outline and marks together -- and installed
+            # engraved side down, where the flip puts every hole back where
+            # the design says it is.
+            from shapely.affinity import scale as _scale
+            geom = _scale(geom, xfact=-1, yfact=1, origin=(0, 0))
+            engrave = _scale(engrave, xfact=-1, yfact=1, origin=(0, 0))
+            mirrored = True
+        parts.append((layer, geom, engrave, mirrored, w, h))
 
     # Tallest first: shelf height is set by the tallest part in the row, so
     # placing tall parts together keeps short rows short.
-    parts.sort(key=lambda p: (-max(p[2], p[3]), p[0].index))
+    parts.sort(key=lambda p: (-max(p[4], p[5]), p[0].index))
 
     # a shelf: [y, height, x-cursor]; a sheet: its shelves + its usable size
     sheets: list[dict] = []
@@ -353,7 +379,7 @@ def pack_sheets(case: CaseModel, apply_kerf: bool = True) -> list[PackedSheet]:
         if abs(w - h) > 1e-9:
             yield True, h, w
 
-    for layer, geom, w, h in parts:
+    for layer, geom, engrave, mirrored, w, h in parts:
         best = None  # (waste, sheet_i, shelf_i | None, rotated, pw, ph)
         for si, sheet in enumerate(sheets):
             shelves, uw, uh = sheet["shelves"], sheet["uw"], sheet["uh"]
@@ -400,9 +426,10 @@ def pack_sheets(case: CaseModel, apply_kerf: bool = True) -> list[PackedSheet]:
         out[si].placements.append(SheetPlacement(
             layer, tx, ty, rotated,
             _placed(geom, rotated, tx, ty),
-            _placed(layer.engrave, rotated, tx, ty)
-            if layer.engrave is not None and not layer.engrave.is_empty
-            else None))
+            _placed(engrave, rotated, tx, ty, anchor=geom)
+            if engrave is not None and not engrave.is_empty
+            else None,
+            mirrored))
         shelves[hi][2] = sx + pw + gap
 
     return out
@@ -523,7 +550,8 @@ def sheet_manifest(sheets: list[PackedSheet], case: CaseModel) -> str:
             lines.append(
                 f"  layer {layer.index:02d} {layer.role:<6} "
                 f"{layer.material.name:<20} {x1 - x0:6.1f} x {y1 - y0:6.1f} mm"
-                f"{'  (rotated 90)' if pl.rotated else ''}")
+                f"{'  (rotated 90)' if pl.rotated else ''}"
+                f"{'  (MIRRORED: install engraved face down)' if pl.mirrored else ''}")
         lines.append("")
     return "\n".join(lines)
 

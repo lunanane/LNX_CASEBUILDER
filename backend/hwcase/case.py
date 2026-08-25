@@ -195,21 +195,26 @@ def _apply_engravings(res: Resolved, layers: list[Layer]) -> None:
 
     from .engrave import build_engraving
 
-    lid = layers[-1]
-    marks, cuts = [], []
+    faces = {"lid": layers[-1], "floor": layers[0]}
+    marks = {"lid": [], "floor": []}
+    cuts = {"lid": [], "floor": []}
     for e in engravings:
-        g = build_engraving(e, clip=lid.geom)
+        face = e.face if e.face in faces else "lid"
+        plate = faces[face]
+        g = build_engraving(e, clip=plate.geom)
         if g.is_empty:
             # Two different problems, and telling somebody their label is off
             # the edge of the plate when it is actually blank sends them to
             # look in the wrong place.
             if e.pattern == Pattern.text and not (e.text or "").strip():
-                lid.notes.append(f"engraving {e.name!r} has no text in it")
+                plate.notes.append(f"engraving {e.name!r} has no text in it")
             else:
-                lid.notes.append(f"engraving {e.name!r} falls outside the lid")
+                plate.notes.append(
+                    f"engraving {e.name!r} falls outside the "
+                    f"{'lid' if face == 'lid' else 'base plate'}")
             continue
-        (cuts if e.through else marks).append(g)
-        lid.notes.append(
+        (cuts[face] if e.through else marks[face]).append(g)
+        plate.notes.append(
             f"{'cut-through' if e.through else 'engraved'} {e.pattern.value}"
             f" {e.name!r}")
 
@@ -222,14 +227,15 @@ def _apply_engravings(res: Resolved, layers: list[Layer]) -> None:
         gx0, gy0, gx1, gy1 = g.bounds
         over = max(x0 - gx0, gx1 - x1, y0 - gy0, gy1 - y1)
         if over > 0.5:
-            lid.notes.append(
+            plate.notes.append(
                 f"{e.name!r} is {over:.1f} mm bigger than the "
                 f"{e.size[0]:.0f} x {e.size[1]:.0f} mm box it sits in")
 
-    if marks:
-        lid.engrave = unary_union(marks)
-    if cuts:
-        lid.geom = lid.geom.difference(unary_union(cuts))
+    for face, plate in faces.items():
+        if marks[face]:
+            plate.engrave = unary_union(marks[face])
+        if cuts[face]:
+            plate.geom = plate.geom.difference(unary_union(cuts[face]))
 
 
 def _report_orphan_supports(res: Resolved, layers: list[Layer], notes_to) -> None:

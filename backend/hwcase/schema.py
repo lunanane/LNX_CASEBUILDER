@@ -653,6 +653,13 @@ class Engraving(Strict):
     #: because it changes whether the part still holds together.
     through: bool = False
 
+    #: which outer plate carries it: the faceplate (lid) or the back plate
+    #: (floor). A through grill works the same on either; surface marks on
+    #: the floor are exported mirrored, plate and all, so you engrave the
+    #: sheet as drawn and flip the plate when assembling.
+    face: Literal["lid", "floor"] = "lid"
+
+
     #: What a label says. Newlines start a new line.
     text: Optional[str] = None
     #: Cap height in millimetres -- the dimension you measure on a finished

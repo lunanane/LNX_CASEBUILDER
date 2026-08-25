@@ -2684,7 +2684,6 @@ def test_catalog_survives_the_vendor_being_down(tmp_path, monkeypatch):
     cache.mkdir(parents=True)
     (cache / "adafruit-products.json").write_text(json.dumps(PRODUCTS),
                                                   encoding="utf-8")
-
     def explode(*a, **kw):
         raise OSError("connection refused")
 
@@ -2867,6 +2866,89 @@ def test_a_pattern_stays_inside_the_box_it_was_given():
         x0, y0, x1, y1 = build_engraving(e, clip).bounds
         assert x0 >= -40.001 and x1 <= 40.001, pattern.value
         assert y0 >= -20.001 and y1 <= 20.001, pattern.value
+
+
+def test_the_outer_ring_is_not_flat_topped():
+    """The outermost ring used to sit exactly on the box edge, so the crop
+    took half a stroke off its top and bottom and it read as a flattened
+    circle. Half a stroke of inset keeps it round."""
+    from hwcase.engrave import build_engraving
+    from hwcase.schema import Engraving
+
+    e = Engraving(name="r", pattern="rings", at=(0.0, 0.0), size=(60.0, 30.0),
+                  stroke=1.2, pitch=3.0)
+    g = build_engraving(e)
+    x0, y0, x1, y1 = g.bounds
+    # round: the extreme x and the extreme y of the outer ring are equal
+    assert abs((x1 - x0) - (y1 - y0)) < 1e-6, "outer ring is cropped flat"
+    assert y1 <= 15.0 + 1e-6
+
+
+def test_an_engraving_can_choose_the_backplate(lib):
+    """A vent grill belongs on the back as often as the front. face='floor'
+    puts the pattern on the base plate: a through grill takes real material
+    out of it, surface marks land in its engrave pass, and the lid carries
+    neither."""
+    scene = load_scene(SCENE)
+    res0 = resolve(scene, lib)
+    m0 = build(res0)
+    fx0, fy0, fx1, fy1 = m0.layers[0].geom.bounds
+    cx, cy = (fx0 + fx1) / 2, (fy0 + fy1) / 2
+    base_area = m0.layers[0].geom.area
+
+    from hwcase.schema import Engraving
+    scene2 = load_scene(SCENE)
+    scene2.engravings = [
+        Engraving(name="vent", pattern="slots", at=(cx, cy),
+                  size=(40.0, 24.0), through=True, face="floor"),
+        Engraving(name="mark", pattern="rule", at=(cx, cy + 30),
+                  size=(30.0, 6.0), face="floor"),
+    ]
+    model = build(resolve(scene2, lib))
+    floor, lid = model.layers[0], model.layers[-1]
+    assert base_area - floor.geom.area > 10.0, "the grill cut nothing"
+    assert floor.engrave is not None and not floor.engrave.is_empty
+    assert lid.engrave is None or lid.engrave.is_empty
+    assert any("vent" in n for n in floor.notes)
+
+
+def test_sheet_marks_ride_with_their_plate(lib):
+    """The packer used to normalise the engrave pass by ITS OWN bounding box,
+    which pinned every grill and label to the plate's min corner. Marks must
+    take the same rotation and offset as the outline they sit on -- and a
+    floor plate carrying surface marks is exported mirrored, outline and
+    marks together, to be installed engraved face down."""
+    from hwcase.export import pack_sheets, sheet_manifest
+    from hwcase.schema import Engraving
+
+    scene = load_scene(SCENE)
+    m0 = build(resolve(scene, lib))
+    fx0, fy0, fx1, fy1 = m0.layers[0].geom.bounds
+    lx0, ly0, lx1, ly1 = m0.layers[-1].geom.bounds
+
+    scene2 = load_scene(SCENE)
+    scene2.engravings = [
+        Engraving(name="back", pattern="rule", face="floor",
+                  at=((fx0 + fx1) / 2, (fy0 + fy1) / 2), size=(30.0, 6.0)),
+        Engraving(name="front", pattern="rule",
+                  at=((lx0 + lx1) / 2, (ly0 + ly1) / 2), size=(30.0, 6.0)),
+    ]
+    scene2.case = scene2.case.model_copy(update={"plates": [(400.0, 400.0)]})
+    model = build(resolve(scene2, lib))
+    sheets = pack_sheets(model)
+    seen = 0
+    for sheet in sheets:
+        for pl in sheet.placements:
+            if pl.engrave is None or pl.engrave.is_empty:
+                continue
+            seen += 1
+            gx0, gy0, gx1, gy1 = pl.geom.bounds
+            ex0, ey0, ex1, ey1 = pl.engrave.bounds
+            assert (gx0 - 1e-6 <= ex0 and ex1 <= gx1 + 1e-6 and
+                    gy0 - 1e-6 <= ey0 and ey1 <= gy1 + 1e-6),                 f"layer {pl.layer.index}: marks are off their plate"
+            assert pl.mirrored == (pl.layer.role == "floor")
+    assert seen == 2
+    assert "MIRRORED: install engraved face down" in sheet_manifest(sheets, model)
 
 
 def test_an_engraving_is_clipped_to_the_plate():
