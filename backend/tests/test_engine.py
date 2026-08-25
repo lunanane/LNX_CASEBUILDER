@@ -2684,6 +2684,14 @@ def test_catalog_survives_the_vendor_being_down(tmp_path, monkeypatch):
     cache.mkdir(parents=True)
     (cache / "adafruit-products.json").write_text(json.dumps(PRODUCTS),
                                                   encoding="utf-8")
+    # back-date the cache: ttl=0 needs age > 0 to attempt a refresh, and on
+    # Windows a just-written file's mtime can land at-or-after the clock read
+    # that computes the age, so the refresh silently never happened
+    import os as _os
+    import time as _time
+    t = _time.time() - 3600
+    _os.utime(cache / "adafruit-products.json", (t, t))
+
     def explode(*a, **kw):
         raise OSError("connection refused")
 
