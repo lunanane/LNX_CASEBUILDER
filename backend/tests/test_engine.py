@@ -4368,3 +4368,43 @@ def test_the_void_survives_the_ties(lib):
         assert len(homes) <= 1, (
             f"layer {layer.index}: reachable mouths live in {len(homes)} "
             f"separate void pieces -- a tie rib severed the cable tunnel")
+
+
+# ---------------------------------------------------------------------------
+# a graze is not a collision, and a collision is not a graze
+# ---------------------------------------------------------------------------
+
+def _two_boards_overlapping_by(lib, depth):
+    """Two hubs stacked so exactly one pair of bodies interferes by `depth`.
+
+    The second hub sits directly over the first (far from the lab pi), height
+    chosen so its 2 mm underside volume digs `depth` into the hub's sockets
+    -- underside world bottom = pos.z - 2.0, so pos.z = top + 2.0 - depth.
+    """
+    from hwcase.schema import Placement
+
+    scene = lab()
+    top = max(s.z[1] for s in resolve(scene, lib).solids
+              if s.placement == "hub")
+    scene.placements.append(Placement(
+        id="over", part="seeed-grove-tca9548a", mount="manual",
+        pos=(140.0, 0.0, top + 2.0 - depth)))
+    return check(resolve(scene, lib), lib)
+
+
+def test_sub_tolerance_interference_is_a_graze(lib):
+    """0.07 mm against a datasheet-guessed height is inside the guess's error
+    bar -- the kerf alone is 0.15 mm. Painting a board red for it buries the
+    collisions that actually stop a build."""
+    issues = _two_boards_overlapping_by(lib, 0.1)
+    assert any(i.code == "graze" and i.level == "warning" for i in issues)
+    assert not any(i.code == "collision" for i in issues)
+    graze = next(i for i in issues if i.code == "graze")
+    assert "measure" in graze.message, "a graze asks for calipers"
+
+
+def test_real_interference_is_still_an_error(lib):
+    """The graze tier must not soften genuine crashes."""
+    issues = _two_boards_overlapping_by(lib, 1.5)
+    assert any(i.code == "collision" and i.level == "error" for i in issues)
+    assert not any(i.code == "graze" for i in issues)

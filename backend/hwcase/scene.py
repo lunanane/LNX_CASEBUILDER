@@ -728,6 +728,13 @@ def _related(res: Resolved, a: str, b: str) -> bool:
     return res.parents.get(a) == b or res.parents.get(b) == a
 
 
+#: Vertical interference below this is a graze, not a collision. The case is
+#: cut with a 0.15 mm kerf into plywood that varies more than that; an
+#: interference smaller than the build tolerance cannot be distinguished from
+#: measurement error, especially against estimated volumes.
+GRAZE = 0.2
+
+
 def check(res: Resolved, lib: PartLibrary) -> list[Issue]:
     """Everything that could make this layout not work in the real world."""
     issues = list(res.issues)
@@ -743,11 +750,28 @@ def check(res: Resolved, lib: PartLibrary) -> list[Issue]:
                 continue
             inter = a.poly.intersection(b.poly)
             if inter.area > 0.5:
-                issues.append(Issue(
-                    "error", "collision",
-                    f"{a.ref} and {b.ref} overlap by {inter.area:.1f} mm^2 "
-                    f"over {z_overlap(a.z, b.z):.1f} mm of height",
-                    [a.ref, b.ref]))
+                depth = z_overlap(a.z, b.z)
+                if depth < GRAZE:
+                    # Interference below the tolerance the case is even cut
+                    # to (the kerf alone is 0.15 mm) is a graze, not a crash.
+                    # It became visible when part undersides went from
+                    # estimated slabs to measured bumps: a 0.07 mm clash
+                    # between a measured solder tail and a datasheet-guessed
+                    # box height is inside the guess's error bar, and
+                    # painting the board red for it buries real collisions.
+                    # Still reported -- it wants calipers, not silence.
+                    issues.append(Issue(
+                        "warning", "graze",
+                        f"{a.ref} grazes {b.ref} by {depth:.2f} mm over "
+                        f"{inter.area:.1f} mm^2 -- below build tolerance; "
+                        f"measure before trusting either part's height",
+                        [a.ref, b.ref]))
+                else:
+                    issues.append(Issue(
+                        "error", "collision",
+                        f"{a.ref} and {b.ref} overlap by {inter.area:.1f} mm^2 "
+                        f"over {depth:.1f} mm of height",
+                        [a.ref, b.ref]))
 
     # 2. wiring room: unrelated parts closer than cable_clearance
     gap = case.cable_clearance
