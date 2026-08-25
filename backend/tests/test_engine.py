@@ -3959,16 +3959,62 @@ def test_sheet_files_are_one_per_sheet_plus_the_cutlist(lib):
     assert names[-1] == "fixture-cutlist.txt"
     assert all(f"of-{len(sheets):02d}" in n for n in names[:-1])
 
-    # every sheet SVG parses and is exactly the bed size
+    # every sheet SVG parses, is exactly the bed size, and draws NO frame --
+    # a cutter that runs every path in the file was cutting the bed outline
     for _name, content in files[:-1]:
         root = ET.fromstring(content)
         assert root.get("width") == "400.00mm"
-        assert 'data-role="sheet"' in content
+        assert 'data-role="sheet"' not in content
 
     manifest = files[-1][1]
-    assert "grey = sheet outline" in manifest
+    assert "no sheet frame" in manifest
     for layer in model.layers:
         assert f"layer {layer.index:02d}" in manifest
+
+
+def test_outer_edges_are_cut_last(lib):
+    """The cutter runs paths in file order. An outer edge run early drops the
+    part out of the sheet before its holes exist, so in every export -- the
+    strip SVG, each sheet SVG, each sheet DXF -- every hole comes before
+    every outline, and the outline that frees the most material is the very
+    last path of all."""
+    import io
+    import re
+
+    from hwcase.export import (_holes_then_outlines, pack_sheets,
+                               sheet_to_dxf_text, sheet_to_svg, to_svg)
+
+    model = build(resolve(load_scene(SCENE), lib))
+    model.spec.plates = [(400.0, 400.0)]
+
+    def all_outlines_after_holes(svg):
+        order = re.findall(r'data-pass="(holes|outline)"', svg)
+        assert "outline" in order and "holes" in order
+        first = order.index("outline")
+        assert all(o == "outline" for o in order[first:]),             "an outline group comes before a holes group"
+
+    all_outlines_after_holes(to_svg(model))
+
+    sheets = pack_sheets(model)
+    for sheet in sheets:
+        all_outlines_after_holes(sheet_to_svg(sheet))
+
+        import ezdxf
+        doc = ezdxf.read(io.StringIO(sheet_to_dxf_text(sheet)))
+        keys = set()
+        for pl in sheet.placements:
+            _holes, outs = _holes_then_outlines(pl.geom)
+            for r in outs:
+                keys.add((round(r[0][0], 3), round(r[0][1], 3)))
+        flags = []
+        for e in doc.modelspace():
+            assert e.dxf.layer != "SHEET", "the frame is back in the DXF"
+            if e.dxf.layer.endswith("_ENGRAVE"):
+                continue
+            pts = e.get_points()
+            flags.append((round(pts[0][0], 3), round(pts[0][1], 3)) in keys)
+        first = flags.index(True)
+        assert all(flags[first:]),             "a hole entity comes after an outline entity in the DXF"
 
 
 def test_the_sheets_zip_holds_every_file(lib):

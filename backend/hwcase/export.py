@@ -24,6 +24,26 @@ def _rings(poly: Polygon) -> list[list[tuple[float, float]]]:
     return [list(poly.exterior.coords)] + [list(r.coords) for r in poly.interiors]
 
 
+def _holes_then_outlines(geom):
+    """Rings split into (holes, outlines), each a list of coordinate lists.
+
+    A cutter runs paths in file order, and a part whose outer edge is cut
+    first falls out of the sheet before its holes exist. So: every interior
+    ring is a hole, every exterior is an outline, and outlines are sorted
+    smallest piece first so the edge that frees the largest chunk of material
+    is always the very last path.
+    """
+    polys = sorted(_polys(geom), key=lambda pp: pp.area)
+    holes = [list(r.coords) for pp in polys for r in pp.interiors]
+    outlines = [list(pp.exterior.coords) for pp in polys]
+    return holes, outlines
+
+
+def _ring_path(ring) -> str:
+    return ('<path d="M '
+            + " L ".join(f"{x:.3f},{y:.3f}" for x, y in ring) + ' Z"/>')
+
+
 def pack(case: CaseModel) -> list[tuple[Layer, float, float]]:
     """Lay the layers out side by side, wrapping at the sheet width."""
     sheet_w = case.layers[0].material.sheet[0] if case.layers else 600.0
@@ -48,32 +68,29 @@ def pack(case: CaseModel) -> list[tuple[Layer, float, float]]:
 def to_svg(case: CaseModel, apply_kerf: bool = True) -> str:
     placed = pack(case)
     parts: list[str] = []
+    tail: list[str] = []
     max_x = max_y = 0.0
     for layer, dx, dy in placed:
         geom = kerf_compensated(layer.geom, layer.material.kerf) if apply_kerf else layer.geom
         geom = translate(geom, dx, dy)
         x0, y0, x1, y1 = geom.bounds
         max_x, max_y = max(max_x, x1), max(max_y, y1)
-        paths = []
-        for poly in _polys(geom):
-            for ring in _rings(poly):
-                d = "M " + " L ".join(f"{x:.3f},{y:.3f}" for x, y in ring) + " Z"
-                paths.append(f'<path d="{d}"/>')
+        holes, outlines = _holes_then_outlines(geom)
         # Engraving is never kerf-compensated: a mark is where you asked
         # for it, and widening it by half a kerf just makes it fat.
         marks = []
         if layer.engrave is not None and not layer.engrave.is_empty:
             for poly in _polys(translate(layer.engrave, dx, dy)):
                 for ring in _rings(poly):
-                    d = "M " + " L ".join(f"{x:.3f},{y:.3f}" for x, y in ring) + " Z"
-                    marks.append(f'<path d="{d}"/>')
+                    marks.append(_ring_path(ring))
 
         label = f"{layer.index:02d} {layer.role} {layer.material.name} " \
                 f"z {layer.z0:.1f}..{layer.z1:.1f}"
         parts.append(
             f'<g id="layer-{layer.index}" data-role="{layer.role}" '
-            f'data-material="{layer.material.name}">\n'
-            f'  <title>{label}</title>\n  ' + "\n  ".join(paths) + "\n</g>"
+            f'data-pass="holes" data-material="{layer.material.name}">\n'
+            f'  <title>{label} -- inner cuts first</title>\n  '
+            + "\n  ".join(_ring_path(r) for r in holes) + "\n</g>"
         )
         if marks:
             # Blue, and its own group. Every cutter's software wants cut and
@@ -83,9 +100,18 @@ def to_svg(case: CaseModel, apply_kerf: bool = True) -> str:
                 f'stroke="#0000ff">\n  <title>{label} -- ENGRAVE, do not cut'
                 f'</title>\n  ' + "\n  ".join(marks) + "\n</g>"
             )
+        # Outer edges at the very END of the file, after every hole of every
+        # layer: a cutter runs paths in document order, and an outline run
+        # early drops the part out of the sheet before its holes exist.
+        tail.append(
+            f'<g id="layer-{layer.index}-outline" data-role="{layer.role}" '
+            f'data-pass="outline" data-material="{layer.material.name}">\n'
+            f'  <title>{label} -- outer edge, cut last</title>\n  '
+            + "\n  ".join(_ring_path(r) for r in outlines) + "\n</g>"
+        )
     w = max_x + SHEET_MARGIN
     h = max_y + SHEET_MARGIN
-    body = "\n".join(parts)
+    body = "\n".join(parts + tail)
     # y is flipped so the SVG reads the same way up as the 3D view
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w:.2f}mm" '
@@ -101,16 +127,21 @@ def to_dxf(case: CaseModel, path: Path, apply_kerf: bool = True) -> Path:
     doc = ezdxf.new(setup=True)
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
+    # Entity order IS cut order on a cutter that runs the file as-is, so the
+    # outer edges are queued and appended after every hole of every layer:
+    # an outline run early drops the part before its holes are cut.
+    deferred: list[tuple[list, str]] = []
     for layer, dx, dy in pack(case):
         name = f"L{layer.index:02d}_{layer.role}"
         if name not in doc.layers:
             doc.layers.add(name)
         geom = kerf_compensated(layer.geom, layer.material.kerf) if apply_kerf else layer.geom
         geom = translate(geom, dx, dy)
-        for poly in _polys(geom):
-            for ring in _rings(poly):
-                msp.add_lwpolyline([(x, y) for x, y in ring], close=True,
-                                   dxfattribs={"layer": name})
+        holes, outlines = _holes_then_outlines(geom)
+        for ring in holes:
+            msp.add_lwpolyline([(x, y) for x, y in ring], close=True,
+                               dxfattribs={"layer": name})
+        deferred.extend((ring, name) for ring in outlines)
 
         if layer.engrave is not None and not layer.engrave.is_empty:
             mark_layer = f"{name}_ENGRAVE"
@@ -120,6 +151,9 @@ def to_dxf(case: CaseModel, path: Path, apply_kerf: bool = True) -> Path:
                 for ring in _rings(poly):
                     msp.add_lwpolyline([(x, y) for x, y in ring], close=True,
                                        dxfattribs={"layer": mark_layer})
+    for ring, name in deferred:
+        msp.add_lwpolyline([(x, y) for x, y in ring], close=True,
+                           dxfattribs={"layer": name})
     path.parent.mkdir(parents=True, exist_ok=True)
     doc.saveas(path)
     return path
@@ -447,34 +481,40 @@ def _path_group(geom, indent: str = "  ") -> list[str]:
 def sheet_to_svg(sheet: PackedSheet) -> str:
     """One bed-load as one SVG, canvas exactly the physical sheet.
 
-    The sheet boundary is drawn in its own grey group so it can be aligned
-    against the bed and then ignored -- it is data-role="sheet", never red,
-    and a cutter set to cut red only will not touch it.
+    No sheet boundary is drawn: cutters that run every path in the file were
+    cutting the frame as a 350 x 350 cut. The canvas itself is the bed size,
+    which is all the alignment the frame ever provided.
+
+    Path order is cut order on such a cutter, so every hole of every part
+    comes first and every outer edge comes last -- an outline run early
+    drops the part out of the sheet before its holes exist.
     """
     w, h = sheet.width, sheet.height
-    parts: list[str] = [
-        f'<g data-role="sheet" stroke="#bbbbbb">\n'
-        f'  <title>sheet outline -- align, do not cut</title>\n'
-        f'  <path d="M 0,0 L {w:.1f},0 L {w:.1f},{h:.1f} L 0,{h:.1f} Z"/>\n'
-        f'</g>'
-    ]
+    parts: list[str] = []
+    tail: list[str] = []
     for pl in sheet.placements:
         layer = pl.layer
         label = (f"{layer.index:02d} {layer.role} {layer.material.name}"
                  + (" (rotated)" if pl.rotated else ""))
+        holes, outlines = _holes_then_outlines(pl.geom)
         parts.append(
             f'<g id="layer-{layer.index}" data-role="{layer.role}" '
-            f'data-material="{layer.material.name}">\n'
-            f'  <title>{label}</title>\n'
-            + "\n".join(_path_group(pl.geom)) + "\n</g>")
+            f'data-pass="holes" data-material="{layer.material.name}">\n'
+            f'  <title>{label} -- inner cuts first</title>\n  '
+            + "\n  ".join(_ring_path(r) for r in holes) + "\n</g>")
         if pl.engrave is not None:
             parts.append(
                 f'<g id="engrave-{layer.index}" data-role="engrave" '
                 f'stroke="#0000ff">\n'
                 f'  <title>{label} -- ENGRAVE, do not cut</title>\n'
                 + "\n".join(_path_group(pl.engrave)) + "\n</g>")
+        tail.append(
+            f'<g id="layer-{layer.index}-outline" data-role="{layer.role}" '
+            f'data-pass="outline" data-material="{layer.material.name}">\n'
+            f'  <title>{label} -- outer edge, cut last</title>\n  '
+            + "\n  ".join(_ring_path(r) for r in outlines) + "\n</g>")
 
-    body = "\n".join(parts)
+    body = "\n".join(parts + tail)
     # y flipped so the sheet reads the same way up as the 3D view
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w:.2f}mm" '
@@ -494,19 +534,17 @@ def sheet_to_dxf_text(sheet: PackedSheet) -> str:
     doc.units = ezdxf.units.MM
     msp = doc.modelspace()
 
-    doc.layers.add("SHEET", color=8)
-    w, h = sheet.width, sheet.height
-    msp.add_lwpolyline([(0, 0), (w, 0), (w, h), (0, h)], close=True,
-                       dxfattribs={"layer": "SHEET"})
-
+    # no SHEET frame: cutters that run the whole file were cutting it
+    deferred: list[tuple[list, str]] = []
     for pl in sheet.placements:
         name = f"L{pl.layer.index:02d}_{pl.layer.role}"
         if name not in doc.layers:
             doc.layers.add(name)
-        for poly in _polys(pl.geom):
-            for ring in _rings(poly):
-                msp.add_lwpolyline(list(ring), close=True,
-                                   dxfattribs={"layer": name})
+        holes, outlines = _holes_then_outlines(pl.geom)
+        for ring in holes:
+            msp.add_lwpolyline(list(ring), close=True,
+                               dxfattribs={"layer": name})
+        deferred.extend((ring, name) for ring in outlines)
         if pl.engrave is not None:
             ename = f"{name}_ENGRAVE"
             if ename not in doc.layers:
@@ -515,6 +553,11 @@ def sheet_to_dxf_text(sheet: PackedSheet) -> str:
                 for ring in _rings(poly):
                     msp.add_lwpolyline(list(ring), close=True,
                                        dxfattribs={"layer": ename})
+
+    # outer edges dead last, after every hole and every engrave pass
+    for ring, name in deferred:
+        msp.add_lwpolyline(list(ring), close=True,
+                           dxfattribs={"layer": name})
 
     buf = io.StringIO()
     doc.write(buf)
@@ -537,8 +580,8 @@ def sheet_manifest(sheets: list[PackedSheet], case: CaseModel) -> str:
         + f" mm, {spec.sheet_margin:.0f} mm edge margin, "
         f"{spec.sheet_spacing:.0f} mm between parts",
         f"pull from stock: {pull}",
-        "red = cut, blue = engrave (mark only), grey = sheet outline "
-        "(align, do not cut)",
+        "red = cut (holes first, outer edges last), blue = engrave "
+        "(mark only); no sheet frame is drawn -- the canvas is the bed",
         "",
     ]
     for sheet in sheets:

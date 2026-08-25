@@ -422,9 +422,17 @@ automatically when that fits better; a layer that fits **no plate** either
 way round is refused with its size and the whole stock in the message,
 because silently dropping a floor plate is not an export.
 
-Each sheet file is exactly the bed size, with the sheet outline in **grey**
-in its own group/layer (align it, don't cut it), cuts in **red**, engraving
-in **blue** on its own DXF layer as before.
+Each sheet file is exactly the bed size — and that canvas is the only
+"frame" there is. No sheet outline is drawn at all: a cutter that runs every
+path in the file was cutting the bed rectangle as a real cut. Cuts are in
+**red**, engraving in **blue** on its own DXF layer as before.
+
+Path order is cut order on such a cutter, so the files are written the way a
+laser must run them: **every hole first, every outer edge last** — in SVG as
+`data-pass="holes"` groups followed by `data-pass="outline"` groups, in DXF
+as plain entity order. An outer edge run early drops the part out of the
+sheet before its holes exist; here the outline that frees the most material
+is always the very last path in the file.
 
 Saving: a browser with a directory picker (Chrome, Edge) asks for a folder
 and writes the files into it. Firefox has no such API, so there the same
