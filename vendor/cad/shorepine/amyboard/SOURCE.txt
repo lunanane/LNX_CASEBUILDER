@@ -1,0 +1,5 @@
+Source: https://github.com/shorepine/tulipcc/tree/main/docs/pcbs/amyboard
+Fetched: 2026-08-26
+License: see tulipcc repository
+amyboard-v1.5.brd    - Eagle board, the authority on every connector position
+amyboard_front_panel.dxf - vendor 10 HP acrylic panel, the authority on the jack drill (7.7 mm)

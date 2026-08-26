@@ -19,54 +19,56 @@ parts:
       faceplate of this case. Ten of them in TWO COLUMNS OF FIVE hard against
       the +X edge, rows SPDIF / LINE / MIDI / CV1 / CV2 top to bottom, left
       column IN and right column OUT.
-      Dimensions are scaled off the vendor's annotated photos in vendor/img/
-      using the USB-C shell (8.94 mm) as the ruler. The shape is right; the
-      millimetres are estimates and the jack pitch is the weakest of them.
-      MEASURE ME -- you own this board.
+      Dimensions come from the vendor's own files: amyboard-v1.5.brd (Eagle,
+      board outline, every connector position) and amyboard_front_panel.dxf
+      (jack drill size, display window) at tulipcc/docs/pcbs/amyboard. The
+      first faceplate was cut from photo-scaled estimates and the jacks did
+      not line up: the real pitch is 11.0 mm along the board and 9.7 mm
+      between the IN and OUT columns, not 12 x 12.
+      Frame mapping: our x = the board's short axis (48 mm, Eagle y), our
+      y = its long axis (106 mm, Eagle x), +z = the jack side. The board has
+      NO mounting holes -- it hangs from its ten jack bushings clamped to
+      the panel, which is how Eurorack modules mount.
     src:
-      confidence: estimated
-      url: https://github.com/shorepine/tulipcc/blob/main/docs/amyboard/README.md
+      confidence: datasheet
+      url: https://github.com/shorepine/tulipcc/tree/main/docs/pcbs/amyboard
 
     outline:
       type: rect
-      size: [50.5, 105.0]
-      corner_radius: 2.0
+      size: [48.0, 106.0]           # amyboard-v1.5.brd Dimension layer
+      corner_radius: 0.5
       origin: min
     pcb_thickness: 1.6
 
-    # Four corner holes, visible in the vendor's board photos at roughly 3.5 mm
-    # in from each edge. Shorepine publish no drawing and there is no STEP to
-    # read, so unlike the Adafruit boards these are NOT extracted -- they are
-    # scaled off the photograph. MEASURE ME before you drill a bottom plate.
-    holes:
-      - {name: h1, at: [3.5, 3.5], diameter: 3.2, screw: M3, src: {confidence: estimated, note: "from the vendor photo"}}
-      - {name: h2, at: [47.0, 3.5], diameter: 3.2, screw: M3, src: {confidence: estimated, note: "from the vendor photo"}}
-      - {name: h3, at: [3.5, 101.5], diameter: 3.2, screw: M3, src: {confidence: estimated, note: "from the vendor photo"}}
-      - {name: h4, at: [47.0, 101.5], diameter: 3.2, screw: M3, src: {confidence: estimated, note: "from the vendor photo"}}
+    # NO mounting holes. The v1.5 Eagle board has no drill of 2 mm or more
+    # anywhere -- the four "corner holes" a photo once suggested were vias
+    # and silk. The module hangs from its ten jack bushings clamped to the
+    # faceplate, exactly like any other Eurorack module.
 
     volumes:
       - name: back_components
         kind: body
-        at: [25.25, 52.5]
-        size: [50.5, 105.0]
+        at: [24.0, 53.0]
+        size: [48.0, 106.0]
         z: [-11.4, 0.0]
-        src: {confidence: estimated, note: "power header and Tulip port are the tall ones"}
-      # Ten panel-mount jacks, 2 columns x 5 rows on a 12 mm pitch. Grid centre
-      # (39.0, 32.05): columns at x 33 and 45, rows at y 8.05 .. 56.05.
+        src: {confidence: estimated, note: "power header and Tulip port are the tall ones; height still a photo estimate"}
+      # Ten NV-PJ3410 panel jacks, 2 columns x 5 rows. From the v1.5 board:
+      # columns at x 33.0 (IN) and 42.7 (OUT), rows at y 9.5 .. 53.5 on an
+      # 11.0 mm pitch. Grid centre (37.85, 31.5).
       - name: jack_bodies
         kind: body
-        at: [39.0, 32.05]
-        size: [9.5, 9.5]
+        at: [37.85, 31.5]
+        size: [9.4, 9.4]
         z: [1.6, 12.6]
-        repeat: {count: [2, 5], pitch: [12.0, 12.0]}
-        src: {confidence: estimated, note: "body height sets how far the panel stands off"}
+        repeat: {count: [2, 5], pitch: [9.7, 11.0]}
+        src: {confidence: datasheet, note: "positions from amyboard-v1.5.brd; body height sets how far the panel stands off"}
       - name: jack_threads
         kind: actuator
-        at: [39.0, 32.05]
-        size: [6.5, 6.5]
+        at: [37.85, 31.5]
+        size: [7.0, 7.0]
         z: [12.6, 17.0]
         shape: circle
-        repeat: {count: [2, 5], pitch: [12.0, 12.0]}
+        repeat: {count: [2, 5], pitch: [9.7, 11.0]}
         src:
           confidence: estimated
           note: >-
@@ -75,8 +77,8 @@ parts:
             them, not one slot.
       - name: display_space
         kind: keepout
-        at: [25.25, 86.0]
-        size: [46.0, 34.0]
+        at: [24.0, 85.5]
+        size: [44.0, 41.0]
         z: [1.6, 12.6]
         src:
           confidence: estimated
@@ -87,21 +89,23 @@ parts:
 
     connectors:
       # mouths sit at the panel plane, z = 12.6
-      - {name: spdif_in,  type: jack_3v5, face: +z, at: [33.0, 56.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
-      - {name: spdif_out, type: jack_3v5, face: +z, at: [45.0, 56.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
-      - {name: line_in,   type: jack_3v5, face: +z, at: [33.0, 44.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
-      - {name: line_out,  type: jack_3v5, face: +z, at: [45.0, 44.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
-      - {name: midi_in,   type: jack_3v5, face: +z, at: [33.0, 32.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
-      - {name: midi_out,  type: jack_3v5, face: +z, at: [45.0, 32.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
-      - {name: cv1_in,    type: jack_3v5, face: +z, at: [33.0, 20.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
-      - {name: cv1_out,   type: jack_3v5, face: +z, at: [45.0, 20.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
-      - {name: cv2_in,    type: jack_3v5, face: +z, at: [33.0, 8.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
-      - {name: cv2_out,   type: jack_3v5, face: +z, at: [45.0, 8.05, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [6.5, 6.5], cutout_shape: circle, external: true, src: {confidence: estimated}}
+      # Positions from amyboard-v1.5.brd; the 7.7 mm hole is the drill the
+      # vendor's own acrylic panel uses for these bushings (M7 thread).
+      - {name: spdif_in,  type: jack_3v5, face: +z, at: [33.0, 53.5, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.7, 7.7], cutout_shape: circle, external: true, src: {confidence: datasheet}}
+      - {name: spdif_out, type: jack_3v5, face: +z, at: [42.7, 53.5, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.7, 7.7], cutout_shape: circle, external: true, src: {confidence: datasheet}}
+      - {name: line_in,   type: jack_3v5, face: +z, at: [33.0, 42.5, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.7, 7.7], cutout_shape: circle, external: true, src: {confidence: datasheet}}
+      - {name: line_out,  type: jack_3v5, face: +z, at: [42.7, 42.5, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.7, 7.7], cutout_shape: circle, external: true, src: {confidence: datasheet}}
+      - {name: midi_in,   type: jack_3v5, face: +z, at: [33.0, 31.5, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.7, 7.7], cutout_shape: circle, external: true, src: {confidence: datasheet}}
+      - {name: midi_out,  type: jack_3v5, face: +z, at: [42.7, 31.5, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.7, 7.7], cutout_shape: circle, external: true, src: {confidence: datasheet}}
+      - {name: cv1_in,    type: jack_3v5, face: +z, at: [33.0, 20.5, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.7, 7.7], cutout_shape: circle, external: true, src: {confidence: datasheet}}
+      - {name: cv1_out,   type: jack_3v5, face: +z, at: [42.7, 20.5, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.7, 7.7], cutout_shape: circle, external: true, src: {confidence: datasheet}}
+      - {name: cv2_in,    type: jack_3v5, face: +z, at: [33.0, 9.5, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.7, 7.7], cutout_shape: circle, external: true, src: {confidence: datasheet}}
+      - {name: cv2_out,   type: jack_3v5, face: +z, at: [42.7, 9.5, 12.6], plug_depth: 22.0, bend_radius: 25.0, cutout: [7.7, 7.7], cutout_shape: circle, external: true, src: {confidence: datasheet}}
 
       - name: i2c_accessories
         type: grove
-        face: +z
-        at: [9.5, 9.65, 1.6]
+        face: -y
+        at: [10.3, 0.0, 4.0]
         plug_depth: 10.0
         bend_radius: 14.0
         cutout: [14.0, 8.0]
@@ -109,11 +113,11 @@ parts:
         # this case -- it is not a port anyone plugs into from outside, so it
         # must not punch a hole through the faceplate.
         external: false
-        src: {confidence: estimated, note: "vendor calls this the front-panel I2C port"}
+        src: {confidence: datasheet, note: "silk I2C_HOST: side-entry JST-PH on the jack side, cable leaves the bottom edge (v1.5 brd)"}
       - name: usb_c
         type: usb_c
         face: +x
-        at: [50.5, 68.15, 0.8]
+        at: [48.0, 66.95, -1.6]
         plug_depth: 18.0
         bend_radius: 20.0
         cutout: [12.0, 8.0]
@@ -121,8 +125,8 @@ parts:
         src: {confidence: estimated}
       - name: microsd
         type: microsd
-        face: +x
-        at: [50.5, 100.05, 0.8]
+        face: +y
+        at: [34.8, 106.0, -1.5]
         plug_depth: 16.0
         bend_radius: 0.0
         cutout: [16.0, 4.0]
@@ -130,16 +134,16 @@ parts:
         src: {confidence: estimated}
       - name: i2c_tulip_host
         type: grove
-        face: -z
-        at: [45.9, 82.45, -11.4]
+        face: +x
+        at: [48.0, 79.1, -2.0]
         plug_depth: 12.0
         bend_radius: 15.0
         external: false
-        src: {confidence: estimated}
+        src: {confidence: datasheet, note: "silk I2C_CONTROL: side-entry JST-PH on the back, cable leaves the +x edge (v1.5 brd)"}
       - name: debug_serial
         type: header_1x6
         face: -z
-        at: [6.6, 82.15, -11.4]
+        at: [13.7, 76.0, -11.4]
         plug_depth: 10.0
         external: false
         src: {confidence: estimated}
@@ -148,15 +152,15 @@ parts:
       - name: panel
         standard: amyboard_panel
         role: socket
-        at: [39.0, 32.05, 12.6]
+        at: [37.85, 31.5, 12.6]
         face: +z
-        src: {confidence: estimated, note: "the plane the jack bushings clamp"}
+        src: {confidence: datasheet, note: "jack grid centre from the v1.5 board; the plane the bushings clamp"}
       - name: eurorack_power
         standard: eurorack_power_10
         role: socket
-        at: [6.0, 67.95, -11.4]
+        at: [5.8, 63.9, -11.4]
         face: -z
-        src: {confidence: estimated, note: "10-pin shrouded IDC on the back"}
+        src: {confidence: datasheet, note: "10-pin shrouded IDC, position from the v1.5 board"}
 
   - id: shorepine-amyboard-panel
     name: AMYboard acrylic front panel (10 HP)
@@ -202,9 +206,9 @@ parts:
       - name: board
         standard: amyboard_panel
         role: plug
-        at: [39.0, 43.8, 0.0]
+        at: [39.0, 42.85, 0.0]
         face: -z
-        src: {confidence: estimated, note: "jack grid centre, 11.75 mm up from the panel foot"}
+        src: {confidence: datasheet, note: "jack grid centre from amyboard_front_panel.dxf"}
 
   - id: seeed-grove-tca9548a
     name: Grove - 8 Channel I2C Multiplexer / I2C Hub (TCA9548A)

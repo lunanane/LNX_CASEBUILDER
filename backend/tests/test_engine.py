@@ -78,6 +78,29 @@ def test_pi_matches_the_official_drawing(lib):
     assert header.size == (50.8, 5.08)        # 2x20 on 2.54
 
 
+def test_amyboard_matches_the_vendor_board_file(lib):
+    """The first faceplate was cut from photo-scaled estimates and the jacks
+    did not line up. These numbers now come from amyboard-v1.5.brd and the
+    vendor's own panel DXF (vendored under vendor/cad/shorepine/amyboard),
+    so nobody 'fixes' them back by eye: 11.0 mm pitch along the board,
+    9.7 mm between the IN and OUT columns, a 7.7 mm panel drill, a
+    48 x 106 mm board -- and NO mounting holes, because the module hangs
+    from its jack bushings like any other Eurorack module."""
+    amy = lib["shorepine-amyboard"]
+    assert amy.outline.size == (48.0, 106.0)
+    assert amy.holes == [], "the board has no mounting holes; supports would be fiction"
+    threads = next(v for v in amy.volumes if v.name == "jack_threads")
+    assert threads.at == (37.85, 31.5)
+    assert threads.repeat.pitch == (9.7, 11.0)
+    jacks = [c for c in amy.connectors if c.type == "jack_3v5"]
+    assert len(jacks) == 10
+    assert all(c.cutout == (7.7, 7.7) for c in jacks)
+    cols = sorted({c.at[0] for c in jacks})
+    rows = sorted({c.at[1] for c in jacks})
+    assert cols == [33.0, 42.7]
+    assert rows == [9.5, 20.5, 31.5, 42.5, 53.5]
+
+
 def test_quad_encoder_is_the_strip_not_the_square(lib):
     """Shop pages say 25.6 x 25.3; the vendor CAD says otherwise. Regression
     guard so nobody 'fixes' this back to the wrong number."""
@@ -1070,7 +1093,7 @@ def test_amyboard_has_no_hovering_slab(lib):
     """It used to be modelled panel-first, so the outline solid was the 128 mm
     acrylic panel floating 11 mm above the board with nothing under most of it."""
     amy = lib["shorepine-amyboard"]
-    assert amy.outline.size == (50.5, 105.0), "the outline is the board, not the panel"
+    assert amy.outline.size == (48.0, 106.0), "the outline is the board, not the panel"
     names = [v.name for v in amy.volumes]
     assert len(names) == len(set(names)), "duplicate volume names"
     assert "pcb" not in names, "that name belongs to the solid made from the outline"
@@ -1402,13 +1425,14 @@ def test_a_round_connector_cuts_a_round_hole(lib):
 
 
 def test_an_explicit_cutout_is_not_widened(lib):
-    """A measured 6.5 mm hole must stay 6.5 mm -- it used to be clamped to 8."""
+    """A specified hole must come out at its specified size -- it used to be
+    clamped to 8. The number is the vendor panel's 7.7 mm jack drill."""
     import math
 
     res = resolve(load_scene(SCENE), lib)
     wc = next(c for c in res.connectors if c.ref == "amy.spdif_in")
     dia = 2 * math.sqrt(wc.corridor_poly.area / math.pi)
-    assert dia == pytest.approx(6.5, abs=0.05)
+    assert dia == pytest.approx(7.7, abs=0.05)
 
 
 def test_a_square_connector_still_cuts_a_square(lib):
