@@ -26,9 +26,9 @@ parts:
       not line up: the real pitch is 11.0 mm along the board and 9.7 mm
       between the IN and OUT columns, not 12 x 12.
       Frame mapping: our x = the board's short axis (48 mm, Eagle y), our
-      y = its long axis (106 mm, Eagle x), +z = the jack side. The board has
-      NO mounting holes -- it hangs from its ten jack bushings clamped to
-      the panel, which is how Eurorack modules mount.
+      y = its long axis (106 mm, Eagle x), +z = the jack side. Four M2.5
+      corner holes (Dimension-layer routed circles, easy to miss in a drill
+      scan) plus the ten jack bushings clamping to the panel.
     src:
       confidence: datasheet
       url: https://github.com/shorepine/tulipcc/tree/main/docs/pcbs/amyboard
@@ -40,10 +40,15 @@ parts:
       origin: min
     pcb_thickness: 1.6
 
-    # NO mounting holes. The v1.5 Eagle board has no drill of 2 mm or more
-    # anywhere -- the four "corner holes" a photo once suggested were vias
-    # and silk. The module hangs from its ten jack bushings clamped to the
-    # faceplate, exactly like any other Eurorack module.
+    # Four corner mounting holes, 2.54 mm (0.1") in from each corner. They
+    # are NOT <hole> elements in the Eagle file -- they are routed circles
+    # on the Dimension layer (present in v1.4 and v1.5 alike), which is why
+    # a drill scan once concluded the board had none. ~2.75 mm bore: M2.5.
+    holes:
+      - {name: h1, at: [2.54, 2.54], diameter: 2.8, screw: M2.5, src: {confidence: datasheet, note: "Dimension-layer circle in amyboard-v1.4/v1.5.brd"}}
+      - {name: h2, at: [45.47, 2.54], diameter: 2.8, screw: M2.5, src: {confidence: datasheet, note: "Dimension-layer circle in amyboard-v1.4/v1.5.brd"}}
+      - {name: h3, at: [2.54, 103.45], diameter: 2.8, screw: M2.5, src: {confidence: datasheet, note: "Dimension-layer circle in amyboard-v1.4/v1.5.brd"}}
+      - {name: h4, at: [45.47, 103.45], diameter: 2.8, screw: M2.5, src: {confidence: datasheet, note: "Dimension-layer circle in amyboard-v1.4/v1.5.brd"}}
 
     volumes:
       - name: back_components

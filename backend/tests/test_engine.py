@@ -84,11 +84,14 @@ def test_amyboard_matches_the_vendor_board_file(lib):
     vendor's own panel DXF (vendored under vendor/cad/shorepine/amyboard),
     so nobody 'fixes' them back by eye: 11.0 mm pitch along the board,
     9.7 mm between the IN and OUT columns, a 7.7 mm panel drill, a
-    48 x 106 mm board -- and NO mounting holes, because the module hangs
-    from its jack bushings like any other Eurorack module."""
+    48 x 106 mm board -- and four M2.5 corner holes that hide as routed
+    circles on the Eagle DIMENSION layer, where a drill scan once missed
+    them entirely (the owner's photo of the real board settled it)."""
     amy = lib["shorepine-amyboard"]
     assert amy.outline.size == (48.0, 106.0)
-    assert amy.holes == [], "the board has no mounting holes; supports would be fiction"
+    assert [(h.at, h.screw) for h in amy.holes] == [
+        ((2.54, 2.54), "M2.5"), ((45.47, 2.54), "M2.5"),
+        ((2.54, 103.45), "M2.5"), ((45.47, 103.45), "M2.5")]
     threads = next(v for v in amy.volumes if v.name == "jack_threads")
     assert threads.at == (37.85, 31.5)
     assert threads.repeat.pitch == (9.7, 11.0)
