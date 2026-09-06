@@ -1,0 +1,62 @@
+# The proxy in front of a hosted hwcase.
+#
+# It does three things the application deliberately does not do for itself:
+# terminate TLS, cap how big a request may be, and give a long render room to
+# finish. Everything else -- who may do what, how many renders at once -- is
+# the app's own business, because the app is the only thing that knows what a
+# scene costs.
+#
+# {$HWCASE_SITE} is your domain (certificate obtained automatically) or, left
+# unset, `:8080` for a plain local instance.
+
+{$HWCASE_SITE} {
+	encode zstd gzip
+
+	# A scene is text: a few hundred placements, some comments, and any parts
+	# the file carries with it. Eight megabytes is generous by two orders of
+	# magnitude, and it is the difference between a bad request and a bad day.
+	request_body {
+		max_size 8MB
+	}
+
+	# A photographic render is minutes of arithmetic, on purpose -- it is a
+	# thing you ask for once and watch. The app already refuses to run two at
+	# a time (429, with Retry-After), so the proxy's job is only to not hang
+	# up on the one that is running.
+	@render path /api/render*
+	handle @render {
+		reverse_proxy hwcase:8000 {
+			transport http {
+				response_header_timeout 15m
+				read_timeout 15m
+			}
+		}
+	}
+
+	handle {
+		reverse_proxy hwcase:8000
+	}
+
+	header {
+		# The editor fetches nothing from anywhere else: three.js is vendored
+		# and the API is same-origin, so `self` costs nothing and rules out a
+		# whole class of accident.
+		#
+		# `script-src` has to allow inline, which is the one loose thread. The
+		# page carries an inline <script type="importmap">, and the server
+		# rewrites it on every asset change to bust the browser cache -- so it
+		# has no stable hash to pin, and a nonce would have to be minted by the
+		# app rather than here. The exposure is small: the only text the editor
+		# ever puts into the DOM as markup is escaped (escapeHtml), and there
+		# is no other user's content on the page to inject with.
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

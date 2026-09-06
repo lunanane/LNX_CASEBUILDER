@@ -679,6 +679,71 @@ class Engraving(Strict):
                 self.at[0] + w / 2, self.at[1] + h / 2)
 
 
+class RackRow(Strict):
+    """One horizontal row in a Eurorack frame.
+
+    `format` keys into `hwcase.eurorack.ROW_FORMATS`. A row is named rather
+    than measured because its rack cost is a property of the format, not of
+    the panels that end up in it: a 1U tile row costs 44.45 mm whether the
+    tiles are Intellijel's or Pulp Logic's.
+    """
+
+    format: str = "3U"
+    label: Optional[str] = None
+
+
+class PanelSpec(Strict):
+    """A side panel's overhang on each edge, and its corner radii.
+
+    Four margins rather than one, because the edges do different jobs. Bottom
+    and top decide what the case rests on: below the rail's 2.7 mm overhang
+    the rails are the only thing underneath and the case stands on aluminium,
+    above it the panel takes the weight. Both are raised automatically if they
+    would let an M5 hole run off the edge.
+
+    Front and back are pure overhang -- a lip past the module face, or behind
+    the body's web -- and default to nothing.
+    """
+
+    #: past the body's edge, along the case's height
+    top: float = 10.5
+    bottom: float = 10.5
+    #: past the rail's face / the body's web, along the case's depth
+    front: float = 0.0
+    back: float = 0.0
+
+    #: corner radii, each named for the two edges it joins
+    r_bottom_front: float = 0.0
+    r_bottom_back: float = 0.0
+    r_top_back: float = 0.0
+    r_top_front: float = 0.0
+
+
+class RackSpec(Strict):
+    """A Eurorack frame: a width in HP and a stack of rows.
+
+    Deliberately small. The frame's shape is not a matter of taste -- it falls
+    out of the format -- so almost everything about it is derived rather than
+    configured. See docs/eurorack-frame-stock.md section 4.
+    """
+
+    #: Rail span, in HP. The side panels add their own capacity on top.
+    hp: float = 68.0
+
+    #: Bottom to top. An ordered list, not a count, so `1U + 3U + 1U` works.
+    #: Two 3U rows by default -- 6U, the common shape and the one being built.
+    rows: list[RackRow] = Field(
+        default_factory=lambda: [RackRow(), RackRow()])
+
+    #: 4 HP slots cut into each side panel, per 3U row. One means one per side.
+    inserts_per_row: int = 0
+    insert_hp: float = 4.0
+
+    #: The side panels: how far each edge reaches past the case, and how the
+    #: corners are cut.
+    panel: PanelSpec = Field(default_factory=lambda: PanelSpec())
+
+
 class ViewSettings(Strict):
     """How the preview is lit. None of this reaches the geometry.
 
@@ -700,7 +765,26 @@ class ViewSettings(Strict):
 
 class Scene(Strict):
     name: str = "untitled"
+    #: Which pipeline builds this scene.
+    #:
+    #: `parts` wraps a case around measured boards -- the original pipeline,
+    #: and the default so that every existing scene file keeps working
+    #: untouched. `rack` generates a Eurorack frame from the format instead,
+    #: and ignores placements entirely.
+    kind: Literal["parts", "rack"] = "parts"
+    #: `kind: rack` only.
+    rack: RackSpec = Field(default_factory=RackSpec)
     anchor: Optional[str] = None       # placement id that defines the origin
+    #: Parts carried by the scene itself, shadowing the shared library by id.
+    #:
+    #: The library is a curated set of boards somebody measured and vouched
+    #: for; it belongs to the installation, not to any one project. A part you
+    #: imported from a vendor model this afternoon does not, and on a server
+    #: that keeps nothing there is nowhere for it to live -- so it lives here,
+    #: in the scene file, and travels with it. Hand somebody your `.yaml` and
+    #: it opens on their machine with the right board in it, rather than with
+    #: a red `unknown part` where the board should be.
+    parts: list[Part] = Field(default_factory=list)
     panels: list[Panel] = Field(default_factory=list)
     #: world z of the inside floor -- the top face of the bottom plate. Left
     #: unset it is derived: the lowest point of everything that is not itself

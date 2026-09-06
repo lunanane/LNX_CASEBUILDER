@@ -229,6 +229,10 @@ body:not(.rendering) .sunctl { opacity: .35; }
 }
 .menu-pop button:hover, .menu-pop label:hover { background: var(--panel-2); color: var(--accent); }
 .menu-pop button:disabled { opacity: .35; cursor: default; background: none; color: var(--fg); }
+/* `display: flex` above beats the hidden attribute's own display:none, so an
+   item the current storage mode has no use for stays on the menu unless this
+   says otherwise. Same shape as .pane[hidden] below. */
+.menu-pop button[hidden] { display: none; }
 .menu-pop kbd {
   margin-left: auto; color: var(--dim); font-size: 11px;
   background: var(--panel-2); border: 1px solid var(--line);

@@ -71,6 +71,10 @@ dependencies are only reinstalled when `backend/requirements.txt` actually
 changes. `start.bat 9000` picks the port; `start.bat 9000 bare` skips auto-reload
 and the browser. Ctrl+C stops it.
 
+`start-hosted.bat` beside it runs the same server the way a public instance
+runs it — see [Putting it on a server](#putting-it-on-a-server). Different port
+(8497), so both can be open at once.
+
 ### In the editor
 
 Across the top: **file**, **edit**, **view** and **help** menus, then the scene
@@ -153,6 +157,53 @@ engine's opinion, never the browser's guess. `save` writes back to
 `backend/scenes/<name>.yaml` and **keeps the file's comments** — it merges the
 new values into the existing YAML document rather than dumping over it, so the
 reasoning recorded in those files survives an edit. Saving is idempotent.
+
+## Putting it on a server
+
+`start.bat` is a single-user tool, and `backend/scenes` is a single-user
+drawer: everything in it belongs to whoever is sitting at the machine. Pointing
+a crowd at that directory does not work, and the fix is not permissions — it is
+not having the directory.
+
+Setting `HWCASE_HOSTED=1` puts the server into a mode where it keeps nothing:
+no scene storage, no writable part library, no output files. Visitors keep
+their projects in the browser and save them as `.yaml` files they own, and the
+server goes back to being pure arithmetic — post a scene, get geometry back.
+It costs almost nothing to do, because every route that does real work already
+took the whole scene in its body and read no file to answer.
+
+Two launchers, then, and they are the same program:
+
+```
+start.bat            your editor      port 8487   scenes in backend\scenes
+start-hosted.bat     the server's     port 8497   scenes in the browser
+```
+
+`start-hosted.bat` sets that one variable and calls straight back into
+`start.bat`, so there is no second copy of anything to drift. It exists so that
+*what the server does* is something you can look at before you deploy it rather
+than after. The modes differ in ways that stay invisible until you hit them —
+your scenes are not there, an imported board goes into the scene file instead
+of the palette, a second render is refused while the first runs — and none of
+those is worth meeting for the first time on the live instance.
+
+It cannot see `backend/scenes`, by design. Your own work stays where
+`start.bat` keeps it.
+
+To put it on an actual server:
+
+```sh
+docker compose up -d --build          # http://localhost:8080
+./deploy/update.sh --pull             # and again, for every change after
+```
+
+`update.sh` rebuilds, restarts, and then waits for the new container to answer
+before calling it done — a build can succeed and still be broken, and without
+the check the working container is already gone by the time anyone notices.
+
+See [docs/hosting.md](docs/hosting.md) for the whole of it: what a user's
+project actually is, what it costs to run, what stays shared, and what you
+would have to build if you wanted accounts.
 
 ## Or from the command line
 

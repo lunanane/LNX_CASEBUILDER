@@ -1,0 +1,25 @@
+# A new scene.
+#
+# Add boards from the palette on the left. Heights are worked out for you:
+# anything with a screen, a knob, a button or an upward-facing socket goes to
+# the faceplate, and anything else rests on the inside floor.
+#
+# A panel is the surface you touch. Derive it from the part that fixes the
+# height -- usually a screen -- rather than typing a number:
+#
+#   panels:
+#     - name: main
+#       from_ref: <placement>.<volume>
+
+name: untitled
+placements: []
+case:
+  style: layered
+  materials:
+    - {name: plywood-3mm, thickness: 3.0, kerf: 0.15, sheet: [600.0, 400.0], color: "#c8a165"}
+  wall: 8.0
+  floor_gap: 4.0
+  ceiling_gap: 1.0
+  part_clearance: 0.6
+  cable_clearance: 5.0
+  corner_radius: 8.0

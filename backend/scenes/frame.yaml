@@ -1,0 +1,26 @@
+# A new Eurorack frame.
+#
+# This project is built from the format, not from boards: set a width in HP
+# and a stack of rows, and the frame follows. Nothing here is placed by hand.
+#
+# The case is two side panels, one folded aluminium U, and two rails per row
+# bolted between the panels with an M5 at each end. Rows are an ordered list
+# bottom to top, so a mixed stack works:
+#
+#   rows:
+#     - {format: 1U-intellijel}
+#     - {format: 3U}
+#     - {format: 1U-intellijel}
+#
+# `inserts_per_row: 1` cuts a 4 HP slot into each side panel per 3U row, so a
+# module slides in from the side -- 8 HP of extra capacity per row, without
+# widening the rails.
+
+name: frame
+kind: rack
+rack:
+  hp: 84
+  rows:
+    - {format: 3U}
+  inserts_per_row: 0
+  insert_hp: 4.0

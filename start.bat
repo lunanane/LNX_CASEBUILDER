@@ -6,6 +6,10 @@ rem    start.bat            first free port from 8487, opens a browser
 rem    start.bat 9000       pick the port yourself
 rem    start.bat 9000 bare  no auto-reload, no browser
 rem
+rem  start-hosted.bat runs the same server the way a public instance runs
+rem  it -- no scene directory, project kept in the browser. It sets one
+rem  variable and calls straight back into here.
+rem
 rem  Everything lives in .venv next to this file, so this never touches your
 rem  system Python and is safe to delete and re-run.
 rem ---------------------------------------------------------------------------
@@ -17,6 +21,16 @@ set "PY=%VENV%\Scripts\python.exe"
 set "REQ=%CD%\backend\requirements.txt"
 set "STAMP=%VENV%\requirements.stamp"
 set "MODE=%~2"
+
+rem Hosted mode is the server's posture: no scene directory, nothing
+rem stored. Set by start-hosted.bat, and read here only to say the right
+rem thing on screen and to pick a port -- the behaviour itself is the
+rem app's, in backend\hwcase\api.py.
+set "HOSTED="
+if /i "%HWCASE_HOSTED%"=="1"    set "HOSTED=1"
+if /i "%HWCASE_HOSTED%"=="true" set "HOSTED=1"
+if /i "%HWCASE_HOSTED%"=="yes"  set "HOSTED=1"
+if /i "%HWCASE_HOSTED%"=="on"   set "HOSTED=1"
 
 title hwcase editor
 
@@ -80,6 +94,10 @@ rem 8487 is ours. It used to be 8765, until another app on this machine took
 rem that port and the editor's bookmark quietly started opening the wrong
 rem program -- the scan-upward logic kept the server running, on a port
 rem nobody was looking at. Distinctive beats conventional here.
+rem Hosted gets its own base port so both can run at once: your editor on
+rem 8487 with your scenes, the server's version on 8497 with none. Two
+rem tabs, and the bookmarks stay meaningful.
+if not defined PORT if defined HOSTED set "PORT=8497"
 if not defined PORT set "PORT=8487"
 set /a "TRY=0"
 :portloop
@@ -95,12 +113,23 @@ if not errorlevel 1 (
 rem --- 5. go ----------------------------------------------------------------
 set "URL=http://127.0.0.1:%PORT%/"
 echo.
-echo   hwcase editor
-echo   ---------------------------------------------
-echo   url      %URL%
-echo   parts    backend\parts\*.yaml
-echo   scenes   backend\scenes\*.yaml
-echo   stop     Ctrl+C in this window
+if defined HOSTED (
+  echo   hwcase editor -- HOSTED, exactly as the server runs it
+  echo   ---------------------------------------------
+  echo   url      %URL%
+  echo   parts    backend\parts\*.yaml   ^(read only^)
+  echo   scenes   kept in this browser -- the server stores nothing
+  echo   files    file ^> open a file / save to a file
+  echo   note     your backend\scenes are NOT visible here, by design
+  echo   stop     Ctrl+C in this window
+) else (
+  echo   hwcase editor
+  echo   ---------------------------------------------
+  echo   url      %URL%
+  echo   parts    backend\parts\*.yaml
+  echo   scenes   backend\scenes\*.yaml
+  echo   stop     Ctrl+C in this window
+)
 echo.
 
 set "EXTRA=--reload --reload-dir hwcase --reload-include *.yaml"

@@ -15,7 +15,7 @@
 # names the feature that has to sit flush, so nobody computes a z by hand -- and
 # if the header stack under the screen changes, the whole front follows.
 
-name: soundmachine-lnx1
+name: soundmachine-lnx1-v2-29mm
 
 panels:
 - name: main
@@ -27,7 +27,7 @@ panels:
 case:
   style: layered
   materials:
-  - {name: plywood-3mm, thickness: 3.5, kerf: 0.15, sheet: [600.0, 400.0], color: "#c8a165"}
+  - {name: plywood-3mm, thickness: 2.9, kerf: 0.15, sheet: [600.0, 400.0], color: "#c8a165"}
   wall: 8.0
   floor_gap: 4.0
   ceiling_gap: 1.0
@@ -101,12 +101,12 @@ placements:
 
   # --- the little OLED next to them ---
   rot_z: 180.0
-  panel_offset: 3.0
+  panel_offset: 4.0
   support: from_lid
   screw_inset: false
 - id: oled
   part: adafruit-4741-oled-1v5
-  pos: [4.14, 8.715, 0.0]
+  pos: [4.14, 8.705, 0.0]
   on_panel: main
   panel_ref: active_area
 
@@ -116,7 +116,7 @@ placements:
   - side: +x
     margin: 0.0
     span: full
-  panel_offset: -2.5
+  panel_offset: -2.91
   support: from_lid
 - id: mux
   part: seeed-grove-tca9548a

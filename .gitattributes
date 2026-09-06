@@ -3,3 +3,13 @@
 # their line endings would be a silent modification of an upstream artefact.
 vendor/** -text
 web/vendor/** -text
+
+# Line endings follow the machine that runs the file, not the one that edits
+# it. This repo is written on Windows and deployed on Linux, and a shell script
+# checked out with CRLF fails with the carriage return glued to the end of its
+# shebang -- which reads like the interpreter is missing rather than like the
+# file is malformed, and costs an hour every time.
+*.sh              text eol=lf
+deploy/Caddyfile  text eol=lf
+Dockerfile        text eol=lf
+*.bat             text eol=crlf

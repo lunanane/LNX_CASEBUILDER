@@ -25,3 +25,6 @@ vendor/catalog/
 *-sheet-*.dxf
 *-cutlist.txt
 export/
+
+# Local design-evidence ledger; DEVELOPMENT_PLAN.md and EXECUTION_PROMPTS.md are authoritative.
+.docs/DEVELOPMENT_PLAN_HISTORY.md

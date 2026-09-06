@@ -4775,3 +4775,232 @@ def test_button_webs_still_survive_the_late_pass(lib):
     lid = model.layers[-1]
     webs = [n for n in lid.notes if "web between" in n]
     assert webs, "the button grid webs went missing"
+
+
+# --------------------------------------------------------------------------
+# a server that keeps nothing
+# --------------------------------------------------------------------------
+#
+# Hosted, hwcase has no scene directory, no writable part library and no output
+# files: the browser holds the project and posts it in with every question.
+# These guard the two halves of that -- that the stateful routes really are
+# gone, and that everything worth having still works without them.
+
+@pytest.fixture()
+def hosted():
+    """The API module, reloaded with HWCASE_HOSTED set, and put back after."""
+    import importlib
+    import os
+
+    from fastapi.testclient import TestClient
+    from hwcase import api
+
+    before = os.environ.get("HWCASE_HOSTED")
+    os.environ["HWCASE_HOSTED"] = "1"
+    importlib.reload(api)
+    try:
+        yield TestClient(api.app)
+    finally:
+        if before is None:
+            os.environ.pop("HWCASE_HOSTED", None)
+        else:
+            os.environ["HWCASE_HOSTED"] = before
+        importlib.reload(api)
+
+
+def test_a_hosted_server_has_no_scene_drawer(hosted):
+    """One shared directory that every visitor can list, rename and overwrite
+    is not storage. The routes are absent rather than forbidden, because a 404
+    says "this server has no scene drawer" and a 403 says "you may not open
+    the one it has"."""
+    assert hosted.get("/api/scenes").status_code == 404
+    assert hosted.get("/api/scenes/anything").status_code == 404
+    assert hosted.post("/api/scenes", json={"name": "x"}).status_code == 405
+    cfg = hosted.get("/api/config").json()
+    assert cfg["hosted"] is True and cfg["scene_storage"] is False
+
+
+def test_the_engine_needs_no_files_at_all(hosted):
+    """The whole point: taking the drawer away costs nothing that matters,
+    because every engine route already carried the scene in its body."""
+    scene = load_scene(SCENE).model_dump(mode="json")
+    assert hosted.post("/api/resolve", json=scene).status_code == 200
+    assert hosted.post("/api/build", json=scene).status_code == 200
+    assert hosted.post("/api/case/freeze", json=scene).status_code == 200
+    svg = hosted.post("/api/export/svg", json=scene)
+    assert svg.status_code == 200 and svg.text.lstrip().startswith("<")
+
+
+def test_an_export_is_bytes_and_not_a_file_on_the_server(hosted, tmp_path,
+                                                         monkeypatch):
+    """The DXF used to be written to out/{name}-layers.dxf and served from
+    there. Two visitors both working on a scene called `case` would take turns
+    overwriting each other's download."""
+    from hwcase import api
+
+    monkeypatch.setattr(api, "OUT_DIR", tmp_path)
+    scene = load_scene(SCENE).model_dump(mode="json")
+    r = hosted.post("/api/export/dxf", json=scene)
+    assert r.status_code == 200
+    assert b"SECTION" in r.content
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_saving_without_a_file_still_keeps_the_comments():
+    """The reason a browser cannot just serialise the model itself. The
+    reasoning in a scene file lives in its comments, and it survives only
+    because the text that was opened is handed back to be merged into."""
+    from fastapi.testclient import TestClient
+    from hwcase import api
+
+    c = TestClient(api.app)
+    previous = ("# why this case is 8 mm thick\n"
+                "name: keeper\n"
+                "case:\n"
+                "  wall: 8.0    # measured off the bezel\n")
+    scene = api.Scene.model_validate({"name": "keeper", "case": {"wall": 9.5}})
+    r = c.post("/api/scene/serialize",
+               json={"scene": scene.model_dump(mode="json"), "previous": previous})
+    assert r.status_code == 200
+    assert "# why this case is 8 mm thick" in r.text
+    assert "measured off the bezel" in r.text
+    assert "9.5" in r.text and "8.0" not in r.text
+
+    # and it comes back in
+    back = c.post("/api/scene/parse", json={"yaml": r.text})
+    assert back.status_code == 200
+    assert back.json()["case"]["wall"] == 9.5
+
+
+def test_a_file_edited_into_nonsense_says_which_field():
+    """Opening a hand-edited file is the normal way in when the server keeps
+    nothing, so the error has to be worth reading."""
+    from fastapi.testclient import TestClient
+    from hwcase import api
+
+    c = TestClient(api.app)
+    assert c.post("/api/scene/parse", json={"yaml": "["}).status_code == 422
+    assert c.post("/api/scene/parse", json={"yaml": "just a string"}).status_code == 422
+    bad = c.post("/api/scene/parse",
+                 json={"yaml": "name: x\ncase:\n  wall: eight\n"})
+    assert bad.status_code == 422
+    assert "wall" in bad.json()["detail"]
+
+
+def test_a_scene_can_carry_its_own_parts(lib):
+    """Where nothing is filed on the server, an imported board has nowhere to
+    live but the scene -- so the scene has to be able to hold one, and hand
+    somebody your .yaml and it opens with the right board in it."""
+    from fastapi.testclient import TestClient
+    from hwcase import api
+
+    c = TestClient(api.app)
+    part = Part(id="drafted", name="drafted board",
+                outline=RectOutline(size=(20.0, 30.0)),
+                volumes=[Box(name="b", at=(0.0, 0.0), size=(20.0, 30.0), z=(0.0, 2.0))])
+    scene = Scene(name="carrier", parts=[part],
+                  placements=[Placement(id="p", part="drafted", mount="manual")])
+    body = scene.model_dump(mode="json")
+
+    # the shared library has never heard of it
+    assert "drafted" not in lib
+    r = c.post("/api/resolve", json=body)
+    assert r.status_code == 200, r.text
+    assert any(s["name"] == "b" for s in r.json()["solids"])
+
+    # and the palette can draw it, which needs numbers only the engine has
+    d = c.post("/api/parts/describe", json={"parts": [part.model_dump(mode="json")]})
+    assert d.status_code == 200
+    assert d.json()["parts"][0]["computed"]["height"] == pytest.approx(2.0)
+
+
+def test_a_scene_part_shadows_the_library(lib):
+    """Same id, and the scene wins. If the installation later ships a properly
+    measured part under that id, a file drawn against the old one keeps
+    working off the copy it was drawn against."""
+    from fastapi.testclient import TestClient
+    from hwcase import api
+
+    c = TestClient(api.app)
+    borrowed = lib.ids[0]
+    tall = Part(id=borrowed, name="shadow",
+                outline=RectOutline(size=(10.0, 10.0)),
+                volumes=[Box(name="only", at=(0.0, 0.0), size=(10.0, 10.0),
+                             z=(0.0, 40.0))])
+    scene = Scene(name="shadowed", parts=[tall],
+                  placements=[Placement(id="p", part=borrowed, mount="manual")])
+    r = c.post("/api/resolve", json=scene.model_dump(mode="json"))
+    assert r.status_code == 200, r.text
+    # `pcb` is the solid the solver extrudes from the outline (AUTO_SOLID);
+    # everything else in the answer came from the scene's part, not the
+    # library's.
+    names = {s["name"] for s in r.json()["solids"]}
+    assert names == {"only", "pcb"}
+    assert not {v.name for v in lib[borrowed].volumes} & names
+
+
+def test_the_starter_scene_is_a_scene():
+    """The browser has to start somewhere, and the starter is a commented file
+    rather than an empty mapping -- the comments are half of what it teaches."""
+    from fastapi.testclient import TestClient
+    from hwcase import api
+
+    c = TestClient(api.app)
+    text = c.get("/api/scene/starter", params={"name": "first"}).text
+    assert "#" in text
+    parsed = c.post("/api/scene/parse", json={"yaml": text})
+    assert parsed.status_code == 200
+    assert parsed.json()["name"] == "first"
+    assert c.get("/api/scene/starter", params={"name": "../etc"}).status_code == 400
+
+
+def test_a_posted_file_cannot_be_a_yaml_bomb():
+    """Opening a file is how you get in when the server keeps nothing, so
+    /api/scene/parse takes text from anybody who can reach the port.
+
+    `safe_load` is safe in the sense that it builds no arbitrary objects, but
+    it still expands aliases: the twenty lines below are under 700 bytes and
+    become nine trillion list elements, which is the worker. Counting anchors
+    is not a defence -- the depth that hurts arrives in twenty lines -- so the
+    expansion is refused outright, which costs nothing because no scene file
+    has ever contained one.
+    """
+    from fastapi.testclient import TestClient
+    from hwcase import api
+
+    c = TestClient(api.app)
+    bomb = "a: &a [x,x,x,x,x,x,x,x,x]\n" + "".join(
+        "%s: &%s [*%s,*%s,*%s,*%s]\n" % (chr(98 + i), chr(98 + i), chr(97 + i),
+                                         chr(97 + i), chr(97 + i), chr(97 + i))
+        for i in range(20))
+
+    r = c.post("/api/scene/parse", json={"yaml": bomb})
+    assert r.status_code == 422 and "anchors" in r.json()["detail"]
+
+    # and it is no way in through the other door either: `previous` is text
+    # from the same file, handed to ruamel rather than to PyYAML.
+    r = c.post("/api/scene/serialize",
+               json={"scene": {"name": "fine"}, "previous": bomb})
+    assert r.status_code == 422
+
+
+def test_the_bomb_guard_does_not_flinch_at_an_ampersand():
+    """It scans the token stream rather than the characters, so `&` in a
+    comment or a value is what it looks like."""
+    from fastapi.testclient import TestClient
+    from hwcase import api
+
+    c = TestClient(api.app)
+    r = c.post("/api/scene/parse", json={"yaml": "# nuts & bolts\nname: amp\n"})
+    assert r.status_code == 200 and r.json()["name"] == "amp"
+
+
+def test_a_scene_file_has_a_size_a_scene_could_be():
+    """A megabyte is twenty times the largest scene in this repo, and a
+    ceiling on how much parsing a stranger can order in one request."""
+    from fastapi.testclient import TestClient
+    from hwcase import api
+
+    c = TestClient(api.app)
+    huge = "name: x\n" + "# pad\n" * 200_000
+    assert c.post("/api/scene/parse", json={"yaml": huge}).status_code == 413

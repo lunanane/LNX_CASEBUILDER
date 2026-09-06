@@ -1,0 +1,57 @@
+# A hosted hwcase, with a reverse proxy in front of it.
+#
+#   docker compose up -d --build
+#
+# Caddy is here for three things the app deliberately does not do itself: TLS,
+# a ceiling on request size, and a rate limit on the two routes that cost real
+# money. Set HWCASE_SITE to your domain and Caddy gets a certificate on its
+# own; leave it and it serves http://localhost:8080 with no certificate, which
+# is what you want while you are still deciding.
+
+services:
+  hwcase:
+    build:
+      context: .
+      args:
+        # 1 pulls in Mitsuba (~100 MB) and turns on the photographic render.
+        WITH_RENDER: "${HWCASE_WITH_RENDER:-0}"
+    restart: unless-stopped
+    environment:
+      # The whole hosting posture, in one variable. See backend/hwcase/api.py.
+      HWCASE_HOSTED: "1"
+      # Renders are minutes of every core the box has. One at a time.
+      HWCASE_RENDER_SLOTS: "${HWCASE_RENDER_SLOTS:-1}"
+      HWCASE_MAX_SAMPLES: "${HWCASE_MAX_SAMPLES:-512}"
+      HWCASE_MAX_PIXELS: "${HWCASE_MAX_PIXELS:-1920}"
+    volumes:
+      # The vendor catalogue and downloaded CAD. Shared, identical for
+      # everybody, and cheap to lose -- but slow to rebuild, so keep it.
+      - vendor-cache:/app/vendor
+    expose:
+      - "8000"
+    # Geometry is CPU work. Without a ceiling one visitor asking for a
+    # 4000-sample render is the whole machine.
+    deploy:
+      resources:
+        limits:
+          cpus: "${HWCASE_CPUS:-2}"
+          memory: "${HWCASE_MEMORY:-2g}"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [hwcase]
+    environment:
+      HWCASE_SITE: "${HWCASE_SITE:-:8080}"
+    ports:
+      - "${HWCASE_HTTP_PORT:-8080}:8080"
+      - "${HWCASE_HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  vendor-cache:
+  caddy-data:
+  caddy-config:

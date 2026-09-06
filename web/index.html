@@ -31,6 +31,13 @@
         <button id="btn-new">new scene<kbd>ctrl N</kbd></button>
         <button id="btn-dup">duplicate&hellip;</button>
         <button id="btn-rename">rename&hellip;</button>
+        <button id="btn-scene-delete">delete scene&hellip;</button>
+        <hr>
+        <!-- The project as a file the user keeps. On a hosted instance these
+             two are the only durable storage there is; locally they are how a
+             scene leaves the machine it was drawn on. -->
+        <button id="btn-open">open a file&hellip;</button>
+        <button id="btn-savefile">save to a file&hellip;</button>
         <hr>
         <button id="btn-save">save<kbd>ctrl S</kbd></button>
         <button id="btn-saveas">save as&hellip;</button>
@@ -88,7 +95,7 @@
   <span class="sep"></span>
   <!-- These two stay on the bar: they change what you are looking at, and you
        reach for them constantly. -->
-  <label><input type="checkbox" id="chk-case"> case</label>
+  <label><input type="checkbox" id="chk-case" checked> case</label>
   <select id="sel-interior" title="what the layers between the hardware look like">
     <option value="pocketed">pocketed</option>
     <option value="hollow">hollow</option>
@@ -130,6 +137,7 @@
     <nav class="tabs" role="tablist">
       <button class="tab active" data-pane="pane-layout" role="tab">layout</button>
       <button class="tab" data-pane="pane-case" role="tab">case</button>
+      <button class="tab" data-pane="pane-frame" role="tab">frame</button>
       <button class="tab" data-pane="pane-look" role="tab">look</button>
       <button class="tab" data-pane="pane-issues" role="tab">
         issues<span id="issue-count"></span></button>
@@ -186,6 +194,60 @@
       <div id="material-list"></div>
       <h2>decoration</h2>
       <div id="engrave-panel"></div>
+    </section>
+
+    <section id="pane-frame" class="pane" hidden>
+      <p class="note" id="fr-note">A Eurorack frame is two side panels, one
+      folded body, and two rails per row bolted between the panels with an M5
+      at each end. Everything below the width is derived from the format.
+      The kind of project is chosen when it is created, not here.</p>
+
+      <h2>width</h2>
+      <div class="field">
+        <label title="rail span in HP. The side panel inserts add their own capacity on top of this.">HP</label>
+        <input type="number" id="fr-hp" step="1" min="1" max="240">
+        <span class="unit" id="fr-hp-mm"></span>
+      </div>
+
+      <h2>rows</h2>
+      <div id="fr-rows"></div>
+      <button id="fr-add-3u" title="add a 3U row at the top">+ 3U</button>
+      <button id="fr-add-1u" title="add a 1U tile row at the top">+ 1U</button>
+
+      <h2>stance</h2>
+      <p class="note">The rail stands <b>2.7 mm</b> proud of the body. That is
+      where the extrusion's sheet slot is, not a choice &mdash; there is one
+      rail profile and the body has to meet it.</p>
+      <p class="note">How far each panel edge reaches past the case. Bottom
+      and top decide what it rests on: below 2.7 mm the rails carry it, above
+      that the panel does. Front and back are pure lip.</p>
+      <div class="field"><label title="past the body's bottom edge. Below the rail's 2.7 mm overhang the case stands on its rails.">bottom</label>
+        <input type="number" id="fr-m-bottom" step="0.5" min="0"><span class="unit">mm</span></div>
+      <div class="field"><label title="past the body's top edge">top</label>
+        <input type="number" id="fr-m-top" step="0.5" min="0"><span class="unit">mm</span></div>
+      <div class="field"><label title="past the rails' front face, as a lip in front of the modules">front</label>
+        <input type="number" id="fr-m-front" step="0.5" min="0"><span class="unit">mm</span></div>
+      <div class="field"><label title="past the body's web, as a lip behind the case">back</label>
+        <input type="number" id="fr-m-back" step="0.5" min="0"><span class="unit">mm</span></div>
+      <p class="note" id="fr-stance"></p>
+
+      <h2>corners</h2>
+      <p class="note">A radius per corner, each named for the two edges it
+      joins. 0 leaves it square.</p>
+      <div class="field"><label>bottom / front</label>
+        <input type="number" id="fr-r-bf" step="1" min="0"><span class="unit">mm</span></div>
+      <div class="field"><label>bottom / back</label>
+        <input type="number" id="fr-r-bb" step="1" min="0"><span class="unit">mm</span></div>
+      <div class="field"><label>top / back</label>
+        <input type="number" id="fr-r-tb" step="1" min="0"><span class="unit">mm</span></div>
+      <div class="field"><label>top / front</label>
+        <input type="number" id="fr-r-tf" step="1" min="0"><span class="unit">mm</span></div>
+
+      <h2>side panel inserts</h2>
+      <label class="check" title="a 4 HP slot cut into each side panel per 3U row, so a module slides in from the side. Adds 8 HP of capacity per 3U row without widening the rails."><input type="checkbox" id="fr-inserts"> 4 HP slot per side, per 3U row</label>
+
+      <h2>result</h2>
+      <div id="fr-result"></div>
     </section>
 
     <section id="pane-look" class="pane" hidden>

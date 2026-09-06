@@ -121,7 +121,14 @@ def to_svg(case: CaseModel, apply_kerf: bool = True) -> str:
     )
 
 
-def to_dxf(case: CaseModel, path: Path, apply_kerf: bool = True) -> Path:
+def _dxf_doc(case: CaseModel, apply_kerf: bool = True):
+    """The whole case as one ezdxf document, packed and ready to be written.
+
+    Split out of `to_dxf` because a hosted editor never wants this file on the
+    server's disk. It wants the bytes, to hand straight back to the browser
+    that asked for them -- and a server that writes nothing has nothing to
+    leak between two people who both named their scene `case`.
+    """
     import ezdxf
 
     doc = ezdxf.new(setup=True)
@@ -154,9 +161,22 @@ def to_dxf(case: CaseModel, path: Path, apply_kerf: bool = True) -> Path:
     for ring, name in deferred:
         msp.add_lwpolyline([(x, y) for x, y in ring], close=True,
                            dxfattribs={"layer": name})
+    return doc
+
+
+def to_dxf(case: CaseModel, path: Path, apply_kerf: bool = True) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    doc.saveas(path)
+    _dxf_doc(case, apply_kerf).saveas(path)
     return path
+
+
+def to_dxf_text(case: CaseModel, apply_kerf: bool = True) -> str:
+    """The same DXF, as text, with no filesystem in the way."""
+    import io
+
+    buf = io.StringIO()
+    _dxf_doc(case, apply_kerf).write(buf)
+    return buf.getvalue()
 
 
 def _clipped_outline(poly: Polygon, res: Resolved) -> list[list[float]]:
@@ -242,6 +262,130 @@ def case_to_json(case: CaseModel) -> dict:
                         else []),
         } for l in case.layers],
     }
+
+
+def rack_min_margin(overhang: float) -> float:
+    from .rack import min_panel_margin
+    return min_panel_margin(overhang)
+
+
+def rack_to_json(model) -> dict:
+    """A frame, for the browser to extrude.
+
+    One frame change happens here and nowhere else. `hwcase.rack` works in a
+    front elevation -- X across, Y up the panel, Z back into the case -- which
+    is how you read a profile drawing. The viewer is Z-up and everything else
+    in it sits on the floor, so the frame is **laid down**: the module face
+    points at the ceiling and the case's back rests on the grid.
+
+    That makes the mapping: a member's section, drawn as (depth, height),
+    puts height on world Y and depth on world **-Z**, offset so the deepest
+    point lands at z = 0; the member sweeps along world X. Those three axes
+    are a rotation. Send depth to +Z instead and the basis becomes a
+    reflection -- every member renders inside out.
+    """
+    def rings(geom):
+        return [[list(c) for c in ring]
+                for poly in _polys(geom) for ring in _rings(poly)]
+
+    depth = model.depth
+    # Centred on the origin in plan, resting on the floor. The viewer orbits
+    # the origin, so a frame laid out from a corner drifts off to one side and
+    # spins around its edge; the cutlist is unaffected because a member's own
+    # coordinates never move, only its pose.
+    x0, y0, _z0, x1, y1, _z1 = model.bounds()
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    return {
+        "kind": "rack",
+        "hp": model.hp,
+        "width": model.width,
+        "web": model.web,
+        "depth": depth,
+        "panel_height": model.panel_height,
+        "outer_width": model.outer_width,
+        "overhang": model.overhang,
+        "margin": model.margin,
+        "margin_min": rack_min_margin(model.overhang),
+        "stands_on": model.stands_on,
+        "panel": {
+            "top": model.plan.top, "bottom": model.plan.bottom,
+            "front": model.plan.front, "back": model.plan.back,
+            "r_bottom_front": model.plan.r_bottom_front,
+            "r_bottom_back": model.plan.r_bottom_back,
+            "r_top_back": model.plan.r_top_back,
+            "r_top_front": model.plan.r_top_front,
+        },
+        "bom": model.bill_of_materials(),
+        "order": model.order_spec(),
+        "rows": [{
+            "format": r.fmt.name, "u": r.fmt.u,
+            "rack": list(r.rack), "slots": list(r.slots), "span": r.span,
+        } for r in model.rows],
+        "members": [{
+            "name": m.name, "kind": m.kind, "material": m.material,
+            "length": m.length,
+            # world (x, y, z): height stays Y, depth becomes -Z off the floor
+            "origin": [m.origin[0] - cx, m.origin[1] - cy,
+                       depth - m.origin[2]],
+            "notes": m.notes,
+            "rings": rings(m.section),
+            "holes": [{"at": list(h.at), "d": h.diameter, "note": h.note}
+                      for h in m.holes],
+        } for m in model.members],
+    }
+
+
+def rack_panels_svg(model, apply_kerf: bool = True, kerf: float = 0.15) -> str:
+    """The frame's side panels, as one SVG ready for a laser.
+
+    Only the panels: the rails and the U-channel are bought as extrusion and
+    folded sheet, so what a cutter needs from this pipeline is the acrylic.
+
+    Same conventions as `to_svg`, because they are the ones that stop a job
+    going wrong: every hole is cut before any outline (a cutter runs paths in
+    document order, and an outline run early drops the part out of the sheet
+    while its holes are still to come), and the y axis is flipped so the file
+    reads the same way up as the 3D view.
+    """
+    panels = [m for m in model.members if m.kind == "side_panel"]
+    if not panels:
+        raise ValueError("this frame has no side panels")
+
+    heads: list[str] = []
+    tails: list[str] = []
+    max_x = max_y = 0.0
+    dx = SHEET_MARGIN
+    for i, panel in enumerate(panels):
+        geom = panel.section
+        if apply_kerf:
+            geom = kerf_compensated(geom, kerf)
+        geom = translate(geom, dx, SHEET_MARGIN)
+        x0, y0, x1, y1 = geom.bounds
+        max_x, max_y = max(max_x, x1), max(max_y, y1)
+        holes, outlines = _holes_then_outlines(geom)
+        label = (f"{panel.name} -- {panel.material}, "
+                 f"{x1 - x0:.1f} x {y1 - y0:.1f} mm")
+        heads.append(
+            f'<g id="{panel.name}-holes" data-pass="holes" '
+            f'data-material="{panel.material}">\n'
+            f'  <title>{label} -- inner cuts first</title>\n  '
+            + "\n  ".join(_ring_path(r) for r in holes) + "\n</g>")
+        tails.append(
+            f'<g id="{panel.name}-outline" data-pass="outline" '
+            f'data-material="{panel.material}">\n'
+            f'  <title>{label} -- outer edge, cut last</title>\n  '
+            + "\n  ".join(_ring_path(r) for r in outlines) + "\n</g>")
+        dx = max_x + SHEET_MARGIN
+
+    w = max_x + SHEET_MARGIN
+    h = max_y + SHEET_MARGIN
+    body = "\n".join(heads + tails)
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w:.2f}mm" '
+        f'height="{h:.2f}mm" viewBox="0 0 {w:.2f} {h:.2f}">\n'
+        f'<g transform="translate(0,{h:.2f}) scale(1,-1)" fill="none" '
+        f'stroke="#ff0000" stroke-width="0.1">\n{body}\n</g>\n</svg>\n'
+    )
 
 
 def write_all(res: Resolved, case: CaseModel, lib: PartLibrary, outdir: Path,

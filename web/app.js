@@ -6,6 +6,7 @@ import { FINISHES, finishFor } from './finishes.js';
 import { createHistory } from './history.js';
 import { STOCK, restockName } from './stock.js';
 import { wireMenus } from './menu.js';
+import { store, files, nameFromFile, NAME_RE } from './store.js';
 
 // ---------------------------------------------------------------------------
 // state
@@ -52,6 +53,7 @@ async function applyScene(scene) {
   renderPlates();
   renderRenderPanel();
   renderEngravePanel();
+  renderFramePanel();
   await doResolve();
   buildGizmo();
 }
@@ -425,6 +427,12 @@ function bakeContactShading(geom, depth, strength) {
 }
 
 function buildCase(caseModel) {
+  // A frame has members, not layers. Every caller that just wants "draw
+  // whatever this scene's case is" comes through here -- applyRenderMode
+  // among them -- and reading .layers off a frame threw, which cleared the
+  // preview and left it blank until the case box was toggled again.
+  if (caseModel && caseModel.kind === 'rack') { buildRack(caseModel); return; }
+
   caseGroup.clear();
   if (!caseModel || !$('chk-case').checked) return;
   const solid = $('chk-render').checked;
@@ -456,6 +464,386 @@ function buildCase(caseModel) {
     caseGroup.add(mesh);
   }
   buildEngravings(caseModel);
+}
+
+// ---------------------------------------------------------------------------
+// the Eurorack frame
+// ---------------------------------------------------------------------------
+//
+// Every member is a cross-section swept along the case's width, so one
+// primitive draws rails, the body and the side panels alike. The section
+// arrives as (depth, height) and is swept along world X. The frame lies flat
+// on the grid with its module face up, so makeBasis sends the section's depth
+// to world -Z and its height to world Y. Those axes are a rotation; sending
+// depth to +Z instead reflects it and every member renders inside out.
+
+const MEMBER_BASIS = new THREE.Matrix4().makeBasis(
+  new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0));
+
+const MEMBER_STYLE = {
+  rail:       { color: 0xd8dade, roughness: 0.34, metalness: 0.82, opacity: 1 },
+  body:       { color: 0x2b57a8, roughness: 0.46, metalness: 0.55, opacity: 1 },
+  side_panel: { color: 0x6b4bd8, roughness: 0.12, metalness: 0.02, opacity: 0.55 },
+};
+
+function buildRack(model) {
+  caseGroup.clear();
+  if (!model || !$('chk-case').checked) return;
+  const solid = $('chk-render').checked;
+
+  for (const m of model.members) {
+    const style = MEMBER_STYLE[m.kind] || MEMBER_STYLE.body;
+
+    if (!solid) {
+      const mat = new THREE.LineBasicMaterial({
+        color: style.color, transparent: true, opacity: 0.6 });
+      for (const ring of m.rings) {
+        const pts = ring.map((pt) => new THREE.Vector3(
+          m.origin[0], m.origin[1] + pt[1], m.origin[2] - pt[0]));
+        if (pts.length) pts.push(pts[0]);
+        caseGroup.add(new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints(pts), mat));
+      }
+      continue;
+    }
+
+    const shapes = shapesFromRings(m.rings);
+    if (!shapes.length) continue;
+    const geom = new THREE.ExtrudeGeometry(shapes, {
+      depth: m.length, bevelEnabled: false, curveSegments: 10 });
+    geom.applyMatrix4(MEMBER_BASIS);
+    const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
+      color: style.color, roughness: style.roughness, metalness: style.metalness,
+      transparent: style.opacity < 1, opacity: style.opacity,
+      side: THREE.DoubleSide,
+    }));
+    mesh.position.set(m.origin[0], m.origin[1], m.origin[2]);
+    mesh.castShadow = mesh.receiveShadow = true;
+    mesh.userData = { member: m.name, kind: m.kind };
+    caseGroup.add(mesh);
+  }
+}
+
+const PANEL_FIELDS = [
+  ['fr-m-bottom', 'bottom', 10.5], ['fr-m-top', 'top', 10.5],
+  ['fr-m-front', 'front', 0], ['fr-m-back', 'back', 0],
+  ['fr-r-bf', 'r_bottom_front', 0], ['fr-r-bb', 'r_bottom_back', 0],
+  ['fr-r-tb', 'r_top_back', 0], ['fr-r-tf', 'r_top_front', 0],
+];
+
+const ROW_CHOICES = ['3U', '1U-intellijel', '1U-pulplogic'];
+
+function rackSpec() {
+  if (!state.scene.rack) {
+    state.scene.rack = {
+      hp: 68, rows: [{ format: '3U' }, { format: '3U' }],
+      inserts_per_row: 0, insert_hp: 4,
+      panel: { top: 10.5, bottom: 10.5, front: 0, back: 0 } };
+  }
+  if (!state.scene.rack.rows || !state.scene.rack.rows.length) {
+    state.scene.rack.rows = [{ format: '3U' }];
+  }
+  if (!state.scene.rack.panel) {
+    state.scene.rack.panel = { top: 10.5, bottom: 10.5, front: 0, back: 0 };
+  }
+  return state.scene.rack;
+}
+
+function renderFramePanel() {
+  if (!state.scene || !$('fr-hp')) return;
+  const isRack = state.scene.kind === 'rack';
+  for (const id of ['fr-hp', 'fr-inserts', 'fr-add-3u', 'fr-add-1u',
+                    ...PANEL_FIELDS.map((f) => f[0])]) {
+    if ($(id)) $(id).disabled = !isRack;
+  }
+
+  if (!isRack) {
+    // Bail before rackSpec(), which would otherwise graft a rack block onto
+    // a parts scene just by looking at it.
+    $('fr-rows').innerHTML = '';
+    $('fr-stance').textContent = '';
+    $('fr-result').innerHTML =
+      '<p class="note">This project is a laser-cut layered case. '
+      + 'A Eurorack frame is a different kind of project -- start one from '
+      + '<b>new scene</b>.</p>';
+    return;
+  }
+
+  const spec = rackSpec();
+  if (document.activeElement !== $('fr-hp')) $('fr-hp').value = spec.hp;
+  $('fr-hp-mm').textContent = '= ' + (spec.hp * 5.08).toFixed(2) + ' mm';
+  $('fr-inserts').checked = !!spec.inserts_per_row;
+  for (const [id, key, dflt] of PANEL_FIELDS) {
+    const el = $(id);
+    if (el && document.activeElement !== el) {
+      el.value = spec.panel?.[key] ?? dflt;
+    }
+  }
+
+  const list = $('fr-rows');
+  list.innerHTML = '';
+  // top of the stack first, because that is how you look at a case
+  for (let i = spec.rows.length - 1; i >= 0; i--) {
+    const row = spec.rows[i];
+    const div = document.createElement('div');
+    div.className = 'field';
+    const lab = document.createElement('label');
+    lab.textContent = 'row ' + (i + 1);
+    const sel = document.createElement('select');
+    sel.disabled = !isRack;
+    for (const c of ROW_CHOICES) {
+      const o = document.createElement('option');
+      o.value = c;
+      o.textContent = c;
+      if (c === row.format) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.onchange = () => {
+      edit();
+      row.format = sel.value;
+      renderFramePanel();
+      doResolve();
+    };
+    const del = document.createElement('button');
+    del.textContent = 'x';
+    del.title = 'remove this row';
+    del.disabled = !isRack || spec.rows.length < 2;
+    del.onclick = () => {
+      edit();
+      spec.rows.splice(spec.rows.indexOf(row), 1);
+      renderFramePanel();
+      doResolve();
+    };
+    div.appendChild(lab);
+    div.appendChild(sel);
+    div.appendChild(del);
+    list.appendChild(div);
+  }
+
+  const stance = $('fr-stance');
+  const m0 = (state.caseModel && state.caseModel.kind === 'rack')
+    ? state.caseModel : null;
+  {
+    if (!m0) stance.textContent = '';
+    else {
+      const clamped = (spec.panel?.bottom ?? 0) < m0.margin - 1e-6;
+      stance.textContent = `This case stands on its ${m0.stands_on}.`
+        + (clamped
+          ? ` Panel margin raised to ${m0.margin.toFixed(2)} mm -- below `
+            + `${m0.margin_min.toFixed(2)} the M5 holes run off the panel edge.`
+          : '');
+    }
+  }
+
+  const out = $('fr-result');
+  const m = (state.caseModel && state.caseModel.kind === 'rack')
+    ? state.caseModel : null;
+  if (!m) { out.innerHTML = '<p class="note">building...</p>'; return; }
+
+  const totalU = m.rows.reduce((a, r) => a + r.u, 0);
+  const bigRows = m.rows.filter((r) => r.u >= 3).length;
+  const cap = m.hp + (spec.inserts_per_row ? 8 * bigRows : 0);
+  const slots = m.rows
+    .map((r) => r.slots.map((s) => s.toFixed(1)).join(' / ')).join(', ');
+  const o = m.order || {};
+  out.innerHTML =
+    '<div class="field"><label>height</label><span>' + totalU + ' U</span></div>' +
+    '<div class="field"><label>rail span</label><span>' + m.width.toFixed(2) + ' mm</span></div>' +
+    '<div class="field"><label>outer width</label><span>' + m.outer_width.toFixed(2) + ' mm</span></div>' +
+    '<div class="field"><label>body web</label><span>' + m.web.toFixed(2) + ' mm</span></div>' +
+    '<div class="field"><label>side panel</label><span>' + m.panel_height.toFixed(2) + ' mm</span></div>' +
+    '<div class="field"><label>rails</label><span>' + m.bom.rails + '</span></div>' +
+    '<div class="field"><label>M5 screws</label><span>' + m.bom['M5 screws'] + '</span></div>' +
+    '<div class="field"><label>capacity</label><span>' + cap + ' HP</span></div>' +
+    '<p class="note">Rail slot centres ' + slots +
+    ' mm from the panel bottom edge.</p>' +
+    '<h2>order the U-channel</h2>' +
+    '<div class="field"><label>length</label><span>' + o.length_mm + ' mm</span></div>' +
+    '<div class="field"><label>width A</label><span>' + o.width_a_mm + ' mm</span></div>' +
+    '<div class="field"><label>width B</label><span>' + o.width_b_mm + ' mm</span></div>' +
+    '<div class="field"><label>width C</label><span>' + o.width_c_mm + ' mm</span></div>' +
+    '<div class="field"><label>thickness</label><span>' + o.thickness_mm + ' mm</span></div>' +
+    '<p class="note">Folded from a ' + o.developed_mm + ' mm flat. A / B / C are' +
+    ' the three flats in order, which is what a folding shop\'s form asks for.</p>' +
+    '<button id="fr-svg" title="the two side panels as one SVG, ready to cut">' +
+    'export side panels (SVG)</button>';
+  const btn = $('fr-svg');
+  if (btn) btn.onclick = exportSidePanels;
+}
+
+// ---------------------------------------------------------------------------
+// which kind of project this is
+// ---------------------------------------------------------------------------
+//
+// Asked once, when a project begins, and never afterwards. The two pipelines
+// are not two settings of one document -- a frame has no placements and a
+// parts case has no rows -- so offering a switch mid-project would either
+// throw away the boards somebody had already placed or keep them around
+// invisibly. Choosing up front makes that impossible instead of merely
+// discouraged.
+
+const PROJECT_KINDS = {
+  parts: {
+    label: 'new laser-cut layered case',
+    blurb: 'Place the boards you have measured; the case is generated around '
+         + 'them as a stack of sheet layers, ready for a laser.',
+  },
+  rack: {
+    label: 'new Eurorack U-profile case',
+    blurb: 'Set a width in HP and a stack of rows; the frame follows -- rails, '
+         + 'a folded aluminium body, and side panels that drill themselves.',
+  },
+};
+
+/** A frame has nothing to show but its case, so make sure the box is on.
+ *  Left off, a rack project opens to an empty viewport. */
+function ensureCaseVisible() {
+  if (state.scene?.kind === 'rack' && !$('chk-case').checked) {
+    $('chk-case').checked = true;
+  }
+}
+
+/** Resolve to 'continue', a kind, or null if dismissed. */
+function chooseProject(latest) {
+  return new Promise((resolve) => {
+    const body = Object.values(PROJECT_KINDS)
+      .map((k) => `<p><b>${escapeHtml(k.label)}</b><br>${escapeHtml(k.blurb)}</p>`)
+      .join('');
+    const actions = [];
+    if (latest) {
+      actions.push({ label: `continue "${latest}"`, act: () => resolve('continue') });
+    }
+    for (const [kind, k] of Object.entries(PROJECT_KINDS)) {
+      actions.push({ label: k.label, act: () => resolve(kind) });
+    }
+    showModal(latest ? 'Open a project' : 'Start a project', body, actions);
+    // showModal always appends its own dismiss button last; make dismissing
+    // resolve too, or an awaited chooser hangs forever.
+    const bar = $('modal-actions');
+    const dismiss = bar.lastElementChild;
+    const prev = dismiss.onclick;
+    dismiss.onclick = () => { prev?.(); resolve(null); };
+  });
+}
+
+/** `base`, or `base-2`, `base-3`... -- the first that is not taken. */
+async function freeSceneName(base) {
+  let taken = [];
+  try { taken = await sceneStore.list(); } catch { /* offer the base name */ }
+  const used = new Set(taken.map(String));
+  if (!used.has(base)) return base;
+  for (let n = 2; n < 999; n++) {
+    if (!used.has(`${base}-${n}`)) return `${base}-${n}`;
+  }
+  return `${base}-${Date.now()}`;
+}
+
+/** Name it, create it, open it. Returns the name, or null if cancelled.
+ *
+ *  Keeps asking rather than giving up: the first version suggested a fixed
+ *  name, and picking a project kind when that name was already taken failed
+ *  with a 409 the dialog had no way to show. From the outside the whole
+ *  dialog just did nothing.
+ */
+async function startProject(kind) {
+  let suggested = await freeSceneName(kind === 'rack' ? 'frame' : 'case');
+  for (;;) {
+    const name = askName('Name for the new project', suggested);
+    if (!name) return null;
+    try {
+      await sceneStore.create(name, null, kind);
+      sceneHandle = null;
+      await refreshScenes(name);
+      await loadScene(name);
+      if (kind === 'rack') {
+        document.querySelector('[data-pane="pane-frame"]')?.click();
+      }
+      ensureCaseVisible();
+      status(`started ${name}`, 'ok');
+      return name;
+    } catch (err) {
+      const clash = /exists|409|conflict/i.test(err.message || '');
+      if (!clash) throw err;
+      status(`there is already a scene called ${name}`, 'err');
+      suggested = await freeSceneName(name);
+    }
+  }
+}
+
+/** The chooser, then whatever it chose. Returns true if a project is open. */
+async function openOrStart(latest) {
+  const choice = await chooseProject(latest);
+  if (choice === null) return !!latest;
+  if (choice === 'continue') return true;
+  try {
+    return (await startProject(choice)) != null;
+  } catch (err) {
+    status('could not start the project: ' + err.message, 'err');
+    console.error(err);
+    return !!latest;
+  }
+}
+
+async function exportSidePanels() {
+  try {
+    const r = await fetch('/api/export/rack/panels.svg', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state.scene),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const blob = new Blob([await r.text()], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (state.sceneName || 'frame') + '-side-panels.svg';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    status('side panels exported', 'ok');
+  } catch (err) {
+    status('export failed: ' + err.message, 'err');
+  }
+}
+
+function wireFramePanel() {
+  if (!$('fr-hp')) return;
+  $('fr-hp').oninput = () => {
+    const v = parseFloat($('fr-hp').value);
+    if (!Number.isFinite(v) || v < 1) return;
+    edit('fr-hp');
+    rackSpec().hp = v;
+    $('fr-hp-mm').textContent = '= ' + (v * 5.08).toFixed(2) + ' mm';
+    scheduleResolve(150);
+  };
+  for (const [id, key] of PANEL_FIELDS) {
+    const el = $(id);
+    if (!el) continue;
+    el.oninput = () => {
+      const v = parseFloat(el.value);
+      if (!Number.isFinite(v) || v < 0) return;
+      edit(id);
+      rackSpec().panel[key] = v;
+      scheduleResolve(150);
+    };
+  }
+  $('fr-inserts').onchange = () => {
+    edit();
+    rackSpec().inserts_per_row = $('fr-inserts').checked ? 1 : 0;
+    doResolve();
+  };
+  // Repaint before the rebuild. The list is the only feedback that a row
+  // landed, and waiting on the round trip to show it makes the button feel
+  // broken whenever the build is slow or fails.
+  const add = (fmt) => () => {
+    edit();
+    rackSpec().rows.push({ format: fmt });
+    renderFramePanel();
+    doResolve();
+  };
+  $('fr-add-3u').onclick = add('3U');
+  $('fr-add-1u').onclick = add('1U-intellijel');
 }
 
 // ---------------------------------------------------------------------------
@@ -603,6 +991,14 @@ function scheduleResolve(delay = 140) {
 
 async function doResolve() {
   if (resolveInFlight) { scheduleResolve(60); return; }
+  // A frame has no placements to resolve -- its shape comes from the format,
+  // not from hardware -- so it skips straight to the build.
+  if (state.scene && state.scene.kind === 'rack') {
+    solidsGroup.clear();
+    ensureCaseVisible();
+    await refreshCase();
+    return;
+  }
   resolveInFlight = true;
   try {
     const resolved = await api('/api/resolve', {
@@ -647,12 +1043,21 @@ async function refreshCase() {
     state.caseModel = await api('/api/build', {
       method: 'POST', body: JSON.stringify(state.scene),
     });
+    if (state.caseModel && state.caseModel.kind === 'rack') {
+      buildRack(state.caseModel);
+      renderFramePanel();
+      return;
+    }
     buildCase(state.caseModel);
     renderCaseScrews();
     // the build is the only thing that knows a label outgrew its box
     renderEngravePanel();
   } catch (err) {
+    // Silence here used to look exactly like a dead button: the row was
+    // added, the rebuild failed, and nothing on screen moved.
     console.warn('case build failed', err);
+    status('build failed: ' + err.message, 'err');
+    if (state.scene && state.scene.kind === 'rack') renderFramePanel();
   }
 }
 
@@ -1693,18 +2098,142 @@ window.addEventListener('keydown', async (ev) => {
 });
 
 // ---------------------------------------------------------------------------
+// where scenes live
+// ---------------------------------------------------------------------------
+//
+// Two implementations of the same five verbs, chosen once at boot from
+// /api/config. Everything below this point -- the toolbar, the keyboard, the
+// scene picker -- goes through `sceneStore` and never learns which one it got.
+//
+// `diskScenes` is the local tool as it has always worked: the server owns
+// backend/scenes and the editor asks it to read and write. `localScenes` is
+// what a hosted instance gets instead, where the server stores nothing and the
+// browser holds the project. See web/store.js for why.
+
+const diskScenes = {
+  kind: 'disk',
+  async list() { return (await api('/api/scenes')).scenes; },
+  async read(name) { return api(`/api/scenes/${encodeURIComponent(name)}`); },
+  async create(name, copyFrom, kind = 'parts') {
+    await api('/api/scenes', {
+      method: 'POST', body: JSON.stringify({ name, copy_from: copyFrom, kind }),
+    });
+  },
+  async rename(from, to) {
+    await api(`/api/scenes/${encodeURIComponent(from)}/rename`, {
+      method: 'POST', body: JSON.stringify({ to }),
+    });
+  },
+  async write(name, scene) {
+    const r = await api(`/api/scenes/${encodeURIComponent(name)}`, {
+      method: 'PUT', body: JSON.stringify(scene),
+    });
+    return `saved ${r.placements} placements`;
+  },
+  async remove() { throw new Error('a scene on the server is deleted on the server'); },
+};
+
+/** Serialise through the server, so the file's comments survive the edit.
+ *  `previous` is the text this scene was last stored as; handing it back is
+ *  what makes a save a merge rather than a dump. */
+async function serialize(name, scene, previous) {
+  return api('/api/scene/serialize', {
+    method: 'POST',
+    body: JSON.stringify({ scene: { ...scene, name }, previous: previous ?? null }),
+  });
+}
+
+const localScenes = {
+  kind: 'local',
+  async list() { return store.list(); },
+  async read(name) {
+    const text = store.read(name);
+    if (text == null) throw new Error(`no scene ${name}`);
+    return api('/api/scene/parse', { method: 'POST', body: JSON.stringify({ yaml: text }) });
+  },
+  async create(name, copyFrom, kind = 'parts') {
+    if (store.has(name)) throw new Error(`${name} already exists`);
+    const text = copyFrom != null
+      ? store.read(copyFrom)
+      : await api(`/api/scene/starter?name=${encodeURIComponent(name)}`
+                  + `&kind=${encodeURIComponent(kind)}`);
+    if (text == null) throw new Error(`there is no scene ${copyFrom} to copy`);
+    store.write(name, text);
+  },
+  async rename(from, to) { store.rename(from, to); },
+  async write(name, scene) {
+    const text = await serialize(name, scene, store.read(name));
+    store.write(name, text);
+    if (sceneHandle) {
+      // The user picked a real file for this scene, so `save` means that file.
+      // The browser copy is written first on purpose: if the handle has gone
+      // stale -- the file moved, the permission lapsed -- the work is already
+      // safe before we find out.
+      try {
+        await files.save(sceneHandle, text);
+        return `saved to ${sceneHandle.name}`;
+      } catch (err) {
+        sceneHandle = null;
+        return `kept in this browser -- writing the file failed (${err.message})`;
+      }
+    }
+    return `saved ${scene.placements.length} placements in this browser`;
+  },
+  async remove(name) { store.remove(name); },
+};
+
+/** Set at boot from /api/config. */
+let sceneStore = diskScenes;
+
+/** False where importing a board files nothing on the server, so an import
+ *  belongs to the scene and undoing it is a local edit. */
+let partImportStored = true;
+
+/** The palette: the installation's library, plus the parts the scene carries.
+ *
+ *  A scene's own parts win on id -- same rule the engine resolves by -- and
+ *  they are sent back to be described rather than drawn from the raw
+ *  definition, because the palette shows derived numbers (z extent, footprint,
+ *  confidence) that only the engine works out. */
+async function reloadParts(reload = false) {
+  const { parts } = await api(`/api/parts${reload ? '?reload=true' : ''}`);
+  let own = [];
+  if (state.scene?.parts?.length) {
+    try {
+      ({ parts: own } = await api('/api/parts/describe', {
+        method: 'POST', body: JSON.stringify({ parts: state.scene.parts }) }));
+    } catch (err) {
+      // A scene carrying a part the engine will not accept is worth saying
+      // out loud, but it must not stop the rest of the palette drawing.
+      status(`this scene carries a part that did not load: ${err.message}`, 'err');
+    }
+  }
+  const own_ids = new Set(own.map((q) => q.id));
+  state.parts = [...parts.filter((q) => !own_ids.has(q.id)), ...own];
+  state.partsById = new Map(state.parts.map((q) => [q.id, q]));
+  renderParts();
+}
+
+/** A file this scene can be written straight back into, where the browser has
+ *  the pickers for it. Cleared whenever the scene stops being that file. */
+let sceneHandle = null;
+
+// ---------------------------------------------------------------------------
 // toolbar
 // ---------------------------------------------------------------------------
 
 async function loadScene(name) {
   state.sceneName = name;
-  state.scene = await api(`/api/scenes/${encodeURIComponent(name)}`);
+  state.scene = await sceneStore.read(name);
+  await reloadParts();           // the scene may bring boards of its own
   history.clear();
   $('sel-interior').value = state.scene.case?.interior || 'pocketed';
   renderCaseScrews();
   renderPlates();
   renderRenderPanel();
   renderEngravePanel();
+  ensureCaseVisible();
+  renderFramePanel();
   state.selection = null;
   shellFor = placementsSig = issuesSig = null;
   await doResolve();
@@ -1712,6 +2241,16 @@ async function loadScene(name) {
 }
 
 function frameCamera() {
+  // A frame never goes through /api/resolve, so it has no `extent`; its
+  // build carries the size instead.
+  const m = state.caseModel;
+  if (state.scene?.kind === 'rack' && m?.kind === 'rack') {
+    const span = Math.max(m.outer_width, m.panel_height, 100);
+    controls.target.set(0, 0, m.depth / 2);
+    camera.position.set(span * 0.35, -span * 0.85, span * 0.75);
+    controls.update();
+    return;
+  }
   const e = state.resolved?.extent;
   if (!e) return;
   const cx = (e.min[0] + e.max[0]) / 2, cy = (e.min[1] + e.max[1]) / 2;
@@ -1723,10 +2262,10 @@ function frameCamera() {
 
 /** Refresh the picker and select `pick`. */
 async function refreshScenes(pick) {
-  const { scenes } = await api('/api/scenes');
-  $('scene-select').innerHTML = scenes.map(
-    (s) => `<option${s === pick ? ' selected' : ''}>${s}</option>`).join('');
-  return scenes;
+  const names = await sceneStore.list();
+  $('scene-select').innerHTML = names.map(
+    (s) => `<option${s === pick ? ' selected' : ''}>${escapeHtml(s)}</option>`).join('');
+  return names;
 }
 
 function askName(what, suggested) {
@@ -1734,6 +2273,11 @@ function askName(what, suggested) {
   if (name == null) return null;
   const clean = name.trim();
   if (!clean) { status('a scene needs a name', 'err'); return null; }
+  if (!NAME_RE.test(clean)) {
+    status('letters, digits, spaces, dot, dash and underscore only \u2014 and it '
+      + 'has to start with a letter or a digit', 'err');
+    return null;
+  }
   return clean;
 }
 
@@ -1741,13 +2285,9 @@ function askName(what, suggested) {
  *  `seed` copies the source file first, so its comments come along. */
 async function writeAs(name, seed) {
   try {
-    await api('/api/scenes', {
-      method: 'POST',
-      body: JSON.stringify({ name, copy_from: seed ? state.sceneName : null }),
-    });
-    await api(`/api/scenes/${encodeURIComponent(name)}`, {
-      method: 'PUT', body: JSON.stringify(state.scene),
-    });
+    await sceneStore.create(name, seed ? state.sceneName : null);
+    await sceneStore.write(name, state.scene);
+    sceneHandle = null;            // a new name is a new file, not the old one
     await refreshScenes(name);
     await loadScene(name);
     status(`now editing ${name}`, 'ok');
@@ -1755,14 +2295,16 @@ async function writeAs(name, seed) {
 }
 
 $('btn-new').onclick = async () => {
-  const name = askName('Name for the new scene', 'untitled');
-  if (!name) return;
+  // No 'continue' here: the user asked for a new project, so the only
+  // question left is which kind.
+  const kind = await chooseProject(null);
+  if (!kind) return;
   try {
-    await api('/api/scenes', { method: 'POST', body: JSON.stringify({ name }) });
-    await refreshScenes(name);
-    await loadScene(name);
-    status(`started ${name}`, 'ok');
-  } catch (err) { status(err.message, 'err'); }
+    await startProject(kind);
+  } catch (err) {
+    status('could not start the project: ' + err.message, 'err');
+    console.error(err);
+  }
 };
 
 $('btn-dup').onclick = () => {
@@ -1779,9 +2321,7 @@ $('btn-rename').onclick = async () => {
   const name = askName('Rename this scene to', state.sceneName);
   if (!name || name === state.sceneName) return;
   try {
-    await api(`/api/scenes/${encodeURIComponent(state.sceneName)}/rename`, {
-      method: 'POST', body: JSON.stringify({ to: name }),
-    });
+    await sceneStore.rename(state.sceneName, name);
     await refreshScenes(name);
     await loadScene(name);
     status(`renamed to ${name}`, 'ok');
@@ -1789,12 +2329,108 @@ $('btn-rename').onclick = async () => {
 };
 
 $('btn-reload').onclick = () => loadScene(state.sceneName);
+
+/** Menu items that only mean something in one of the two modes. */
+function applyStorageMode() {
+  const local = sceneStore.kind === 'local';
+  $('btn-scene-delete').hidden = !local;
+  $('btn-reload').textContent = local ? 'discard changes' : 'reload from disk';
+  if (local && !store.durable) {
+    status('this browser will not keep scenes between visits — save to a file '
+      + 'before you close the tab', 'err');
+  }
+}
+
+/** Nothing stored yet: start something rather than showing an empty editor. */
+async function startFirstScene() {
+  if (sceneStore.kind !== 'local') {
+    status('no scenes yet — press "new" to start one', 'err');
+    return;
+  }
+  await sceneStore.create('untitled', null);
+  await refreshScenes('untitled');
+  await loadScene('untitled');
+  status('new scene — it lives in this browser until you save it to a file');
+}
 $('btn-save').onclick = async () => {
   try {
-    const r = await api(`/api/scenes/${encodeURIComponent(state.sceneName)}`, {
-      method: 'PUT', body: JSON.stringify(state.scene),
-    });
-    status(`saved ${r.placements} placements${r.backup ? ` (backup ${r.backup})` : ''}`, 'ok');
+    status(await sceneStore.write(state.sceneName, state.scene), 'ok');
+  } catch (err) { status(err.message, 'err'); }
+};
+
+// --- the user's own files -------------------------------------------------
+//
+// How a project leaves the browser and comes back. Present in both modes:
+// exporting the scene you are looking at is useful even when the server keeps
+// a copy, and it is the only way to keep one when it does not.
+
+$('btn-open').onclick = async () => {
+  const picked = await files.open();
+  if (!picked) return;
+  try {
+    // Validated before anything is stored or replaced. A file hand-edited into
+    // an invalid state should say which field and why, and leave the scene you
+    // were working on exactly as it was.
+    const scene = await api('/api/scene/parse', {
+      method: 'POST', body: JSON.stringify({ yaml: picked.text }) });
+
+    let name = nameFromFile(picked.name);
+    if (sceneStore.kind === 'local') {
+      if (store.has(name) && !window.confirm(
+        `${name} is already open in this browser. Replace it with this file?`)) {
+        const alt = askName('Open it under a different name', `${name}-2`);
+        if (!alt) return;
+        name = alt;
+      }
+      store.write(name, picked.text);
+      sceneHandle = picked.handle;      // ctrl+S now writes back to their file
+    } else {
+      // With a server that stores scenes, an opened file becomes one of its
+      // scenes like any other. The server owns the copy from here on, so no
+      // handle is kept -- saving to the file again is an explicit export.
+      const existing = await sceneStore.list();
+      while (existing.includes(name)) {
+        // A file whose name collides must not overwrite the scene already
+        // under it. That scene is on disk, and probably in someone's git.
+        if (window.confirm(`${name} already exists on the server. Overwrite it?`)) break;
+        const alt = askName('Open it under a different name', `${name}-2`);
+        if (!alt) return;
+        name = alt;
+      }
+      await api('/api/scenes', { method: 'POST', body: JSON.stringify({ name }) })
+        .catch(() => {});                       // already present is fine
+      await api(`/api/scenes/${encodeURIComponent(name)}`, {
+        method: 'PUT', body: JSON.stringify(scene) });
+      sceneHandle = null;
+    }
+    await refreshScenes(name);
+    await loadScene(name);
+    status(`opened ${picked.name}`, 'ok');
+  } catch (err) { status(err.message, 'err'); }
+};
+
+$('btn-savefile').onclick = async () => {
+  try {
+    const previous = sceneStore.kind === 'local' ? store.read(state.sceneName) : null;
+    const text = await serialize(state.sceneName, state.scene, previous);
+    const handle = await files.saveAs(state.sceneName, text);
+    if (handle) sceneHandle = handle;
+    if (sceneStore.kind === 'local') store.write(state.sceneName, text);
+    status(handle ? `saved to ${handle.name}` : `downloaded ${state.sceneName}.yaml`, 'ok');
+  } catch (err) { status(err.message, 'err'); }
+};
+
+$('btn-scene-delete').onclick = async () => {
+  const name = state.sceneName;
+  if (!window.confirm(
+    `Delete ${name} from this browser? A copy you saved as a file is untouched.`)) return;
+  try {
+    await sceneStore.remove(name);
+    sceneHandle = null;
+    const left = await refreshScenes();
+    if (left.length) await loadScene(left[0]);
+    else await startFirstScene();
+    status(`deleted ${name}`, 'ok');
   } catch (err) { status(err.message, 'err'); }
 };
 // Blob URLs are held until they are replaced. One export is most of a
@@ -1955,7 +2591,9 @@ function applyRenderMode() {
   }
   if (on) {
     const e = state.resolved?.extent;
-    ground.position.z = e ? e.min[2] - 0.6 : -8;
+    ground.position.z = state.caseModel?.kind === 'rack'
+      ? -0.6
+      : (e ? e.min[2] - 0.6 : -8);
     placeSun();
     // The chosen environment may not be in memory yet; this is the one place
     // that notices and fetches it.
@@ -1965,7 +2603,10 @@ function applyRenderMode() {
   buildCase(state.caseModel);
   document.body.classList.toggle('rendering', on);
 }
-$('chk-render').onchange = () => { applyRenderMode(); if ($('chk-render').checked && !state.caseModel) refreshCase(); };
+$('chk-render').onchange = () => {
+  applyRenderMode();
+  if ($('chk-render').checked && !state.caseModel) refreshCase();
+};
 for (const id of ['sun-az', 'sun-el', 'sun-power']) {
   $(id).oninput = () => { if ($('chk-render').checked) placeSun(); };
 }
@@ -2127,10 +2768,22 @@ async function importProduct(entry, row) {
   catStatus(`fetching and measuring ${entry.name}…`);
   try {
     const r = await api(`/api/catalog/import/${entry.id}`, { method: 'POST' });
-    const { parts } = await api('/api/parts?reload=true');
-    state.parts = parts;
-    state.partsById = new Map(parts.map((p) => [p.id, p]));
-    renderParts();
+    if (r.stored === false) {
+      // Nothing was filed on the server -- one visitor importing a board must
+      // not change what every other visitor sees -- so it goes into the scene
+      // and travels with the file from here on. Which means there has to be
+      // one: with no scene open the draft has nowhere to live at all.
+      if (!state.scene) {
+        throw new Error('open or start a scene first — an imported board is '
+          + 'kept in the scene file, and there is no scene to keep it in');
+      }
+      edit('import');
+      state.scene.parts = [
+        ...(state.scene.parts || []).filter((q) => q.id !== r.definition.id),
+        r.definition,
+      ];
+    }
+    await reloadParts(r.stored !== false);
 
     // Say what was guessed. An imported board has no connectors, so it asks
     // the case for no cable room -- that is worth interrupting for.
@@ -2157,12 +2810,14 @@ async function importProduct(entry, row) {
 
 async function forgetPart(partId) {
   try {
-    await api(`/api/catalog/import/${encodeURIComponent(partId)}`,
-      { method: 'DELETE' });
-    const { parts } = await api('/api/parts?reload=true');
-    state.parts = parts;
-    state.partsById = new Map(parts.map((p) => [p.id, p]));
-    renderParts();
+    if (partImportStored) {
+      await api(`/api/catalog/import/${encodeURIComponent(partId)}`,
+        { method: 'DELETE' });
+    } else if (state.scene) {
+      edit('import');
+      state.scene.parts = (state.scene.parts || []).filter((q) => q.id !== partId);
+    }
+    await reloadParts(partImportStored);
     catStatus('import undone');
   } catch (err) {
     catStatus(err.message, 'err');
@@ -2797,7 +3452,7 @@ function engraveWarning(e) {
 /** Draw the marks on the lid, so you can see them without exporting. */
 function buildEngravings(caseModel) {
   engraveGroup.clear();
-  if (!caseModel || !$('chk-case').checked) return;
+  if (!caseModel || caseModel.kind === 'rack' || !$('chk-case').checked) return;
   for (const layer of caseModel.layers) {
     if (!layer.engrave?.length) continue;
     const shapes = shapesFromRings(layer.engrave);
@@ -2826,6 +3481,7 @@ function buildEngravings(caseModel) {
   wireCatalog();
   wireMenus();
   wireTabs();
+  wireFramePanel();
   wireHelp();
   wirePlates();
   renderRenderPanel();
@@ -2837,14 +3493,21 @@ function buildEngravings(caseModel) {
         status(`hwcase ${VERSION} · ui ${UI_BUILD}`);
       })
       .catch(() => {});
-    const { parts } = await api('/api/parts');
-    state.parts = parts;
-    state.partsById = new Map(parts.map((p) => [p.id, p]));
-    renderParts();
+    // Which of the two homes this instance offers. A server that predates
+    // /api/config is a server that stores scenes, which is the old default.
+    const cfg = await api('/api/config').catch(() => ({ scene_storage: true }));
+    sceneStore = cfg.scene_storage ? diskScenes : localScenes;
+    partImportStored = cfg.part_import_stored !== false;
+    applyStorageMode();
 
-    const scenes = await refreshScenes();
-    if (scenes.length) await loadScene(scenes[0]);
-    else status('no scenes yet — press "new" to start one', 'err');
+    await reloadParts();
+
+    const names = await refreshScenes();
+    const pick = sceneStore.kind === 'local' ? (store.last() ?? names[0]) : names[0];
+    if (pick) await loadScene(pick);
+    // Ask what this session is for. The latest project is already loaded
+    // behind the sheet, so 'continue' is instant and dismissing is harmless.
+    if (!(await openOrStart(pick)) && !pick) await startFirstScene();
   } catch (err) {
     status(err.message, 'err');
     console.error(err);

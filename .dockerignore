@@ -1,0 +1,39 @@
+# Everything that is somebody's project rather than part of the tool.
+#
+# backend/scenes is the big one: those are working documents, and a hosted
+# image must not carry them -- both because they are not the visitor's and
+# because hosted mode has nowhere to put them.
+
+.git
+.gitattributes
+.venv
+.claude
+
+backend/scenes
+backend/.pytest_cache
+**/__pycache__
+**/*.pyc
+
+out
+export
+instrument
+docs
+
+# Caches the container rebuilds for itself, and reference material the engine
+# never reads at runtime.
+vendor/cad
+vendor/catalog
+vendor/datasheets
+vendor/img
+
+# Exports that happen to sit at the top of the checkout.
+*.dxf
+*.svg
+*.png
+
+Dockerfile
+.dockerignore
+docker-compose.yml
+start.bat
+start-hosted.bat
+deploy
