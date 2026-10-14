@@ -277,6 +277,7 @@ rack:
     - {{format: 3U}}
   inserts_per_row: 0
   insert_hp: 4.0
+  module_depth: 51.0
   panel:
     top: 10.5
     bottom: 10.5

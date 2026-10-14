@@ -739,6 +739,12 @@ class RackSpec(Strict):
     inserts_per_row: int = 0
     insert_hp: float = 4.0
 
+    #: How deep a module may be: clear space from the module face back to the
+    #: inside of the body's web. Sets the case's depth outright -- the folded
+    #: flange and the side panels follow from it. Skiffs run 25-40; the built
+    #: case is 51, deep enough to put a PSU behind the modules.
+    module_depth: float = 51.0
+
     #: The side panels: how far each edge reaches past the case, and how the
     #: corners are cut.
     panel: PanelSpec = Field(default_factory=lambda: PanelSpec())

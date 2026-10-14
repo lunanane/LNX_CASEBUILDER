@@ -303,6 +303,7 @@ def rack_to_json(model) -> dict:
         "depth": depth,
         "panel_height": model.panel_height,
         "outer_width": model.outer_width,
+        "module_depth": model.module_depth,
         "overhang": model.overhang,
         "margin": model.margin,
         "margin_min": rack_min_margin(model.overhang),

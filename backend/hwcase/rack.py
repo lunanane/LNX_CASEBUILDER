@@ -77,7 +77,14 @@ BODY_T = 1.0
 
 #: Flange depth -- and therefore the case depth. Fixed by the stock, not
 #: derived from anything.
-BODY_FLANGE = 40.0
+#: How deep a module may be: clear space from the module face back to the
+#: inside of the body's web. This is *the* depth parameter -- the flange, the
+#: case depth and the side panels all follow from it.
+#:
+#: 51 is the built case: a 40 mm flange starting 12 mm behind the module face,
+#: less the 1 mm web. Skiffs run 25-40; deeper cases leave room for a PSU
+#: behind the modules.
+MODULE_DEPTH = 51.0
 
 #: How far the rail's outer edge sits below the sheet slot the body's flange
 #: enters -- and therefore how far the rail stands proud of the body.
@@ -179,34 +186,50 @@ def resolve_margin(margin: float | None = None,
 #: the panel's inner face is where the rail stops.
 SIDE_PANEL_T = 5.0
 
-#: How much deeper the side panel is than the body's flange.
+#: How far the sheet slot reaches forward from the rail's back face -- and so
+#: how far the body's flange enters the rail.
 #:
-#: The built panel is 52 mm deep against a 40 mm flange. The 12 mm is where
-#: the rail sits proud of the flange at the front plus whatever the panel
-#: overhangs at the back -- one number rather than two, because the built case
-#: is the only sample and it cannot separate them. `estimated`, like `c`.
-SIDE_PANEL_MARGIN = 12.0
-
-
-def case_depth() -> float:
-    """Front of the rail to the back of the body -- the case's own depth."""
-    return BODY_FLANGE + SIDE_PANEL_MARGIN
+#: A property of the extrusion, like `RAIL_OVERHANG`. It is what used to be
+#: written down as "the side panel is 12 mm deeper than the flange": the same
+#: fact seen from the other end, since the body starts `RAIL_D - this` behind
+#: the module face. Naming it here means the case's depth is derived from the
+#: module depth instead of from a fitted panel dimension.
+RAIL_SLOT_DEPTH = 7.0
 
 
 def body_depth_offset() -> float:
     """How far back the body starts, from the module face.
 
-    The body's web is the back of the case and the rail's face is the front,
-    so the body hangs off the back of the case depth rather than the front.
-    Whatever is left over at the front is how far the rail and the body
-    overlap, and that is where the sheet slot has to be.
+    Fixed by the rail: the flange has to reach into the sheet slot, and the
+    slot is where the extrusion puts it. Independent of how deep the case is.
     """
-    return case_depth() - BODY_FLANGE
+    return RAIL_D - RAIL_SLOT_DEPTH
+
+
+def body_flange(module_depth: float = MODULE_DEPTH) -> float:
+    """Depth of the folded flange, for a given module depth.
+
+    The flange runs from where it enters the rail to the web at the back, so
+    it is the case depth less the head start the rail gives it.
+    """
+    f = module_depth + BODY_T - body_depth_offset()
+    if f < RAIL_SLOT_DEPTH:
+        raise ValueError(
+            f"module depth {module_depth} mm leaves a {f:.1f} mm flange, "
+            f"which is shorter than the {RAIL_SLOT_DEPTH} mm it has to reach "
+            f"into the rail. The shallowest case this rail allows is "
+            f"{RAIL_SLOT_DEPTH + body_depth_offset() - BODY_T:.1f} mm.")
+    return f
+
+
+def case_depth(module_depth: float = MODULE_DEPTH) -> float:
+    """Front of the rail to the back of the body -- the case's own depth."""
+    return module_depth + BODY_T
 
 
 def rail_body_overlap() -> float:
     """How much of the rail's depth the body's flange reaches into."""
-    return RAIL_D - body_depth_offset()
+    return RAIL_SLOT_DEPTH
 
 
 def rail_bore_depth() -> float:
@@ -350,6 +373,7 @@ class RackModel:
     web: float
     panel_height: float
     overhang: float = RAIL_OVERHANG
+    module_depth: float = MODULE_DEPTH
     plan: PanelPlan = field(default_factory=lambda: PanelPlan())
 
     @property
@@ -365,7 +389,8 @@ class RackModel:
     def depth(self) -> float:
         """How far the case reaches back from the module face."""
         return max(
-            (m.section.bounds[2] for m in self.members), default=BODY_FLANGE)
+            (m.section.bounds[2] for m in self.members),
+            default=case_depth(self.module_depth))
 
     @property
     def outer_width(self) -> float:
@@ -398,11 +423,12 @@ class RackModel:
         return {
             "part": "aluminium U-channel, folded, cut to size",
             "length_mm": round(self.width, 1),
-            "width_a_mm": round(BODY_FLANGE, 1),
+            "width_a_mm": round(body_flange(self.module_depth), 1),
             "width_b_mm": round(self.web, 1),
-            "width_c_mm": round(BODY_FLANGE, 1),
+            "width_c_mm": round(body_flange(self.module_depth), 1),
             "thickness_mm": BODY_T,
-            "developed_mm": round(2 * BODY_FLANGE + self.web, 1),
+            "developed_mm": round(
+                2 * body_flange(self.module_depth) + self.web, 1),
         }
 
     def bill_of_materials(self) -> dict[str, int | float]:
@@ -516,7 +542,8 @@ def rail_section(flip: bool = False,
     return section
 
 
-def body_section(web: float) -> Polygon:
+def body_section(web: float,
+                 module_depth: float = MODULE_DEPTH) -> Polygon:
     """The folded U, as a 1.0 mm open profile in (depth, height).
 
     Flange, web, flange -- the shape you get by unrolling the supplier's
@@ -529,7 +556,7 @@ def body_section(web: float) -> Polygon:
     rails' sheet slots. Built the other way round the web lands across the
     front of the case, which is a lid, not a chassis.
     """
-    t, f = BODY_T, BODY_FLANGE
+    t, f = BODY_T, body_flange(module_depth)
     outer = shapely_box(0.0, 0.0, f, web)
     inner = shapely_box(0.0, t, f - t, web - t)
     return outer.difference(inner)
@@ -540,6 +567,7 @@ def side_panel_section(rows: list[RowFormat], hp: float,
                        insert_hp: float = 4.0,
                        overhang: float = RAIL_OVERHANG,
                        plan: "PanelPlan | None" = None,
+                       module_depth: float = MODULE_DEPTH,
                        ) -> tuple[Polygon, list[Hole]]:
     """The side panel outline and every hole in it.
 
@@ -549,7 +577,7 @@ def side_panel_section(rows: list[RowFormat], hp: float,
     """
     q = (plan or PanelPlan()).resolved(overhang)
     h = panel_height(rows, overhang, q)
-    depth = case_depth()
+    depth = case_depth(module_depth)
     base = panel_base(rows, overhang, q)
     # The panel's own frame starts at its front-bottom corner, so a front
     # overhang pushes the case's depth 0 to `q.front` rather than moving
@@ -601,7 +629,8 @@ def side_panel_section(rows: list[RowFormat], hp: float,
 def build(rows: list[RowFormat], hp: float, inserts_per_row: int = 0,
           insert_hp: float = 4.0,
           overhang: float = RAIL_OVERHANG,
-          plan: "PanelPlan | None" = None) -> RackModel:
+          plan: "PanelPlan | None" = None,
+          module_depth: float = MODULE_DEPTH) -> RackModel:
     """Turn a row stack and a width into every piece of the frame.
 
     Three datums, and everything else hangs off them:
@@ -616,6 +645,7 @@ def build(rows: list[RowFormat], hp: float, inserts_per_row: int = 0,
       ends from outside, so the panels add their own thickness either side.
     """
     plan = (plan or PanelPlan()).resolved(overhang)
+    body_flange(module_depth)          # fail loudly on an impossible depth
     width = frame_width(hp)
     web = web_height(rows, overhang)
     ph = panel_height(rows, overhang, plan)
@@ -648,16 +678,17 @@ def build(rows: list[RowFormat], hp: float, inserts_per_row: int = 0,
     members.append(Member(
         name="body",
         kind="body",
-        section=body_section(web),
+        section=body_section(web, module_depth),
         length=width,
         origin=(0.0, body_y, body_depth_offset()),
         axis="x",
-        notes=[f"one folded U, web {web:.2f}, flange {BODY_FLANGE}, "
+        notes=[f"one folded U, web {web:.2f}, "
+               f"flange {body_flange(module_depth):.2f}, "
                f"{overhang:.2f} mm inside the rail edge"],
     ))
 
     panel, holes = side_panel_section(
-        rows, hp, inserts_per_row, insert_hp, overhang, plan)
+        rows, hp, inserts_per_row, insert_hp, overhang, plan, module_depth)
     base = panel_base(rows, overhang, plan)
     for side, x in (("left", -SIDE_PANEL_T), ("right", width)):
         members.append(Member(
@@ -673,7 +704,8 @@ def build(rows: list[RowFormat], hp: float, inserts_per_row: int = 0,
         ))
 
     return RackModel(rows=placed, members=members, hp=hp, width=width,
-                     web=web, panel_height=ph, overhang=overhang, plan=plan)
+                     web=web, panel_height=ph, overhang=overhang, plan=plan,
+                     module_depth=module_depth)
 
 
 def build_spec(spec) -> RackModel:
@@ -704,4 +736,5 @@ def build_spec(spec) -> RackModel:
         r_top_front=getattr(panel, "r_top_front", 0.0),
     ) if panel is not None else PanelPlan()
     return build(rows, spec.hp, spec.inserts_per_row, spec.insert_hp,
-                 RAIL_OVERHANG, plan)
+                 RAIL_OVERHANG, plan,
+                 getattr(spec, "module_depth", MODULE_DEPTH))

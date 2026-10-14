@@ -456,3 +456,47 @@ def test_every_member_is_inside_the_side_panel_envelope(rows, hp, kw):
             continue          # rails are allowed past it in height
         assert h0 >= ph0 - 1e-9 and h1 <= ph1 + 1e-9, (
             f"{x.name} sticks out of the panel in height")
+
+
+# --------------------------------------------------------------------------
+# module depth
+# --------------------------------------------------------------------------
+
+
+def test_module_depth_reproduces_the_built_flange():
+    """51 mm of module room is the 40 mm channel that was ordered."""
+    assert rack.body_flange(51.0) == pytest.approx(40.0)
+    assert rack.case_depth(51.0) == pytest.approx(52.0)
+    m = rack.build([ROW_3U], 74.0, module_depth=51.0)
+    assert m.order_spec()["width_a_mm"] == pytest.approx(40.0)
+
+
+@pytest.mark.parametrize("depth", [25.0, 40.0, 51.0, 80.0, 120.0])
+def test_depth_drives_body_and_panels_together(depth):
+    m = rack.build([ROW_3U, ROW_3U], 68.0, module_depth=depth)
+    body = [x for x in m.members if x.kind == "body"][0]
+    panel = [x for x in m.members if x.kind == "side_panel"][0]
+    # the body's flange grows with the depth...
+    assert body.section.bounds[2] == pytest.approx(rack.body_flange(depth))
+    # ...and the panel wraps exactly the case it belongs to
+    assert panel.section.bounds[2] == pytest.approx(rack.case_depth(depth))
+    # the back of the body is still the back of the case
+    assert (body.origin[2] + body.section.bounds[2]
+            == pytest.approx(rack.case_depth(depth)))
+
+
+@pytest.mark.parametrize("depth", [25.0, 51.0, 120.0])
+def test_the_rail_engagement_never_changes_with_depth(depth):
+    """The flange enters the slot by the same 7 mm however deep the case is."""
+    m = rack.build([ROW_3U], 68.0, module_depth=depth)
+    body = [x for x in m.members if x.kind == "body"][0]
+    rail = [x for x in m.members if x.kind == "rail"][0]
+    overlap = (rail.origin[2] + rail.section.bounds[2]) - body.origin[2]
+    assert overlap == pytest.approx(rack.RAIL_SLOT_DEPTH)
+    # and the M5 bore stays clear of it
+    assert rack.rail_bore_depth() + rack.RAIL_END_BORE / 2 < body.origin[2]
+
+
+def test_a_case_too_shallow_for_the_rail_is_refused():
+    with pytest.raises(ValueError, match="shorter than"):
+        rack.build([ROW_3U], 68.0, module_depth=15.0)

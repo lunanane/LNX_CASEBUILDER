@@ -538,6 +538,7 @@ function rackSpec() {
     state.scene.rack = {
       hp: 68, rows: [{ format: '3U' }, { format: '3U' }],
       inserts_per_row: 0, insert_hp: 4,
+      module_depth: 51,
       panel: { top: 10.5, bottom: 10.5, front: 0, back: 0 } };
   }
   if (!state.scene.rack.rows || !state.scene.rack.rows.length) {
@@ -552,8 +553,8 @@ function rackSpec() {
 function renderFramePanel() {
   if (!state.scene || !$('fr-hp')) return;
   const isRack = state.scene.kind === 'rack';
-  for (const id of ['fr-hp', 'fr-inserts', 'fr-add-3u', 'fr-add-1u',
-                    ...PANEL_FIELDS.map((f) => f[0])]) {
+  for (const id of ['fr-hp', 'fr-depth', 'fr-inserts', 'fr-add-3u',
+                    'fr-add-1u', ...PANEL_FIELDS.map((f) => f[0])]) {
     if ($(id)) $(id).disabled = !isRack;
   }
 
@@ -571,6 +572,9 @@ function renderFramePanel() {
 
   const spec = rackSpec();
   if (document.activeElement !== $('fr-hp')) $('fr-hp').value = spec.hp;
+  if (document.activeElement !== $('fr-depth')) {
+    $('fr-depth').value = spec.module_depth ?? 51;
+  }
   $('fr-hp-mm').textContent = '= ' + (spec.hp * 5.08).toFixed(2) + ' mm';
   $('fr-inserts').checked = !!spec.inserts_per_row;
   for (const [id, key, dflt] of PANEL_FIELDS) {
@@ -650,6 +654,8 @@ function renderFramePanel() {
     '<div class="field"><label>height</label><span>' + totalU + ' U</span></div>' +
     '<div class="field"><label>rail span</label><span>' + m.width.toFixed(2) + ' mm</span></div>' +
     '<div class="field"><label>outer width</label><span>' + m.outer_width.toFixed(2) + ' mm</span></div>' +
+    '<div class="field"><label>module depth</label><span>' + m.module_depth.toFixed(1) + ' mm</span></div>' +
+    '<div class="field"><label>case depth</label><span>' + m.depth.toFixed(1) + ' mm</span></div>' +
     '<div class="field"><label>body web</label><span>' + m.web.toFixed(2) + ' mm</span></div>' +
     '<div class="field"><label>side panel</label><span>' + m.panel_height.toFixed(2) + ' mm</span></div>' +
     '<div class="field"><label>rails</label><span>' + m.bom.rails + '</span></div>' +
@@ -809,6 +815,13 @@ async function exportSidePanels() {
 
 function wireFramePanel() {
   if (!$('fr-hp')) return;
+  $('fr-depth').oninput = () => {
+    const v = parseFloat($('fr-depth').value);
+    if (!Number.isFinite(v) || v < 18) return;
+    edit('fr-depth');
+    rackSpec().module_depth = v;
+    scheduleResolve(150);
+  };
   $('fr-hp').oninput = () => {
     const v = parseFloat($('fr-hp').value);
     if (!Number.isFinite(v) || v < 1) return;
