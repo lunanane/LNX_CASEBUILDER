@@ -157,14 +157,16 @@ would be impossible.
 The U-channel's flange edge slides into the rail's 1.50 mm slot, and a sliding
 nut in the channel below bolts the two together. The body is therefore *smaller*
 than the case's outer envelope — the rail overhangs it by `5.00 - 2.30 = 2.70 mm`
-per edge. The 40 mm flange is the case depth, fixed by the stock.
+per edge. The flange enters the rail's slot by 7 mm, so the body starts 12 mm
+behind the module face. The 40 mm flange of this order is what a 51 mm module
+depth needs; the depth is now a setting and the flange follows from it.
 
 ### 4.3 The parameterisation
 
 ```
 length(HP) = HP x 5.08              68 HP -> 345.44 mm  (cut 345)
 web(U)     = U x 44.45 - 6.25       5U -> 216.00 (this case, exactly)
-flange     = 40                     the case depth
+flange     = module depth - 11      51 mm -> 40 (this case)
 ```
 
 The `6.25` is `10.85 - 2 x 2.30`: the rack hole deduction less twice the inset
@@ -210,11 +212,10 @@ Each side panel therefore contributes 4 HP of capacity outboard of the rails —
 
 ### 4.6 Still open
 
-1. **A 6U case needs four rails; one U-channel has two flange edges.** Either
-   the middle pair mounts to the side panels, or a 6U case is two stacked 3U
-   shells. Monolithic 6U web = 260.45; two stacked 3U shells = 2 x 127.10 =
-   254.20. Blocks geometry generation for 6U.
-2. **The two Ø3 holes** at (59, 11) and (180, 11) are not symmetric about the
+1. **The two Ø3 holes** at (59, 11) and (180, 11) are not symmetric about the
    panel's centre of 118.5 — 59 would pair with 178, not 180. Check the built
    part before re-cutting.
-3. **The fifth screenshot** never arrived.
+2. **The fifth screenshot** never arrived.
+
+The question of how a 6U case carries four rails is closed: the side panels
+carry every rail, one M5 per end, and a case has one body whatever its height.

@@ -10,6 +10,29 @@ and friends) make empty boxes; EDA tools lay out parts *inside* a PCB. The
 middle — "here are eight modules, wrap a case around them without blocking the
 HDMI port" — is what this is.
 
+**Full documentation: [docs/index.html](docs/index.html)** — one self-contained
+page covering the editor, both kinds of project, the file formats, the command
+line, the HTTP API and hosting. Open it straight from a checkout, or serve it
+with GitHub Pages (Settings → Pages → deploy from branch, folder `/docs`).
+
+**License: noncommercial.** [PolyForm Noncommercial 1.0.0](LICENSE): use, change
+and share it for any noncommercial purpose; commercial use needs a separate
+licence. Third-party files keep their own terms, listed in [NOTICE](NOTICE).
+
+## Two kinds of project
+
+The editor asks which one you want when a project begins, and never afterwards:
+
+| | laser-cut layered case | Eurorack U-profile case |
+|---|---|---|
+| what decides the shape | the boards you place | the format: a width in HP and a stack of rows |
+| what it is made of | a stack of sheet layers | rails, one folded aluminium body, two side panels |
+| what you get out | SVG / DXF sheets and a cut list | a side-panel SVG and the numbers to order the rest |
+| scene file | `kind: parts` (the default) | `kind: rack` |
+
+Most of this README is about the first. The second has
+[its own section](#eurorack-frames).
+
 ## The idea in one paragraph
 
 A case is a **stack of slabs**. Each slab is one sheet of material and one 2D
@@ -31,6 +54,9 @@ backend/
     library.py    YAML part loader
     scene.py      mate solver + the checks (collision, access, exposure, clearance)
     case.py       scene -> stack of slabs
+    eurorack.py   the Eurorack format as arithmetic: HP, U, panel and hole rules
+    rack.py       a row stack and a width -> rails, folded body, side panels
+    scenefile.py  write a scene back to YAML without losing its comments
     engrave.py    front-panel decoration, as a pass the cutter keeps separate
     hershey.py    single-stroke lettering for those decorations
     measure.py    read geometry out of vendor CAD -- the one place that does
@@ -46,8 +72,12 @@ backend/
   scenes/         layouts
   tests/          pytest suite over the engine
 docs/
+  index.html      the complete documentation, as one page
   research.md     what already exists and what we build ourselves
   measurements.md what is exact, what is guessed, what to measure next
+  eurorack.md     the Eurorack mechanical norms, with sources
+  eurorack-frame-stock.md  the rail, U-channel and acrylic the frame is built from
+  hosting.md      running an instance for other people
 web/            the editor: three.js (vendored, no build step, no CDN)
 tools/
   fetch_cad.py    mirror vendor STEP/STL into vendor/cad/
@@ -85,11 +115,13 @@ in a row, and the last four were off the edge of the screen, which is the same
 as not existing.)
 
 Left: the part library, click to drop one into the scene, with the catalogue
-search underneath. Middle: the 3D view. Right: four panes —
+search underneath. Middle: the 3D view. Right: five panes —
 
 - **layout** — placements and the selected part's numbers
 - **case** — size, the bolts that hold the stack together, minimum web,
   and the materials with their colours
+- **frame** — a Eurorack frame's width, depth, rows and side panels; only
+  live in a frame project
 - **look** — lighting, contact shading, and the final render
 - **issues** — the live list, badged so a problem is visible from any pane
 
@@ -158,6 +190,78 @@ engine's opinion, never the browser's guess. `save` writes back to
 new values into the existing YAML document rather than dumping over it, so the
 reasoning recorded in those files survives an edit. Saving is idempotent.
 
+## Eurorack frames
+
+Choose **new Eurorack U-profile case** when starting a project and nothing is
+placed by hand. A frame's shape is decided by the format before any module
+exists, so the whole thing is arithmetic over a width and a stack of rows:
+
+- **rails** — one aluminium extrusion (f&w Art. 16500), two per row, cut to
+  the case width. The rail *is* the case's visible front edge.
+- **the body** — one folded 1.0 mm aluminium U, whatever the height. Its
+  flange edges slide into the rails' sheet slots.
+- **two side panels** — 5 mm plate, and the only structural member: every rail
+  is bolted between them with one M5 per end.
+
+```yaml
+name: my-frame
+kind: rack
+rack:
+  hp: 68                  # rail span
+  rows:                   # bottom to top; mix freely
+    - {format: 3U}
+    - {format: 3U}
+  module_depth: 51.0      # clear room behind the module face
+  inserts_per_row: 1      # a 4 HP slot in each side panel, per 3U row
+  panel:
+    top: 10.5             # how far the side panel reaches past the body
+    bottom: 10.5
+    r_bottom_front: 6.0   # a radius per corner
+```
+
+What follows from those few numbers:
+
+| | rule | 68 HP, 6U, 51 mm |
+|---|---|---:|
+| rail length | `HP × 5.08` | 345.44 mm |
+| body web | `U × 44.45 − 6.25` | 260.45 mm |
+| body flange | `module depth − 11` | 40 mm |
+| case depth | `module depth + 1` | 52 mm |
+| side panel height | `web + top + bottom` | 281.45 mm |
+| outer width | `rail length + 2 × 5` | 355.44 mm |
+| rails / M5 screws | `2 × rows` / `2 × rails` | 4 / 8 |
+| capacity with inserts | `HP + 8` per 3U row | 76 HP |
+
+Row formats are `3U`, `1U-intellijel` and `1U-pulplogic` — there is no neutral
+1U, because the two tile standards are 3.5 mm apart and not interchangeable.
+`1U + 3U + 1U` reproduces the hand-built reference case exactly: a 216.00 mm
+web and a 237 mm side panel.
+
+**Module depth** is the one depth parameter. Skiffs run 25–40 mm; 51 is the
+built case and leaves room for a power supply behind the modules. The
+shallowest frame this rail allows is 18 mm, and anything less is refused with
+the reason rather than drawn.
+
+**What the case stands on** falls out of the bottom margin. The rail sits
+2.7 mm proud of the body — a property of the extrusion, not a setting. Keep
+the panel's bottom margin under that and the case rests on its rails; go over
+and it rests on the side panels. Margins are raised automatically to 2.2 mm if
+they would let an M5 hole run off the panel's edge.
+
+**Getting it made.** The frame pane's result block lists every derived number,
+and an *order the U-channel* block in the fields a folding shop's form asks for
+(length, widths A / B / C, thickness). **export side panels (SVG)** writes both
+panels as one file with the holes ahead of the outlines, kerf-compensated.
+Rails are bought by length; nothing else is cut.
+
+The command line does not build frames yet: `check` and `build` run the layered
+pipeline only, so `build` on a `kind: rack` scene writes an empty two-layer case
+rather than a frame. Use the editor, or `POST /api/build` and
+`POST /api/export/rack/panels.svg`.
+
+Background, with sources: [docs/eurorack.md](docs/eurorack.md) for the format,
+[docs/eurorack-frame-stock.md](docs/eurorack-frame-stock.md) for the stock.
+
 ## Putting it on a server
 
 `start.bat` is a single-user tool, and `backend/scenes` is a single-user
@@ -204,6 +308,10 @@ the check the working container is already gone by the time anyone notices.
 See [docs/hosting.md](docs/hosting.md) for the whole of it: what a user's
 project actually is, what it costs to run, what stays shared, and what you
 would have to build if you wanted accounts.
+
+GitHub hosts the code and, through Pages, the documentation. It cannot host
+the editor itself: every piece of geometry is computed by the Python server, so
+a static host serves a page that loads and then has nothing to ask.
 
 ## Or from the command line
 
@@ -564,7 +672,7 @@ Mixing them up is how a panel ends up with a speaker grill sawn clean out of it,
 so engraving lives in its own group in the SVG (blue, titled *do not cut*) and
 its own `_ENGRAVE` layer in the DXF, never merged with the outline.
 
-Seven patterns, from the **look** pane: `text` for labelling, `fins` (the
+Seven patterns, from the decoration section of the **case** pane: `text` for labelling, `fins` (the
 amplifier front-panel look), `slots` (a speaker grill, offset row to row — a
 square grid looks like a spreadsheet), `rings`, `hex`, `rule` for separating
 groups of controls, and `frame`. Each carries a preset that looks right without
@@ -827,7 +935,15 @@ overflowing toolbar, image-based lighting from CC0 environments, baked contact
 shading, front-panel engraving as its own laser pass, and an optional Mitsuba
 renderer for the final photograph.
 
+And then: bed-sized sheet export with a plate stock and a cut list, one screw
+length for every board (wells), a hosted mode that stores nothing, and a second
+pipeline for Eurorack frames — rails, folded body and self-drilling side panels
+from a width, a depth and a row stack.
+
 Next:
+0. **Frames from the command line, and a drill list for the rails** — the
+   frame pipeline is reachable from the editor and the API only, and exports
+   the side panels but no per-rail cut list.
 1. **Snapping** — the editor moves parts freely in XY. Wants: snap to mates
    (drop the pad on a Trellis and have it click on as a child), snap to part
    edges and to a grid, and alignment guides. The 60 mm Trellis tiling is the

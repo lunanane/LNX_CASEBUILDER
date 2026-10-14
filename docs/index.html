@@ -1,0 +1,1258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hwcase documentation</title>
+<meta name="description" content="hwcase: parametric cases around real hardware. Laser-cut layered cases and Eurorack frames, from one editor.">
+<style>
+:root {
+  --bg: #fbfaf7;
+  --panel: #f2efe8;
+  --ink: #1f1d1a;
+  --muted: #6a655c;
+  --rule: #ddd7ca;
+  --accent: #b4571c;
+  --accent-ink: #8a3f10;
+  --code-bg: #efebe2;
+  --note-bg: #f6efe0;
+  --warn-bg: #fbe9e1;
+  --warn: #a8321a;
+  --alu: #9aa3ad;
+  --acrylic: #e08a3c;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #181715;
+    --panel: #201f1c;
+    --ink: #e9e5dc;
+    --muted: #a09a8e;
+    --rule: #37342e;
+    --accent: #e8935a;
+    --accent-ink: #f0a877;
+    --code-bg: #26241f;
+    --note-bg: #2a261d;
+    --warn-bg: #33201a;
+    --warn: #f08a6c;
+    --alu: #8d96a0;
+    --acrylic: #d98842;
+  }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.6 var(--sans);
+  -webkit-text-size-adjust: 100%;
+}
+.layout { display: grid; grid-template-columns: 264px minmax(0, 1fr); min-height: 100vh; }
+nav.toc {
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+  padding: 28px 20px 40px; background: var(--panel); border-right: 1px solid var(--rule);
+  font-size: 14px;
+}
+nav.toc .brand { font: 600 20px/1.2 var(--mono); letter-spacing: -0.02em; margin: 0 0 2px; }
+nav.toc .ver { color: var(--muted); margin: 0 0 22px; font-size: 13px; }
+nav.toc h4 {
+  margin: 20px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--muted);
+}
+nav.toc a { display: block; padding: 3px 0; color: var(--ink); text-decoration: none; }
+nav.toc a:hover { color: var(--accent); }
+main { padding: 44px 48px 96px; max-width: 900px; min-width: 0; }
+h1 { font-size: 36px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 12px; text-wrap: balance; }
+h2 {
+  font-size: 25px; line-height: 1.25; letter-spacing: -0.01em;
+  margin: 64px 0 14px; padding-top: 26px; border-top: 1px solid var(--rule);
+}
+h3 { font-size: 18px; margin: 34px 0 8px; }
+h4 { font-size: 15px; margin: 24px 0 6px; }
+p { margin: 0 0 14px; }
+.lede { font-size: 19px; color: var(--muted); margin-bottom: 26px; max-width: 62ch; }
+a { color: var(--accent-ink); }
+ul, ol { margin: 0 0 14px; padding-left: 22px; }
+li { margin-bottom: 5px; }
+code, kbd, pre { font-family: var(--mono); font-size: 0.88em; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+kbd {
+  background: var(--bg); border: 1px solid var(--rule); border-bottom-width: 2px;
+  padding: 0 5px; border-radius: 4px; white-space: nowrap;
+}
+pre {
+  background: var(--code-bg); padding: 14px 16px; border-radius: 8px;
+  overflow-x: auto; margin: 0 0 16px; line-height: 1.5; font-size: 13.5px;
+}
+pre code { background: none; padding: 0; font-size: inherit; }
+.tw { overflow-x: auto; margin: 0 0 18px; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 7px 12px 7px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; white-space: nowrap; }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+td:first-child code { white-space: nowrap; }
+.note, .warn {
+  border-left: 3px solid var(--accent); background: var(--note-bg);
+  padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 0 0 18px;
+}
+.warn { border-left-color: var(--warn); background: var(--warn-bg); }
+.note > :last-child, .warn > :last-child { margin-bottom: 0; }
+.cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 0 0 20px; }
+.card { border: 1px solid var(--rule); border-radius: 10px; padding: 16px 18px; background: var(--panel); }
+.card h3 { margin: 0 0 6px; font-size: 17px; }
+.card p { margin: 0 0 8px; font-size: 15px; }
+.card p:last-child { margin: 0; color: var(--muted); font-size: 14px; }
+figure { margin: 0 0 20px; }
+figure svg { width: 100%; max-width: 680px; height: auto; display: block; }
+figcaption { font-size: 14px; color: var(--muted); margin-top: 8px; max-width: 62ch; }
+.dia text { font: 12px var(--sans); fill: var(--ink); }
+.dia .dim { fill: var(--muted); }
+.dia .lead { stroke: var(--muted); stroke-width: 0.8; fill: none; }
+footer { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 14px; }
+@media (max-width: 860px) {
+  .layout { display: block; }
+  nav.toc { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--rule); padding: 20px 16px; }
+  nav.toc .links { columns: 2; column-gap: 20px; }
+  nav.toc h4 { break-after: avoid; }
+  main { padding: 28px 16px 72px; }
+  h1 { font-size: 29px; }
+  h2 { font-size: 22px; margin-top: 48px; }
+  .cards { grid-template-columns: 1fr; }
+}
+@media print {
+  nav.toc { display: none; }
+  .layout { display: block; }
+  main { max-width: none; padding: 0; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc" aria-label="Contents">
+  <p class="brand">hwcase</p>
+  <p class="ver">documentation · engine 0.2.0</p>
+  <div class="links">
+    <h4>Start</h4>
+    <a href="#what">What it is</a>
+    <a href="#install">Install and run</a>
+    <a href="#editor">The editor</a>
+    <h4>Layered cases</h4>
+    <a href="#layered">How a layered case works</a>
+    <a href="#workflow">The working loop</a>
+    <a href="#heights">Heights and panels</a>
+    <a href="#cutouts">Getting cables out</a>
+    <a href="#interior">The interior</a>
+    <a href="#screws">Screws and bolts</a>
+    <a href="#guarantees">What the engine guarantees</a>
+    <a href="#size">Case size and anchors</a>
+    <a href="#engrave">Engraving</a>
+    <a href="#export">Exporting for the laser</a>
+    <a href="#render">Rendering</a>
+    <h4>Eurorack frames</h4>
+    <a href="#frame">How a frame goes together</a>
+    <a href="#frame-params">What you set</a>
+    <a href="#frame-derived">What follows</a>
+    <a href="#frame-stance">Stance and corners</a>
+    <a href="#frame-inserts">Side panel inserts</a>
+    <a href="#frame-make">Getting it made</a>
+    <h4>Parts</h4>
+    <a href="#parts">The part library</a>
+    <a href="#part-file">A part file</a>
+    <a href="#import">Importing from a catalogue</a>
+    <a href="#audit">Auditing the library</a>
+    <h4>Reference</h4>
+    <a href="#scene-ref">Scene file</a>
+    <a href="#cli">Command line</a>
+    <a href="#api">HTTP API</a>
+    <a href="#hosting">Hosting</a>
+    <a href="#dev">Development</a>
+    <a href="#limits">Known limits</a>
+    <a href="#credits">License and credits</a>
+  </div>
+</nav>
+
+<main>
+
+<h1>hwcase</h1>
+<p class="lede">Lay real hardware out in 3D, check that the plugs and cables can
+physically get where they need to go, and get a case you can actually have
+made: laser-cut layers, or a Eurorack frame from extrusion and folded sheet.</p>
+
+<section id="what">
+<h2>What it is</h2>
+<p>Box generators make empty boxes. PCB tools lay out components inside a
+board. hwcase covers the gap between them: you have eight boards on the bench,
+and you want a case around them that does not block the HDMI port.</p>
+<p>There are two kinds of project. The editor asks which one you want when a
+project begins, and the choice is fixed after that, because the two have
+nothing in common to convert.</p>
+<div class="cards">
+  <div class="card">
+    <h3>Laser-cut layered case</h3>
+    <p>You place the boards. The case is generated around them as a stack of
+    flat sheets, with a pocket, a window or a cable opening wherever the
+    hardware needs one.</p>
+    <p>Output: SVG or DXF sheets sized to your cutting bed, plus a cut list.</p>
+  </div>
+  <div class="card">
+    <h3>Eurorack U-profile case</h3>
+    <p>You set a width in HP, a depth, and a stack of rows. The frame follows
+    from the format: rails, one folded aluminium body, and two side panels that
+    drill themselves.</p>
+    <p>Output: a side-panel SVG, and the numbers to order the rest.</p>
+  </div>
+</div>
+<p>Both share one editor, one file format and one server. All geometry is
+computed by a Python engine; the browser only draws what the engine returns, so
+what you see and what you cut cannot disagree.</p>
+</section>
+
+<section id="install">
+<h2>Install and run</h2>
+<h3>Windows</h3>
+<pre><code>start.bat</code></pre>
+<p>That is all. On the first run it builds a <code>.venv</code> folder beside
+itself and installs the requirements, which takes about two minutes. It then
+finds a free port from 8487 upward, starts the server and opens the browser.
+Later runs take a few seconds. It needs Python 3 on the machine and touches
+nothing outside its own folder.</p>
+<div class="tw"><table>
+<tr><th>Command</th><th>What it does</th></tr>
+<tr><td><code>start.bat</code></td><td>First free port from 8487, opens a browser, reloads when the engine changes</td></tr>
+<tr><td><code>start.bat 9000</code></td><td>Uses the port you give it</td></tr>
+<tr><td><code>start.bat 9000 bare</code></td><td>No auto-reload and no browser</td></tr>
+<tr><td><code>start-hosted.bat</code></td><td>The same server the way a public instance runs it, on port 8497. See <a href="#hosting">Hosting</a></td></tr>
+</table></div>
+
+<h3>Linux and macOS</h3>
+<p>There is no launcher script, but the steps are short:</p>
+<pre><code>python3 -m venv .venv
+.venv/bin/pip install -r backend/requirements.txt
+cd backend
+../.venv/bin/python -m uvicorn hwcase.api:app --port 8487</code></pre>
+<p>Then open <code>http://127.0.0.1:8487</code>.</p>
+
+<h3>Docker</h3>
+<pre><code>docker build -t hwcase .
+docker run --rm -p 8000:8000 hwcase</code></pre>
+<p>The image runs in hosted mode by default, which stores nothing. See
+<a href="#hosting">Hosting</a> for the single-user variant with a mounted
+project folder.</p>
+
+<h3>The photographic renderer (optional)</h3>
+<pre><code>.venv\Scripts\python -m pip install mitsuba</code></pre>
+<p>About 50 MB. Everything else works without it, and the editor hides the
+render button when it is missing. On startup Mitsuba prints
+<code>jitc_llvm_init(): LLVM API initialization failed</code>; that message is
+harmless.</p>
+</section>
+
+<section id="editor">
+<h2>The editor</h2>
+<p>Across the top are four menus (<b>file</b>, <b>edit</b>, <b>view</b>,
+<b>help</b>), the scene picker, an export button, and the three controls you
+reach for constantly: the <b>case</b> toggle, the <b>interior</b> mode and the
+<b>render</b> switch.</p>
+<p>On the left is the part library, with a catalogue search under it. The 3D
+view is in the middle. On the right are five panes:</p>
+<div class="tw"><table>
+<tr><th>Pane</th><th>What is in it</th></tr>
+<tr><td><b>layout</b></td><td>The placements, and the numbers for the selected part</td></tr>
+<tr><td><b>case</b></td><td>Size, bolts, minimum web, cutting plates, materials and decoration</td></tr>
+<tr><td><b>frame</b></td><td>A Eurorack frame's width, depth, rows and side panels. Only live in a frame project</td></tr>
+<tr><td><b>look</b></td><td>Lighting, contact shading and the final render</td></tr>
+<tr><td><b>issues</b></td><td>The live problem list, with a count badge visible from every pane</td></tr>
+</table></div>
+
+<h3>Mouse</h3>
+<div class="tw"><table>
+<tr><th>Action</th><th>Result</th></tr>
+<tr><td>Drag a part</td><td>Move it in its plane</td></tr>
+<tr><td><kbd>shift</kbd> + drag</td><td>Move it in Z</td></tr>
+<tr><td>Drag the blue ring</td><td>Rotate. Hold <kbd>shift</kbd> for 15° steps</td></tr>
+<tr><td>Drag empty space</td><td>Orbit the camera</td></tr>
+<tr><td><kbd>alt</kbd> while dragging</td><td>Bypass snapping</td></tr>
+<tr><td>Click an issue</td><td>Select the part it blames</td></tr>
+</table></div>
+
+<h3>Keyboard</h3>
+<div class="tw"><table>
+<tr><th>Key</th><th>Result</th></tr>
+<tr><td><kbd>R</kbd> / <kbd>shift R</kbd></td><td>Rotate 90° right / left</td></tr>
+<tr><td>Arrow keys</td><td>Nudge 1 mm. With <kbd>shift</kbd>, 0.1 mm</td></tr>
+<tr><td><kbd>del</kbd></td><td>Remove the selection</td></tr>
+<tr><td><kbd>esc</kbd></td><td>Deselect</td></tr>
+<tr><td><kbd>ctrl Z</kbd> / <kbd>ctrl shift Z</kbd></td><td>Undo / redo</td></tr>
+<tr><td><kbd>ctrl S</kbd></td><td>Save</td></tr>
+<tr><td><kbd>ctrl N</kbd></td><td>New scene</td></tr>
+<tr><td><kbd>F1</kbd></td><td>The built-in manual</td></tr>
+</table></div>
+
+<h3>Moving and snapping</h3>
+<p>Selecting a part puts a gizmo on it: an amber pivot for sliding and a blue
+ring for turning. The ring is a fixed size, so it is the same target on a
+25 mm breakout as on a 128 mm panel.</p>
+<p>Snapping is on by default. While you drag, the moving part's edges and
+centreline are matched against every other board's, and the nearest match
+within 2 mm wins, independently in X and Y. A green guide shows what it caught.
+This is how two 60 mm keypad boards end up exactly 60 mm apart. A snapped
+coordinate is kept exact, not rounded.</p>
+<p>The <b>90°</b> buttons snap to an absolute multiple of 90. If you free-rotate
+to 37° and press one, you land on 0° or 90°, never 127°. Rotation pivots on the
+part's own centre.</p>
+<p>A part mated to another, such as a screen plugged into a Pi, cannot be
+dragged on its own. Clicking any board in a mated stack moves the whole stack.</p>
+<p>Parts named by an error are drawn ghosted red. The case outline and the
+issue list update while you drag.</p>
+
+<h3>Scenes and files</h3>
+<p>A project is a <b>scene</b>: one YAML file. The file menu offers
+<b>new</b>, <b>duplicate</b>, <b>rename</b>, <b>save as</b> and
+<b>delete</b>, plus <b>open a file</b> and <b>save to a file</b> for moving a
+scene between machines.</p>
+<ul>
+<li>Run locally, scenes live in <code>backend/scenes/</code>.</li>
+<li>Saving <b>keeps the file's comments</b>. New values are merged into the
+existing document, so notes you wrote in the file survive an edit.</li>
+<li>Duplicating and renaming copy the file itself, comments included.</li>
+<li>Scene names become file names. Letters, digits, spaces, dot, dash and
+underscore are allowed. Creating or renaming onto an existing name is refused.</li>
+</ul>
+</section>
+
+<section id="layered">
+<h2>How a layered case works</h2>
+<p>A case is a <b>stack of slabs</b>. Each slab is one sheet of material and
+one 2D shape: the outer outline, minus the pockets the hardware needs at that
+height, minus the corridors the connectors need through the walls.</p>
+<p>Cut the stack on a laser and it is the case. The same model also serves a
+2.5D milling job or a 3D preview, because it is all 2D polygon arithmetic. That
+is also why it is fast enough to recompute on every drag.</p>
+</section>
+
+<section id="workflow">
+<h2>The working loop</h2>
+<ol>
+<li><b>Add</b> parts from the palette. What is listed there has been measured.
+The search box under it reaches the rest of Adafruit's catalogue.</li>
+<li><b>Arrange</b> them by dragging. A part carries its real volumes (sockets,
+glass, knobs), so the case knows what to avoid, not just how big the board is.</li>
+<li><b>Check</b> the issues pane. It reports collisions, plugs that cannot be
+inserted, cables with no room, controls you could not reach, and numbers that
+are still guesses.</li>
+<li><b>Cut</b>: export SVG or DXF.</li>
+</ol>
+<div class="note"><p>The checker is the point of the tool. In the demo scene the
+Raspberry Pi is rotated 180° because, the other way round, the checker reported
+that four USB plugs needed 45 mm of straight run through the keypads.</p></div>
+</section>
+
+<section id="heights">
+<h2>Heights and panels</h2>
+<p>You should not have to type a height. A <b>panel</b> is the surface your
+eyes and fingers meet, and it is derived from the part that fixes it:</p>
+<pre><code>panels:
+  - name: main
+    from_ref: screen.active_area     # the screen glass fixes the face</code></pre>
+<p>Every other part then says which of its own features must sit flush:</p>
+<pre><code>  - id: encoders
+    part: adafruit-5752-quad-encoder
+    on_panel: main
+    panel_ref: bushings     # the collar clamps the panel; the shaft stands proud</code></pre>
+<p>Change the spacer under the screen and the panel moves, and every keypad,
+knob and window moves with it.</p>
+<div class="tw"><table>
+<tr><th>Setting</th><th>Meaning</th></tr>
+<tr><td><code>mount: auto</code></td><td>The default. A board with anything facing up goes to the panel; anything else rests on the floor</td></tr>
+<tr><td><code>mount: panel</code> / <code>floor</code></td><td>Force one or the other</td></tr>
+<tr><td><code>mount: manual</code></td><td>Use the Z in <code>pos</code> exactly as written</td></tr>
+<tr><td><code>panel_ref</code></td><td>A volume name in this part or in anything mated on top of it; <code>top</code> for the highest point; <code>auto</code> for the highest control or display</td></tr>
+<tr><td><code>panel_offset</code></td><td>Positive stands proud of the panel, negative sits recessed</td></tr>
+<tr><td><code>under_panel: true</code></td><td>The faceplate passes over this board unbroken. No window or hole is cut for it</td></tr>
+</table></div>
+<p>A display recessed below the faceplate gets its window cut through every
+layer above the glass, so it looks out through a well. The checker warns when a
+control ends up below its panel, because you could not press it.</p>
+
+<h3>Mates</h3>
+<p>Two parts with a matching connector standard can be snapped together. The
+child is positioned by the solver, and you set only the gap:</p>
+<pre><code>  - id: screen
+    part: hyperpixel4-square-touch
+    parent: pi
+    parent_mate: gpio40
+    mate: gpio40
+    mate_gap: 17.0          # the header stack between the two boards</code></pre>
+
+<h3>Features that repeat</h3>
+<p>A 4×4 keypad is sixteen 10 mm buttons on a 15 mm pitch, not one 55 mm
+square. Volumes take a <code>repeat</code> grid and a <code>shape</code>:</p>
+<pre><code>      - name: buttons
+        at: [30.0, 30.0]
+        size: [10.0, 10.0]
+        corner_radius: 1.5
+        repeat: {count: [4, 4], pitch: [15.0, 15.0]}   # centred on `at`
+      - name: bushings
+        size: [6.8, 6.8]
+        shape: circle
+        repeat: {count: [4, 1], pitch: [19.05, 0.0]}</code></pre>
+<p>Instances are named <code>buttons[2,3]</code> in the issue list.</p>
+</section>
+
+<section id="cutouts">
+<h2>Getting cables out</h2>
+<p>How a port gets out of the case is decided <b>per side of a board</b>:</p>
+<pre><code>  - id: pi
+    part: rpi-3b
+    sides:
+      - side: -y
+        cutout: open_side
+        headroom: 2.0
+        span: full
+      - side: +x
+        cutout: per_connector
+        include: [usb1, hdmi]     # only the ports you actually use</code></pre>
+<div class="tw"><table>
+<tr><th><code>cutout</code></th><th>What the case does</th></tr>
+<tr><td><code>none</code></td><td>Leaves the wall solid on this side</td></tr>
+<tr><td><code>per_connector</code></td><td>One opening per port, sized for the plug and its cable bend. The default</td></tr>
+<tr><td><code>open_to_edge</code></td><td>The same openings, run out to the edge as slots</td></tr>
+<tr><td><code>channel</code></td><td>A groove <code>channel_width</code> wide from each port out through the wall, open down to the underside</td></tr>
+<tr><td><code>open_side</code></td><td>One opening spanning all selected ports of that side, open to the underside</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>Option</th><th>Default</th><th>Meaning</th></tr>
+<tr><td><code>include</code></td><td>every external port</td><td>Which of that side's connectors count. Name a list to drop a port you never use, or add an internal one</td></tr>
+<tr><td><code>margin</code></td><td>unset</td><td>Material between this side's outermost port and the outside of the case. Unset, the wall lands where the global <code>wall</code> puts it, which can bury a port on an inner board</td></tr>
+<tr><td><code>channel_width</code></td><td class="n">10</td><td>Width of a <code>channel</code>, mm</td></tr>
+<tr><td><code>headroom</code></td><td class="n">2</td><td>Clearance above and below the ports for <code>open_side</code> and <code>channel</code>, mm</td></tr>
+<tr><td><code>span</code></td><td><code>ports</code></td><td>Width of the opening: <code>ports</code>, <code>board</code> or <code>full</code></td></tr>
+</table></div>
+<p>A connector can also ask for a round hole with
+<code>cutout_shape: circle</code>, which is what a 3.5 mm jack wants. An
+explicit <code>cutout</code> size on a connector is treated as a measurement
+and is never widened.</p>
+</section>
+
+<section id="interior">
+<h2>The interior</h2>
+<p>Internal cables need somewhere to run. Left solid, the middle layers are a
+block with a pocket per board. Hollowed out completely, the faceplate has
+nothing holding it up. So the interior is a choice, from the dropdown in the
+header:</p>
+<div class="tw"><table>
+<tr><th><code>interior</code></th><th>The middle layers become</th><th class="n">Material left</th></tr>
+<tr><td><code>pocketed</code></td><td>Solid, one pocket per part, corridors for the external ports. The default</td><td class="n">75%</td></tr>
+<tr><td><code>grown</code></td><td>Pockets grown to clear every cable port and the clearance around each board</td><td class="n">66%</td></tr>
+<tr><td><code>ribs</code></td><td>Hollow, plus stiffeners on a grid, routed around hardware and cables</td><td class="n">27%</td></tr>
+<tr><td><code>hollow</code></td><td>A wall all the way round, empty inside</td><td class="n">12%</td></tr>
+</table></div>
+<p>The last column is measured on the demo scene, relative to solid. The floor
+and the lid keep their own rules whatever the interior is.</p>
+<p>The stack is sized from the lowest <b>board</b>. Anything hanging below a
+board, such as an SD card or a pin row, pierces the base plate as an opening
+instead of costing a whole spacer layer.</p>
+</section>
+
+<section id="screws">
+<h2>Screws and bolts</h2>
+<h3>Carrying a board by its mounting holes</h3>
+<p>Per placement, <code>support</code> decides whether the case holds the board:</p>
+<div class="tw"><table>
+<tr><th><code>support</code></th><th>What the case grows</th></tr>
+<tr><td><code>none</code></td><td>Nothing. The default</td></tr>
+<tr><td><code>from_floor</code></td><td>A column from the bottom plate up to the board's underside, with a clearance hole through it</td></tr>
+<tr><td><code>from_lid</code></td><td>A clearance hole down through the faceplate, so the board is screwed up against its underside</td></tr>
+</table></div>
+<p><code>screw_inset</code> decides whether the head sinks into the outer plate.
+Left unset it follows the direction: flush for <code>from_floor</code>, so the
+case does not rock on the bench, and proud for <code>from_lid</code>, because a
+counterbore there would leave the head nothing to bear on.</p>
+
+<h3>One screw length: wells</h3>
+<p>On by default (<code>screw_wells</code>). The head-diameter bore continues
+through every layer of a support column except the one directly against the
+board. Every screw then spans exactly one sheet plus the board, so
+<b>one screw length fits every board in the case</b>, however deep each sits.</p>
+
+<h3>Case bolts</h3>
+<p>Bolts through the whole stack clamp it together. Choose
+<code>none</code>, <code>corners</code> or <code>perimeter</code> in the case
+pane, with an optional centre bolt for a wide lid.</p>
+<p>Each bolt carries a <b>collar</b> of material on every layer, 9 mm by
+default. Without it, a hollow layer has nothing at that point and the hole
+would simply be absent from the sheet. A bolt that would land on a board is
+reported, not drilled.</p>
+</section>
+
+<section id="guarantees">
+<h2>What the engine guarantees</h2>
+<p>Three checks run on the finished geometry, whatever interior you chose.</p>
+<ul>
+<li><b>The material is one piece.</b> Nothing comes off the cutting bed as a
+separate part. A post holding a board up is tied back with a rib; loose
+debris is dropped.</li>
+<li><b>The empty space is one piece.</b> Every internal lead can reach every
+other one. Where a board would be walled in, a groove
+<code>cable_channel</code> wide is cut. Turn this off with
+<code>link_cables: false</code>.</li>
+<li><b>Nothing is too thin to survive.</b> Material narrower than
+<code>min_segment</code> (4 mm by default) is opened out, so two close cutouts
+become one opening instead of leaving a thread of plywood. Set it to 0 to
+disable.</li>
+</ul>
+<p>Screw seats are re-checked after everything else has run. If a later step
+carves one away, the build says so with coordinates.</p>
+</section>
+
+<section id="size">
+<h2>Case size and anchors</h2>
+<p>By default the outline is the bounding box of the hardware plus the wall.
+That is right while laying out, and wrong once you want a connector flush with
+the outside: push a board outward and the wall moves with it.</p>
+<p>The <b>case size</b> control switches the outline to <b>fixed</b>. The
+current shape is frozen, and from then on moving a board moves it relative to
+a stationary wall.</p>
+<p><code>anchor</code> re-centres the scene on one placement at every solve.
+That placement then cannot be dragged, because dragging it slides everything
+else the other way. The checker warns about an anchored part that is not
+locked.</p>
+</section>
+
+<section id="engrave">
+<h2>Engraving</h2>
+<p>A laser does two jobs. A <b>cut</b> goes through the sheet. An
+<b>engrave</b> marks the surface. Engraving is kept in its own group in the SVG
+(blue, titled "do not cut") and its own <code>_ENGRAVE</code> layer in the DXF.</p>
+<p>Seven patterns, from the decoration section of the case pane:</p>
+<div class="tw"><table>
+<tr><th>Pattern</th><th>What it draws</th></tr>
+<tr><td><code>text</code></td><td>Lettering in a single-stroke font</td></tr>
+<tr><td><code>fins</code></td><td>Parallel fins, the amplifier front-panel look</td></tr>
+<tr><td><code>slots</code></td><td>Rounded slots in offset rows, like a speaker grill</td></tr>
+<tr><td><code>rings</code></td><td>Concentric rings</td></tr>
+<tr><td><code>hex</code></td><td>A hex mesh</td></tr>
+<tr><td><code>rule</code></td><td>One hairline, for separating groups of controls</td></tr>
+<tr><td><code>frame</code></td><td>A border following the region's edge</td></tr>
+</table></div>
+<h3>Labels</h3>
+<ul>
+<li>Labels use the Hershey <b>stroke</b> fonts, so the laser follows the centre
+line of each letter in one pass. Two weights are included: light and medium.</li>
+<li><code>text_size</code> is <b>cap height in millimetres</b>, the dimension
+you measure on the finished panel.</li>
+<li>A label is never scaled to fit its box. It overhangs and reports by how much.</li>
+<li>A character the font does not have is skipped, not replaced by a box.</li>
+</ul>
+<p>Marks are clipped to the plate. <code>face</code> chooses the faceplate
+(<code>lid</code>) or the back plate (<code>floor</code>).</p>
+<div class="warn"><p><b>cut right through</b> moves a pattern out of the
+engraving pass and into the geometry. Whether the panel still holds together
+afterwards is not checked.</p></div>
+</section>
+
+<section id="export">
+<h2>Exporting for the laser</h2>
+<p>Export splits the cut into <b>bed-sized sheets</b>: one file per bed-load,
+plus a <code>cutlist.txt</code> naming which layer is on which sheet, its size,
+and whether it was rotated.</p>
+<h3>Plate stock</h3>
+<p>The <b>sheet</b> section of the case pane holds the plate sizes you have.
+One entry (350 × 350 mm by default) means every sheet is that size. Add more
+entries for offcuts. Parts are placed largest first, and a new plate is always
+the smallest one that fits, so offcuts are used before a full sheet is broken.
+The cut list opens with a line saying how many of each size to fetch.</p>
+<ul>
+<li>Margin (5 mm) and part spacing (4 mm) apply to every plate.</li>
+<li>Parts are rotated 90° automatically when that fits better.</li>
+<li>A layer that fits no plate is refused, with its size in the message.</li>
+</ul>
+<h3>How the files are written</h3>
+<ul>
+<li>Each sheet file is exactly the bed size. No sheet outline is drawn, because
+a cutter that runs every path would cut it.</li>
+<li>Cuts are red. Engraving is blue, on its own DXF layer.</li>
+<li><b>Every hole comes first and every outer edge last.</b> Path order is cut
+order on many machines, and an outline cut early drops the part out of the
+sheet before its holes exist.</li>
+<li>Outlines are kerf-compensated using the material's <code>kerf</code>.</li>
+</ul>
+<p>Chrome and Edge ask for a folder and write the files into it. Firefox has no
+folder picker, so the same files arrive as one zip.</p>
+</section>
+
+<section id="render">
+<h2>Rendering</h2>
+<p>The <b>render</b> toggle swaps the schematic view for a physically based
+one, with a sun you steer using three sliders (azimuth, elevation, strength).</p>
+<ul>
+<li><b>Light</b> comes from one of four environments: a built-in synthetic
+room, and three captured ones (studio, daylight, dusk).</li>
+<li><b>Contact</b> darkens the seams between slabs, which is what makes a stack
+read as separate sheets.</li>
+<li><b>Finish</b> comes from the material's name: <code>plywood-3mm</code> is
+matte, <code>acrylic-clear-3mm</code> is glossy and see-through,
+<code>aluminium-2mm</code> is metallic. A <code>color</code> in the scene
+overrides the preset's colour and keeps its feel.</li>
+</ul>
+<h3>The final photograph</h3>
+<p><b>render a photograph</b> in the look pane ray-traces the scene on the
+server with the same environment the preview uses. It takes minutes. A
+1100 × 825 image at 96 samples takes about 35 seconds on a laptop. It needs the
+optional Mitsuba install. Acrylic is rendered as real glass-like material, with
+refraction and edge glow.</p>
+</section>
+
+<section id="frame">
+<h2>How a frame goes together</h2>
+<p>A Eurorack frame's shape is decided by the format before any module exists.
+Nothing is placed by hand. The case is made of three kinds of piece:</p>
+<ul>
+<li><b>Rails.</b> One aluminium extrusion, two per row, cut to the case width.
+The rail is the case's visible front edge, not something hidden inside it.</li>
+<li><b>The body.</b> One folded 1.0 mm aluminium U, whatever the height. Its
+two flange edges slide into the rails' sheet slots. It is a skin, not a chassis.</li>
+<li><b>Two side panels.</b> 5 mm plate, and the only structural member. Every
+rail is bolted between the panels with one M5 screw per end.</li>
+</ul>
+<figure>
+<svg class="dia" viewBox="0 0 560 376" role="img" aria-label="Side view of a 3U frame: side panel, two rails at the front edge, and the folded body behind them">
+  <!-- side panel -->
+  <rect x="60" y="24" width="104" height="296" fill="var(--acrylic)" fill-opacity="0.22" stroke="var(--acrylic)" stroke-width="1.5"/>
+  <!-- rails -->
+  <rect x="60" y="39.4" width="38" height="20" fill="var(--alu)" fill-opacity="0.75" stroke="var(--ink)" stroke-width="1"/>
+  <rect x="60" y="284.4" width="38" height="20" fill="var(--alu)" fill-opacity="0.75" stroke="var(--ink)" stroke-width="1"/>
+  <!-- body: U open to the front -->
+  <path d="M84 44.8 H164 V299 H84" fill="none" stroke="var(--ink)" stroke-width="2.2"/>
+  <!-- M5 holes -->
+  <circle cx="72" cy="49.4" r="5" fill="var(--bg)" stroke="var(--ink)" stroke-width="1"/>
+  <circle cx="72" cy="294.4" r="5" fill="var(--bg)" stroke="var(--ink)" stroke-width="1"/>
+  <!-- module depth dimension -->
+  <path class="lead" d="M60 346 H162 M60 340 V352 M162 340 V352"/>
+  <text class="dim" x="111" y="366" text-anchor="middle">module depth</text>
+  <!-- front label -->
+  <text class="dim" x="46" y="176" text-anchor="middle" transform="rotate(-90 46 176)">module face (front)</text>
+  <!-- leaders -->
+  <path class="lead" d="M98 52 H250"/>
+  <text x="256" y="56">rail, 10 mm tall, 19 mm deep</text>
+  <circle cx="128" cy="118" r="2" fill="var(--muted)"/>
+  <path class="lead" d="M128 118 H250"/>
+  <text x="256" y="122">side panel, 5 mm plate</text>
+  <path class="lead" d="M164 184 H250"/>
+  <text x="256" y="188">body: one folded U, 1 mm</text>
+  <text class="dim" x="256" y="205">the web is the back of the case</text>
+  <path class="lead" d="M76 291 L104 270 H250"/>
+  <text x="256" y="274">M5 through the panel into the rail end</text>
+  <circle cx="126" cy="299" r="2" fill="var(--muted)"/>
+  <path class="lead" d="M126 299 L150 326 H250"/>
+  <text x="256" y="330">flange edge, entering the rail's slot by 7 mm</text>
+</svg>
+<figcaption>A 3U frame seen from the side, to scale. The rails stand 2.7 mm
+proud of the body at top and bottom. That distance is where the extrusion's
+slot is, not a setting.</figcaption>
+</figure>
+<p>The model is built around specific stock: the f&amp;w rail Art. 16500
+("Eurorack-Rail mit Kante"), a 1.0 mm aluminium U-channel folded to order, and
+5 mm plate for the side panels. Using a different rail profile means changing
+the constants at the top of <code>backend/hwcase/rack.py</code>.</p>
+</section>
+
+<section id="frame-params">
+<h2>What you set</h2>
+<p>Everything is in the <b>frame</b> pane, and in the scene file under
+<code>rack:</code>.</p>
+<pre><code>name: my-frame
+kind: rack
+rack:
+  hp: 68                  # rail span
+  rows:                   # bottom to top
+    - {format: 3U}
+    - {format: 3U}
+  module_depth: 51.0
+  inserts_per_row: 1
+  insert_hp: 4.0
+  panel:
+    top: 10.5
+    bottom: 10.5
+    front: 0.0
+    back: 0.0
+    r_bottom_front: 6.0
+    r_top_front: 3.0</code></pre>
+<div class="tw"><table>
+<tr><th>Field</th><th>Default</th><th>Meaning</th></tr>
+<tr><td><code>hp</code></td><td class="n">68</td><td>Rail span in HP. 1 HP is 5.08 mm</td></tr>
+<tr><td><code>rows</code></td><td>two 3U rows</td><td>An ordered list, bottom to top. Each row has a <code>format</code> and an optional <code>label</code></td></tr>
+<tr><td><code>module_depth</code></td><td class="n">51</td><td>Clear room from the module face back to the inside of the body, mm. Minimum 18</td></tr>
+<tr><td><code>inserts_per_row</code></td><td class="n">0</td><td>Set to 1 to cut an insert slot into each side panel per 3U row</td></tr>
+<tr><td><code>insert_hp</code></td><td class="n">4</td><td>Width of that slot in HP</td></tr>
+<tr><td><code>panel.top</code>, <code>bottom</code></td><td class="n">10.5</td><td>How far the side panel reaches past the body's edge, mm</td></tr>
+<tr><td><code>panel.front</code>, <code>back</code></td><td class="n">0</td><td>A lip in front of the rails or behind the body, mm</td></tr>
+<tr><td><code>panel.r_*</code></td><td class="n">0</td><td>Corner radii: <code>r_bottom_front</code>, <code>r_bottom_back</code>, <code>r_top_back</code>, <code>r_top_front</code></td></tr>
+</table></div>
+
+<h3>Row formats</h3>
+<div class="tw"><table>
+<tr><th>Format</th><th class="n">Rack cost</th><th class="n">Panel height</th></tr>
+<tr><td><code>3U</code></td><td class="n">3 U</td><td class="n">128.5 mm</td></tr>
+<tr><td><code>1U-intellijel</code></td><td class="n">1 U</td><td class="n">39.65 mm</td></tr>
+<tr><td><code>1U-pulplogic</code></td><td class="n">1 U</td><td class="n">43.18 mm</td></tr>
+</table></div>
+<p>There is no neutral 1U. The two tile standards are 3.5 mm apart and are not
+interchangeable, so a row always says whose.</p>
+
+<h3>Module depth</h3>
+<p>This is the one depth setting. The body's flange and the side panels follow
+from it.</p>
+<div class="tw"><table>
+<tr><th class="n">Module depth</th><th class="n">Body flange</th><th class="n">Case depth</th><th>Typical use</th></tr>
+<tr><td class="n">25 mm</td><td class="n">14 mm</td><td class="n">26 mm</td><td>Skiff</td></tr>
+<tr><td class="n">40 mm</td><td class="n">29 mm</td><td class="n">41 mm</td><td>Shallow case</td></tr>
+<tr><td class="n">46 mm</td><td class="n">35 mm</td><td class="n">47 mm</td><td></td></tr>
+<tr><td class="n">51 mm</td><td class="n">40 mm</td><td class="n">52 mm</td><td>The reference build; room for a power supply behind the modules</td></tr>
+</table></div>
+<p>Below 18 mm the flange would be too short to reach into the rail, and the
+frame is refused with that reason.</p>
+</section>
+
+<section id="frame-derived">
+<h2>What follows</h2>
+<div class="tw"><table>
+<tr><th>Result</th><th>Rule</th></tr>
+<tr><td>Rail length</td><td><code>HP × 5.08</code></td></tr>
+<tr><td>Rail slot span of a row</td><td><code>U × 44.45 − 10.85</code>, so 122.5 mm for 3U</td></tr>
+<tr><td>Body web</td><td><code>total U × 44.45 − 6.25</code></td></tr>
+<tr><td>Body flange</td><td><code>module depth − 11</code></td></tr>
+<tr><td>Case depth</td><td><code>module depth + 1</code></td></tr>
+<tr><td>Side panel height</td><td><code>web + top margin + bottom margin</code></td></tr>
+<tr><td>Outer width</td><td><code>rail length + 2 × 5</code></td></tr>
+<tr><td>Rails</td><td><code>2 × rows</code></td></tr>
+<tr><td>M5 screws</td><td><code>2 × rails</code></td></tr>
+<tr><td>Capacity with inserts</td><td><code>HP + 8</code> for each 3U row</td></tr>
+</table></div>
+<p>Rail length uses the nominal HP grid, not the narrower module-panel widths.
+A frame cut to panel widths would be narrower than the modules it holds.</p>
+
+<h3>Worked examples</h3>
+<p>All at 68 HP, 51 mm module depth and the default 10.5 mm panel margins.</p>
+<div class="tw"><table>
+<tr><th>Row stack</th><th class="n">Web</th><th class="n">Panel height</th><th class="n">Rails</th><th class="n">M5</th><th>M5 holes, mm from panel bottom</th></tr>
+<tr><td>3U</td><td class="n">127.10</td><td class="n">148.10</td><td class="n">2</td><td class="n">4</td><td>12.8, 135.3</td></tr>
+<tr><td>1U + 3U + 1U</td><td class="n">216.00</td><td class="n">237.00</td><td class="n">6</td><td class="n">12</td><td>12.8, 46.4, 57.25, 179.75, 190.6, 224.2</td></tr>
+<tr><td>3U + 3U</td><td class="n">260.45</td><td class="n">281.45</td><td class="n">4</td><td class="n">8</td><td>12.8, 135.3, 146.15, 268.65</td></tr>
+</table></div>
+<p>Rail length is 345.44 mm and outer width 355.44 mm in all three. The M5
+holes sit 6 mm behind the module face, in the solid part of the rail in front
+of its slot.</p>
+<div class="note"><p>The 1U + 3U + 1U row matches the hand-built reference
+case: a 216 mm web and a 237 mm side panel. The hole positions differ from that
+case by up to about a millimetre, because it was drilled to whole-millimetre
+spans (35 / 123 / 35) and the tool uses the exact rack arithmetic
+(33.6 / 122.5 / 33.6).</p></div>
+</section>
+
+<section id="frame-stance">
+<h2>Stance and corners</h2>
+<p>The rail stands 2.7 mm proud of the body. What the case rests on follows
+from the side panel's <b>bottom</b> margin:</p>
+<div class="tw"><table>
+<tr><th>Bottom margin</th><th>The case stands on</th></tr>
+<tr><td>Under 2.7 mm</td><td>Its rails (aluminium)</td></tr>
+<tr><td>2.7 mm or more</td><td>Its side panels. This is the default, at 10.5 mm</td></tr>
+</table></div>
+<p>The top and bottom margins are raised automatically to 2.2 mm if they are
+set lower, because below that an M5 hole would run off the panel's edge. The
+frame pane says when it has done this, and which stance you ended up with.</p>
+<p>Front and back margins are pure lip. Each of the four corners takes its own
+radius. Two radii on one edge that add up to more than the edge are refused.</p>
+</section>
+
+<section id="frame-inserts">
+<h2>Side panel inserts</h2>
+<p>With <code>inserts_per_row: 1</code>, each side panel gets a slot per 3U
+row. The slot is 4 HP across (20.32 mm) and 112 mm long, centred on its row,
+and it breaks the panel's back edge so a module can slide in from the side.</p>
+<p>That adds 4 HP on each side, so 8 HP per 3U row, without widening the rails.
+A 68 HP frame with inserts holds 76 HP per 3U row. 1U rows get no slot.</p>
+</section>
+
+<section id="frame-make">
+<h2>Getting it made</h2>
+<p>The <b>result</b> block at the bottom of the frame pane lists every derived
+number: height in U, rail span, outer width, depths, web, panel height, rail
+and screw counts, capacity, and the rail slot centres measured from the panel's
+bottom edge.</p>
+<div class="tw"><table>
+<tr><th>Piece</th><th>How you get it</th></tr>
+<tr><td>Side panels</td><td><b>export side panels (SVG)</b>. Both panels in one file, holes before outlines, kerf-compensated by 0.15 mm</td></tr>
+<tr><td>Body</td><td>The <b>order the U-channel</b> block: length, widths A / B / C and thickness, which are the fields a folding shop's form asks for</td></tr>
+<tr><td>Rails</td><td>Bought by length. The count and the length are in the result block</td></tr>
+<tr><td>Screws</td><td>One M5 per rail end</td></tr>
+</table></div>
+<p>For a 68 HP, 6U frame at 46 mm module depth, the U-channel order reads:
+length 345.4 mm, A 35.0, B 260.5, C 35.0, thickness 1.0, folded from a
+330.5 mm flat.</p>
+<div class="warn"><p><b>Check before ordering.</b> One constant in the model
+is fitted from a single built case and not yet confirmed with calipers: the
+2.3 mm from the outermost rail slot centre to the body's edge. It sets the web
+height. Measure your own rail before committing to a folded part.</p></div>
+</section>
+
+<section id="parts">
+<h2>The part library</h2>
+<p>Parts are data, not code. Each is a YAML entry in
+<code>backend/parts/</code> describing one physical board: its outline, the
+volumes that stand off it, its connectors, mounting holes and mates.</p>
+<p>The library ships with nine parts: Raspberry Pi 3B, Pimoroni HyperPixel 4.0
+Square, Adafruit 1.5" OLED, NeoTrellis, the elastomer keypad, the quad encoder
+strip, the Shorepine AMYboard and its Eurorack panel, and the Seeed Grove I²C
+hub.</p>
+<h3>Confidence</h3>
+<p>Every number carries where it came from. The issues pane reports anything
+that is still a guess.</p>
+<div class="tw"><table>
+<tr><th>Tag</th><th>Meaning</th></tr>
+<tr><td><code>measured</code></td><td>Calipers on the actual unit</td></tr>
+<tr><td><code>datasheet</code></td><td>An official mechanical drawing or vendor CAD file</td></tr>
+<tr><td><code>vendor</code></td><td>A product page or shop listing</td></tr>
+<tr><td><code>community</code></td><td>A forum post, or a case somebody else made</td></tr>
+<tr><td><code>estimated</code></td><td>A guess. Verify before cutting</td></tr>
+</table></div>
+<h3>Coordinates</h3>
+<p>In a part file, X and Y lie in the board plane and +Z points out of the
+component side. <b>z = 0 is the bottom face of the PCB.</b> The board occupies
+<code>[0, pcb_thickness]</code>, and a datasheet height quoted from the board
+surface is <code>pcb_thickness + height</code>. All lengths are millimetres and
+all angles degrees.</p>
+</section>
+
+<section id="part-file">
+<h2>A part file</h2>
+<pre><code>parts:
+  - id: my-board
+    name: My Board
+    vendor: Somebody
+    category: input
+    src: {confidence: vendor, url: "https://example.com/my-board"}
+
+    outline:
+      type: rect
+      size: [60.0, 40.0]
+      corner_radius: 2.0
+      origin: min              # local origin at the lower-left corner
+    pcb_thickness: 1.6
+
+    holes:
+      - {at: [3.0, 3.0], diameter: 2.7, screw: M2.5}
+
+    volumes:
+      - name: knob
+        kind: actuator
+        shape: circle
+        at: [30.0, 20.0]
+        size: [7.0, 7.0]
+        z: [1.6, 16.0]
+
+    connectors:
+      - name: usb
+        type: usb_c
+        face: -y               # the side the plug comes in from
+        at: [30.0, 0.0, 3.2]
+        plug_depth: 25.0
+        external: true
+
+    mates:
+      - name: gpio40
+        standard: rpi_gpio_40
+        role: plug
+        at: [30.0, 36.0, 0.0]
+        face: -z</code></pre>
+<div class="tw"><table>
+<tr><th>Volume <code>kind</code></th><th>Meaning</th></tr>
+<tr><td><code>body</code></td><td>Solid matter. Nothing else may occupy it</td></tr>
+<tr><td><code>keepout</code></td><td>No material and no other part, for airflow or tool access</td></tr>
+<tr><td><code>cable</code></td><td>Room a cable or bend needs. Cables may share it</td></tr>
+<tr><td><code>actuator</code></td><td>Something the user must reach: a button or a shaft</td></tr>
+<tr><td><code>display</code></td><td>Something the user must see. It gets a window</td></tr>
+</table></div>
+<div class="tw"><table>
+<tr><th>Connector field</th><th>Default</th><th>Meaning</th></tr>
+<tr><td><code>face</code></td><td></td><td>The direction the plug is inserted from: <code>+x</code>, <code>-x</code>, <code>+y</code>, <code>-y</code>, <code>+z</code>, <code>-z</code></td></tr>
+<tr><td><code>at</code></td><td></td><td>Centre of the socket mouth</td></tr>
+<tr><td><code>plug_depth</code></td><td class="n">10</td><td>Straight room the plug needs beyond the mouth, mm</td></tr>
+<tr><td><code>bend_radius</code></td><td class="n">12</td><td>Extra room for the cable to bend, mm</td></tr>
+<tr><td><code>cutout</code></td><td>derived</td><td>Panel opening as width and height</td></tr>
+<tr><td><code>cutout_shape</code></td><td><code>rect</code></td><td><code>circle</code> for a round hole</td></tr>
+<tr><td><code>external</code></td><td><code>false</code></td><td><code>true</code> if it must reach the outside world</td></tr>
+</table></div>
+<p>Outlines are <code>rect</code> or <code>poly</code> (a list of points).</p>
+</section>
+
+<section id="import">
+<h2>Importing from a catalogue</h2>
+<p>The <b>find a part</b> box searches Adafruit's live catalogue, about 5,500
+products. Around 470 of them have a vendor CAD model, and the search says which.
+A product with a model can be measured automatically.</p>
+<p>The catalogue is cached on disk and refreshed daily, so search works offline
+and survives the vendor's site being down.</p>
+<div class="tw"><table>
+<tr><th>An import gives you</th><th>Status</th></tr>
+<tr><td>The outline, board thickness and the volumes standing off the board</td><td>Real, from the model</td></tr>
+<tr><td>The mounting holes</td><td>Real, from the STEP file</td></tr>
+<tr><td>Which way up the board is</td><td>Guessed, and labelled as a guess</td></tr>
+<tr><td>What each volume is</td><td>Unknown. A box is known to be there, not that it is a socket</td></tr>
+<tr><td>Connectors</td><td><b>None</b></td></tr>
+</table></div>
+<div class="warn"><p>A freshly imported board has no connectors, so it asks the
+case for <b>no cable room at all</b> until you add them.</p></div>
+<p>Run locally, imports are written to <code>backend/parts/imported.yaml</code>
+and join the palette. On a hosted instance they go into the scene file instead.</p>
+<h3>Measuring CAD by hand</h3>
+<pre><code>python tools/fetch_cad.py 3954 4741 5752
+python tools/measure_cad.py --band 0.8 "vendor/cad/adafruit/5752/*.stl"
+python tools/extract_holes.py "vendor/cad/adafruit/3954/*.step"</code></pre>
+<p>The first downloads vendor models, the second prints dimensions and height
+profiles, and the third reads mounting-hole positions out of a STEP file.</p>
+</section>
+
+<section id="audit">
+<h2>Auditing the library</h2>
+<pre><code>python -m hwcase.cli audit
+python -m hwcase.cli audit --tolerance 0.5 --strict</code></pre>
+<p>This re-measures every part that names a <code>cad:</code> file and reports
+where the part file and the model disagree: outline, board thickness, and how
+far anything stands proud. Worth running periodically, because vendors revise
+boards and quietly replace their models.</p>
+</section>
+
+<section id="scene-ref">
+<h2>Scene file reference</h2>
+<p>A scene is one YAML document. Unknown keys are rejected, so a typo is an
+error and not a silently ignored setting.</p>
+<h3>Top level</h3>
+<div class="tw"><table>
+<tr><th>Key</th><th>Default</th><th>Meaning</th></tr>
+<tr><td><code>name</code></td><td><code>untitled</code></td><td>The scene's name</td></tr>
+<tr><td><code>kind</code></td><td><code>parts</code></td><td><code>parts</code> for a layered case, <code>rack</code> for a Eurorack frame</td></tr>
+<tr><td><code>rack</code></td><td></td><td>Frame settings. Used only when <code>kind: rack</code>. See <a href="#frame-params">What you set</a></td></tr>
+<tr><td><code>placements</code></td><td>empty</td><td>The boards in the scene</td></tr>
+<tr><td><code>panels</code></td><td>empty</td><td>User-facing surfaces. See <a href="#heights">Heights and panels</a></td></tr>
+<tr><td><code>case</code></td><td></td><td>How the case is built</td></tr>
+<tr><td><code>engravings</code></td><td>empty</td><td>Decoration</td></tr>
+<tr><td><code>parts</code></td><td>empty</td><td>Parts carried by the scene itself, overriding the library by id</td></tr>
+<tr><td><code>anchor</code></td><td>unset</td><td>A placement id to centre the scene on</td></tr>
+<tr><td><code>floor</code></td><td>derived</td><td>World Z of the inside floor</td></tr>
+<tr><td><code>view</code></td><td></td><td>Preview lighting: <code>env</code>, <code>exposure</code>, <code>backdrop</code>, <code>ao</code>, <code>shadows</code>. Does not affect geometry</td></tr>
+</table></div>
+
+<h3>Placement</h3>
+<div class="tw"><table>
+<tr><th>Key</th><th>Default</th><th>Meaning</th></tr>
+<tr><td><code>id</code></td><td></td><td>A unique name within the scene</td></tr>
+<tr><td><code>part</code></td><td></td><td>The id of a part</td></tr>
+<tr><td><code>label</code></td><td>unset</td><td>A display name</td></tr>
+<tr><td><code>pos</code></td><td><code>[0, 0, 0]</code></td><td>World position. Z is used only with <code>mount: manual</code></td></tr>
+<tr><td><code>rot_z</code></td><td class="n">0</td><td>Rotation about the vertical, degrees</td></tr>
+<tr><td><code>tilt</code></td><td class="n">0</td><td>0 flat, 90 on edge, 180 upside down, 270 on the other edge</td></tr>
+<tr><td><code>locked</code></td><td><code>false</code></td><td>Stops it being dragged</td></tr>
+<tr><td><code>parent</code>, <code>parent_mate</code>, <code>mate</code>, <code>mate_gap</code></td><td>unset</td><td>Attach to another placement. See <a href="#heights">Mates</a></td></tr>
+<tr><td><code>mount</code>, <code>on_panel</code>, <code>panel_ref</code>, <code>panel_offset</code>, <code>under_panel</code></td><td></td><td>How the height is decided. See <a href="#heights">Heights and panels</a></td></tr>
+<tr><td><code>sides</code></td><td>empty</td><td>Cutout policy per side. See <a href="#cutouts">Getting cables out</a></td></tr>
+<tr><td><code>support</code>, <code>screw_inset</code></td><td><code>none</code>, auto</td><td>See <a href="#screws">Screws and bolts</a></td></tr>
+</table></div>
+
+<h3>Case</h3>
+<div class="tw"><table>
+<tr><th>Key</th><th class="n">Default</th><th>Meaning</th></tr>
+<tr><td><code>interior</code></td><td class="n"><code>pocketed</code></td><td><code>pocketed</code>, <code>hollow</code>, <code>ribs</code> or <code>grown</code></td></tr>
+<tr><td><code>materials</code></td><td class="n">3 mm plywood</td><td>The sheet stack, bottom to top. The last entry repeats as needed</td></tr>
+<tr><td><code>wall</code></td><td class="n">6</td><td>Material around the parts, mm</td></tr>
+<tr><td><code>floor_gap</code></td><td class="n">3</td><td>Depth under the lowest board, mm</td></tr>
+<tr><td><code>ceiling_gap</code></td><td class="n">2</td><td>Room above the highest part, mm</td></tr>
+<tr><td><code>part_clearance</code></td><td class="n">0.6</td><td>Slop around each part pocket, mm</td></tr>
+<tr><td><code>cable_clearance</code></td><td class="n">5</td><td>Minimum gap between parts for wiring, mm</td></tr>
+<tr><td><code>overlap_clearance</code></td><td class="n">1.5</td><td>Vertical room where one board passes over another, mm</td></tr>
+<tr><td><code>corner_radius</code></td><td class="n">6</td><td>Radius of the outline's corners, mm</td></tr>
+<tr><td><code>outline</code></td><td class="n">derived</td><td>A fixed outline, overriding the derived one</td></tr>
+<tr><td><code>rib_width</code>, <code>rib_spacing</code></td><td class="n">6, 45</td><td><code>ribs</code> interior only, mm</td></tr>
+<tr><td><code>link_cables</code></td><td class="n"><code>true</code></td><td>Cut channels so every internal lead can reach the others</td></tr>
+<tr><td><code>cable_channel</code></td><td class="n">5</td><td>Width of those channels, mm</td></tr>
+<tr><td><code>min_segment</code></td><td class="n">4</td><td>Material thinner than this is opened out. 0 disables</td></tr>
+<tr><td><code>min_island</code></td><td class="n">150</td><td>A loose piece smaller than this is allowed to fall out as scrap; anything bigger is tied back to the main piece</td></tr>
+<tr><td><code>screw_wells</code></td><td class="n"><code>true</code></td><td>One screw length for every board</td></tr>
+<tr><td><code>support_boss</code></td><td class="n">9</td><td>Diameter of the post around a board screw, mm</td></tr>
+<tr><td><code>support_rib</code></td><td class="n">5</td><td>Width of the strut tying a free-standing post back to material, mm</td></tr>
+<tr><td><code>screw_clearance</code></td><td class="n">0.4</td><td>Added to a hole's diameter for the through hole, mm</td></tr>
+<tr><td><code>screw_head</code></td><td class="n">6.5</td><td>Counterbore diameter for a board screw, mm</td></tr>
+<tr><td><code>case_screws</code></td><td class="n"><code>none</code></td><td><code>none</code>, <code>corners</code> or <code>perimeter</code></td></tr>
+<tr><td><code>case_screw_d</code></td><td class="n">3.4</td><td>Bolt clearance hole, mm (M3)</td></tr>
+<tr><td><code>case_screw_inset</code></td><td class="n">6</td><td>Distance in from the outline corners, mm</td></tr>
+<tr><td><code>case_screw_head</code></td><td class="n">6.5</td><td>Counterbore in the outer plates, mm</td></tr>
+<tr><td><code>case_screw_spacing</code></td><td class="n">80</td><td><code>perimeter</code> only: spacing along each edge, mm</td></tr>
+<tr><td><code>case_screw_boss</code></td><td class="n">9</td><td>Collar around each bolt, mm. 0 drills only where material already is</td></tr>
+<tr><td><code>case_screw_center</code></td><td class="n"><code>false</code></td><td>One more bolt in the middle</td></tr>
+<tr><td><code>plates</code></td><td class="n">350 × 350</td><td>The cutting plate sizes you have</td></tr>
+<tr><td><code>sheet_margin</code></td><td class="n">5</td><td>Keep-out from the plate edge, mm</td></tr>
+<tr><td><code>sheet_spacing</code></td><td class="n">4</td><td>Air between parts on a plate, mm</td></tr>
+</table></div>
+<p>A material is <code>{name, thickness, kerf, sheet, color}</code>, with
+defaults <code>plywood-3mm</code>, 3.0, 0.15, <code>[600, 300]</code> and
+<code>#c8a165</code>.</p>
+
+<h3>Engraving</h3>
+<div class="tw"><table>
+<tr><th>Key</th><th class="n">Default</th><th>Meaning</th></tr>
+<tr><td><code>pattern</code></td><td class="n"><code>fins</code></td><td>One of the seven patterns</td></tr>
+<tr><td><code>at</code>, <code>size</code>, <code>rotation</code></td><td class="n"></td><td>Centre, box and angle, in the same world XY as the placements</td></tr>
+<tr><td><code>stroke</code></td><td class="n">1.2</td><td>Width of one mark, mm</td></tr>
+<tr><td><code>pitch</code></td><td class="n">3</td><td>Gap between marks, mm</td></tr>
+<tr><td><code>round_ends</code></td><td class="n"><code>true</code></td><td>Rounded ends on the marks</td></tr>
+<tr><td><code>through</code></td><td class="n"><code>false</code></td><td>Cut through instead of marking the surface</td></tr>
+<tr><td><code>face</code></td><td class="n"><code>lid</code></td><td><code>lid</code> or <code>floor</code></td></tr>
+<tr><td><code>text</code></td><td class="n"></td><td>What a label says. Newlines start a new line</td></tr>
+<tr><td><code>text_size</code></td><td class="n">6</td><td>Cap height, mm</td></tr>
+<tr><td><code>font</code></td><td class="n"><code>light</code></td><td><code>light</code> or <code>medium</code></td></tr>
+<tr><td><code>text_align</code>, <code>line_spacing</code>, <code>tracking</code></td><td class="n"><code>center</code>, 1.45, 0</td><td>Layout of a label</td></tr>
+</table></div>
+</section>
+
+<section id="cli">
+<h2>Command line</h2>
+<p>Run from the <code>backend</code> folder.</p>
+<pre><code>python -m hwcase.cli parts                              # list the library
+python -m hwcase.cli check scenes/soundmachine-v0.yaml  # report problems
+python -m hwcase.cli build scenes/soundmachine-v0.yaml -o ../out
+python -m hwcase.cli audit                              # library vs vendor CAD</code></pre>
+<div class="tw"><table>
+<tr><th>Command</th><th>Options</th><th>What it does</th></tr>
+<tr><td><code>parts</code></td><td></td><td>Lists every part with its size, height and weakest confidence</td></tr>
+<tr><td><code>check &lt;scene&gt;</code></td><td><code>--strict</code> exits non-zero on errors</td><td>Resolves the scene and prints extent, panels and issues</td></tr>
+<tr><td><code>build &lt;scene&gt;</code></td><td><code>-o DIR</code>, default <code>out</code></td><td>Writes <code>*-layers.svg</code>, <code>*-layers.dxf</code>, <code>*-scene.json</code> and <code>*-case.json</code></td></tr>
+<tr><td><code>audit</code></td><td><code>--tolerance MM</code> (0.3), <code>--strict</code></td><td>Compares parts against their vendor models</td></tr>
+</table></div>
+<p><code>--parts DIR</code> before the command points at a different part
+library.</p>
+<div class="warn"><p><b>The command line builds layered cases only.</b> Run
+on a <code>kind: rack</code> scene, <code>check</code> reports an empty scene
+and <code>build</code> writes an empty two-layer case instead of a frame. Build
+frames from the editor or the HTTP API.</p></div>
+</section>
+
+<section id="api">
+<h2>HTTP API</h2>
+<p>The editor talks to a FastAPI server. Every route that does real work takes
+the whole scene as JSON in the request body and reads no file to answer, so the
+API is usable on its own. Interactive documentation is served at
+<code>/docs</code> on a running instance.</p>
+<h3>Engine</h3>
+<div class="tw"><table>
+<tr><th>Route</th><th>Returns</th></tr>
+<tr><td><code>POST /api/resolve</code></td><td>Resolved placements, issues and the scene's extent</td></tr>
+<tr><td><code>POST /api/build</code></td><td>The layer stack for a layered case, or the members, bill of materials and order numbers for a frame</td></tr>
+<tr><td><code>POST /api/case/freeze</code></td><td>The derived case outline turned into a fixed one</td></tr>
+<tr><td><code>POST /api/export/svg</code></td><td>All layers as one SVG</td></tr>
+<tr><td><code>POST /api/export/dxf</code></td><td>All layers as one DXF</td></tr>
+<tr><td><code>POST /api/export/sheets/{svg|dxf}</code></td><td>Bed-sized sheets and a cut list, as a zip, or as JSON with <code>?as_json=true</code></td></tr>
+<tr><td><code>POST /api/export/rack/panels.svg</code></td><td>A frame's two side panels as one SVG. Frame scenes only</td></tr>
+<tr><td><code>POST /api/render</code></td><td>A ray-traced PNG. Query: <code>samples</code>, <code>width</code>, <code>height</code>, <code>env</code>, <code>elevation</code>, <code>azimuth</code></td></tr>
+<tr><td><code>GET /api/render/status</code></td><td>Whether the renderer is installed, and which environments exist</td></tr>
+</table></div>
+<h3>Parts and catalogue</h3>
+<div class="tw"><table>
+<tr><th>Route</th><th>Returns</th></tr>
+<tr><td><code>GET /api/parts</code></td><td>The library</td></tr>
+<tr><td><code>GET /api/parts/{id}</code></td><td>One part</td></tr>
+<tr><td><code>POST /api/parts/describe</code></td><td>Derived numbers for parts carried inside a scene</td></tr>
+<tr><td><code>GET /api/catalog/search?q=</code></td><td>Matching catalogue products, best first</td></tr>
+<tr><td><code>GET /api/catalog/status</code></td><td>The catalogue's age and size</td></tr>
+<tr><td><code>POST /api/catalog/import/{product_id}</code></td><td>A draft part measured from the vendor model</td></tr>
+</table></div>
+<h3>Scene files</h3>
+<div class="tw"><table>
+<tr><th>Route</th><th>Returns</th></tr>
+<tr><td><code>POST /api/scene/parse</code></td><td>YAML text in, a validated scene out</td></tr>
+<tr><td><code>POST /api/scene/serialize</code></td><td>A scene as YAML, keeping the comments of the previous text if you pass it</td></tr>
+<tr><td><code>GET /api/scene/starter?name=&amp;kind=</code></td><td>A blank, commented scene of either kind</td></tr>
+<tr><td><code>GET /api/config</code></td><td>What this instance can do: hosted or not, renderer limits, version</td></tr>
+<tr><td><code>GET /api/health</code></td><td>A liveness check</td></tr>
+</table></div>
+<h3>Local only</h3>
+<p>These read and write <code>backend/scenes</code>. They do not exist on a
+hosted instance.</p>
+<div class="tw"><table>
+<tr><th>Route</th><th>Does</th></tr>
+<tr><td><code>GET /api/scenes</code></td><td>Lists scenes</td></tr>
+<tr><td><code>GET /api/scenes/{name}</code></td><td>Loads one</td></tr>
+<tr><td><code>POST /api/scenes</code></td><td>Creates one, blank or as a copy</td></tr>
+<tr><td><code>PUT /api/scenes/{name}</code></td><td>Saves, keeping comments</td></tr>
+<tr><td><code>POST /api/scenes/{name}/rename</code></td><td>Renames</td></tr>
+<tr><td><code>DELETE /api/catalog/import/{part_id}</code></td><td>Removes an imported part</td></tr>
+</table></div>
+<h3>Example: build a frame</h3>
+<pre><code>curl -X POST http://127.0.0.1:8487/api/build \
+  -H "Content-Type: application/json" \
+  -d '{"name":"f","kind":"rack","rack":{"hp":68,"module_depth":46,
+       "rows":[{"format":"3U"},{"format":"3U"}],"inserts_per_row":1}}'</code></pre>
+<p>The response carries <code>width</code>, <code>web</code>,
+<code>panel_height</code>, <code>depth</code>, <code>stands_on</code>,
+<code>bom</code>, <code>order</code>, <code>rows</code> and one entry per
+member with its outline and holes.</p>
+</section>
+
+<section id="hosting">
+<h2>Hosting</h2>
+<div class="note"><p><b>GitHub can host the code and this documentation, not
+the editor.</b> GitHub Pages serves static files only, and every piece of
+geometry is computed by the Python server. To put the editor online you need a
+machine that can run Python or Docker.</p></div>
+<h3>Publishing this page with GitHub Pages</h3>
+<p>In the repository on GitHub: <b>Settings → Pages → Build and deployment →
+Deploy from a branch</b>, choose the main branch and the <code>/docs</code>
+folder. This file is self-contained, with no external assets.</p>
+
+<h3>Two modes of one program</h3>
+<div class="tw"><table>
+<tr><th></th><th>Local</th><th>Hosted</th></tr>
+<tr><td>Started with</td><td><code>start.bat</code></td><td><code>start-hosted.bat</code>, or <code>HWCASE_HOSTED=1</code></td></tr>
+<tr><td>Default port</td><td class="n">8487</td><td class="n">8497</td></tr>
+<tr><td>Scenes live in</td><td><code>backend/scenes</code></td><td>The visitor's browser, and files they save</td></tr>
+<tr><td>An imported part goes</td><td>Into the library</td><td>Into the scene file</td></tr>
+<tr><td>Renders at once</td><td class="n">4</td><td class="n">1; a second request is refused with 429</td></tr>
+</table></div>
+<p>Hosted mode keeps nothing on the server: no scene storage, no writable part
+library, no output files, no accounts. Run <code>start-hosted.bat</code> before
+deploying to see exactly how it behaves.</p>
+<p>A visitor's project lives in the browser's local storage, which does not
+survive clearing site data and does not exist in a private window. The durable
+copy is the file from <b>file → save to a file</b>. Tell people to keep it.</p>
+
+<h3>Running a public instance</h3>
+<pre><code>HWCASE_SITE=case.example.com docker compose up -d --build
+./deploy/update.sh --pull        # for every change after the first</code></pre>
+<p>The compose file puts a Caddy reverse proxy in front for TLS, a request size
+cap and rate limiting. With <code>HWCASE_SITE</code> unset it serves
+<code>http://localhost:8080</code> without a certificate.
+<code>update.sh</code> rebuilds, restarts, and waits for the new container to
+answer before calling it done.</p>
+
+<h3>Settings</h3>
+<div class="tw"><table>
+<tr><th>Variable</th><th class="n">Hosted default</th><th class="n">Local default</th><th>Meaning</th></tr>
+<tr><td><code>HWCASE_HOSTED</code></td><td class="n"></td><td class="n">unset</td><td><code>1</code> turns hosted mode on</td></tr>
+<tr><td><code>HWCASE_RENDER_SLOTS</code></td><td class="n">1</td><td class="n">4</td><td>Renders at once, per worker</td></tr>
+<tr><td><code>HWCASE_MAX_SAMPLES</code></td><td class="n">512</td><td class="n">4096</td><td>Ceiling on render quality</td></tr>
+<tr><td><code>HWCASE_MAX_PIXELS</code></td><td class="n">1920</td><td class="n">4096</td><td>Ceiling on either image dimension</td></tr>
+<tr><td><code>HWCASE_ORIGINS</code></td><td class="n">none</td><td class="n"><code>*</code></td><td>Comma-separated CORS origins</td></tr>
+<tr><td><code>HWCASE_MAX_SCENE_BYTES</code></td><td class="n">1048576</td><td class="n">1048576</td><td>Largest scene file the text routes will read</td></tr>
+</table></div>
+<p>Compose also reads <code>HWCASE_WITH_RENDER</code>, <code>HWCASE_CPUS</code>,
+<code>HWCASE_MEMORY</code>, <code>HWCASE_HTTP_PORT</code> and
+<code>HWCASE_HTTPS_PORT</code>.</p>
+
+<h3>One user, in Docker</h3>
+<pre><code>docker run --rm -p 8000:8000 -e HWCASE_HOSTED= \
+  -v "$PWD/my-project:/app/backend/scenes" hwcase</code></pre>
+<p>The image sets hosted mode, so it has to be cleared explicitly. The mounted
+folder must be writable by uid 10001.</p>
+<p>The full account is in <code>docs/hosting.md</code>.</p>
+</section>
+
+<section id="dev">
+<h2>Development</h2>
+<h3>Layout</h3>
+<pre><code>backend/
+  hwcase/
+    schema.py      the data model: parts, scenes, cases, frames
+    geom.py        transforms, footprints, connector corridors
+    library.py     YAML part loader
+    scene.py       mate solver and the checks
+    case.py        scene -> stack of slabs
+    eurorack.py    the Eurorack format as arithmetic
+    rack.py        row stack and width -> rails, body, side panels
+    scenefile.py   save a scene without losing its comments
+    engrave.py     front-panel decoration
+    hershey.py     single-stroke lettering
+    measure.py     read geometry out of vendor CAD
+    catalog.py     search Adafruit's product feed
+    ingest.py      turn a catalogue hit into a draft part
+    audit.py       check the library against vendor models
+    raytrace.py    the final photograph (needs Mitsuba)
+    export.py      SVG and DXF for the cutter, JSON for the browser
+    cli.py         parts | check | build | audit
+    api.py         the HTTP server
+  parts/           the part library
+  scenes/          your projects
+  tests/           the engine test suite
+web/               the editor: three.js, vendored, no build step
+tools/             fetch and measure vendor CAD
+deploy/            Caddyfile and update script
+docs/              this page and the background notes</code></pre>
+<h3>Tests</h3>
+<pre><code>cd backend &amp;&amp; python -m pytest tests/ -q          # engine: 395 tests, about 18 minutes
+cd backend &amp;&amp; python -m pytest tests/test_rack.py  # frames only: under a second
+cd web &amp;&amp; node --test tests/                       # editor logic: 70 tests</code></pre>
+<p>The editor's tests need Node and no dependencies.</p>
+<h3>Background notes</h3>
+<div class="tw"><table>
+<tr><th>File</th><th>Covers</th></tr>
+<tr><td><code>docs/eurorack.md</code></td><td>The Eurorack mechanical norms, with sources</td></tr>
+<tr><td><code>docs/eurorack-frame-stock.md</code></td><td>The rail, U-channel and acrylic the frame model is built on</td></tr>
+<tr><td><code>docs/measurements.md</code></td><td>What is exact, what is guessed, what to measure next</td></tr>
+<tr><td><code>docs/research.md</code></td><td>What already exists and what this project builds itself</td></tr>
+<tr><td><code>docs/hosting.md</code></td><td>Running an instance for other people</td></tr>
+</table></div>
+</section>
+
+<section id="limits">
+<h2>Known limits</h2>
+<ul>
+<li><b>Frames are not in the command line.</b> They build from the editor and
+the API only.</li>
+<li><b>No drill list for rails.</b> The frame exports its side panels and the
+U-channel order numbers. Rails are listed by count and length only.</li>
+<li><b>One rail profile.</b> The frame model is built around f&amp;w Art. 16500.</li>
+<li><b>No joinery.</b> Layers are held by bolts. Kerf is modelled; finger
+joints are not.</li>
+<li><b>No solid export.</b> There is no STEP output for milling or printing yet.</li>
+<li><b>Cables are a clearance, not a route.</b> The engine reserves room and
+connects the empty space, but does not plan a path or check cable lengths.</li>
+<li><b>Sheet packing is rectangular.</b> Layers are shelf-packed, not nested
+into each other's concavities.</li>
+<li><b>One catalogue.</b> Search and import cover Adafruit only.</li>
+<li><b>It does not check your wiring</b>, and it does not know that a board
+needs airflow.</li>
+</ul>
+</section>
+
+<section id="credits">
+<h2>License and credits</h2>
+<p>hwcase is licensed under the
+<a href="https://polyformproject.org/licenses/noncommercial/1.0.0">PolyForm Noncommercial License 1.0.0</a>
+(<code>LICENSE</code> in the repository). You may use, study, change and share
+it for any noncommercial purpose, including personal projects, research,
+teaching, and use by charities and public institutions. Commercial use needs a
+separate licence from the copyright holder.</p>
+<p>Third-party files keep their own terms. They are listed in
+<code>NOTICE</code> and below.</p>
+<ul>
+<li>3D view: three.js, vendored.</li>
+<li>Geometry: shapely. DXF: ezdxf. Mesh reading: trimesh. Server: FastAPI.</li>
+<li>Lettering: the Hershey stroke fonts, public domain.</li>
+<li>Lighting environments: Poly Haven, CC0. Studio by Sergej Majboroda;
+daylight by Greg Zaal and Jarod Guest; dusk by Greg Zaal.</li>
+<li>Part data and CAD: Adafruit's public product feed and CAD repository
+(MIT). AMYboard board file, panel drawing and photos: Shorepine's Tulip
+repository (MIT).</li>
+<li>Eurorack dimensions: Doepfer's A-100 construction details, Intellijel and
+Pulp Logic for the two 1U standards.</li>
+</ul>
+</section>
+
+<footer>hwcase 0.2.0 · Copyright Luna Nane · licensed under the
+<a href="https://polyformproject.org/licenses/noncommercial/1.0.0">PolyForm Noncommercial License 1.0.0</a>.
+This page is a single file: <code>docs/index.html</code>.</footer>
+
+</main>
+</div>
+</body>
+</html>
