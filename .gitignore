@@ -26,5 +26,16 @@ vendor/catalog/
 *-cutlist.txt
 export/
 
+# Photos and screenshots dropped at the top of the checkout. They are private,
+# never source; the images the project needs live under vendor/ and web/.
+/*.jpg
+/*.jpeg
+/*.JPG
+/*.png
+/*.PNG
+/*.webp
+/*.heic
+/*.HEIC
+
 # Local design-evidence ledger; DEVELOPMENT_PLAN.md and EXECUTION_PROMPTS.md are authoritative.
 .docs/DEVELOPMENT_PLAN_HISTORY.md
