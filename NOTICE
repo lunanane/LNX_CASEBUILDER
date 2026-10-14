@@ -1,0 +1,38 @@
+Required Notice: Copyright Luna Nane (https://github.com/lunanane/LNX_CASEBUILDER)
+
+hwcase is licensed under the PolyForm Noncommercial License 1.0.0, in LICENSE.
+That covers everything in this repository that is not listed below: the
+engine, the editor, the part library, the scenes, the tools and the
+documentation.
+
+In short, and only as a summary -- LICENSE is what counts: you may use, study,
+change and share this for any noncommercial purpose, including personal
+projects, research, teaching and use by charities and public institutions.
+Commercial use needs a separate licence from the copyright holder.
+
+
+Third-party files
+-----------------
+
+These are not covered by LICENSE. Each stays under its own terms.
+
+web/vendor/three.module.js, OrbitControls.js, RoomEnvironment.js, RGBELoader.js
+    three.js, MIT License, Copyright 2010-2024 three.js authors.
+
+web/vendor/hdri/*.hdr
+    Poly Haven, CC0. Authors in web/vendor/hdri/CREDITS.json.
+
+vendor/fonts/*.jhf
+    The Hershey fonts, public domain.
+
+vendor/cad/adafruit/**
+    Adafruit_CAD_Parts, MIT License, Copyright (c) 2016 Adafruit Industries.
+    https://github.com/adafruit/Adafruit_CAD_Parts
+
+vendor/cad/shorepine/**, vendor/img/amyboard_*
+    Tulip Creative Computer, MIT License, Copyright (c) 2017-2022 Brian Whitman.
+    https://github.com/shorepine/tulipcc
+
+vendor/datasheets/*.pdf
+    Mechanical drawings and datasheets, copyright their publishers (Raspberry
+    Pi Ltd and Seeed Studio), included for reference only.
