@@ -40,10 +40,21 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sheets" / "layered.jso
 # ---------------------------------------------------------------------------
 
 #: ezdxf stamps every new document with the time and two fresh GUIDs, so two
-#: exports of the same case a second apart already differ. Those fields carry
-#: no geometry; they are blanked before hashing and nothing else is touched.
+#: exports of the same case a second apart already differ. And it writes the
+#: CLASSES section in set order, which follows Python's per-process string
+#: hash seed, so two runs of the same code shuffle that section. None of it
+#: carries geometry: the stamps are blanked and the CLASS records sorted
+#: before hashing, and nothing else is touched.
 _GUID = re.compile(r"\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\}")
 _EZDXF_STAMP = re.compile(r"^\d+\.\d+\.\d+ @ \d{4}-\d\d-\d\dT[0-9:.+]+$")
+_CLASSES = re.compile(r"(  2\nCLASSES\n)(.*?)(  0\nENDSEC\n)", re.S)
+
+
+def _sorted_classes(m: re.Match) -> str:
+    records = m.group(2).split("  0\nCLASS\n")
+    head, body = records[0], sorted(records[1:])
+    return m.group(1) + head + "".join("  0\nCLASS\n" + r for r in body) \
+        + m.group(3)
 
 
 def _stable(text: str) -> str:
@@ -54,7 +65,8 @@ def _stable(text: str) -> str:
             lines[i + 2] = "<time>"
         elif _EZDXF_STAMP.match(line.strip()):
             lines[i] = "<ezdxf stamp>"
-    return _GUID.sub("{GUID}", "\n".join(lines))
+    text = _GUID.sub("{GUID}", "\n".join(lines))
+    return _CLASSES.sub(_sorted_classes, text, count=1)
 
 
 def _layered_scenes() -> list[Path]:
