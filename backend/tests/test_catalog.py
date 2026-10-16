@@ -344,3 +344,156 @@ def test_a_non_sha_answer_is_refused(tmp_path, vendor):
     c = cat.Catalog(cache_dir=tmp_path / "c", ttl=3600).load()
     assert "CAD index unavailable" in c.error
     assert not (tmp_path / "c" / "adafruit-cad-tree.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# downloads: from the index, under a cap (acceptance 4)
+# ---------------------------------------------------------------------------
+
+class FakeRaw:
+    """Stands in for `ingest._get`: the raw file host."""
+
+    def __init__(self, body=b"solid x\nendsolid x\n"):
+        self.body = body
+        self.calls: list[tuple[str, object]] = []
+
+    def __call__(self, url, timeout=60.0, limit=None):
+        self.calls.append((url, limit))
+        assert not url.startswith("https://api.github.com/"), url
+        body = self.body(url) if callable(self.body) else self.body
+        return body if limit is None else body[:limit + 1]
+
+
+@pytest.fixture
+def raw(monkeypatch):
+    from hwcase import ingest
+
+    fake = FakeRaw()
+    monkeypatch.setattr(ingest, "_get", fake)
+    monkeypatch.delenv("HWCASE_MAX_CAD_MB", raising=False)
+    return fake
+
+
+def test_downloads_use_the_indexed_file_list(loaded, raw, vendor, tmp_path):
+    """No per-import API call: the index already says what is in the folder,
+    and files come from the raw host at the pinned commit."""
+    from hwcase import ingest
+
+    before = len(vendor.calls)
+    got = ingest.download_cad(loaded.get("4741"), dest_root=tmp_path / "cad")
+    assert len(vendor.calls) == before                  # no GitHub API at all
+    assert sorted(p.name for p in got) == ["4741 1.5-inch OLED.step",
+                                           "4741 1.5-inch OLED.stl"]
+    assert all(p.parent == tmp_path / "cad" / "4741" for p in got)
+    for url, limit in raw.calls:
+        assert f"/Adafruit_CAD_Parts/{SHA}/4741%201.5-inch%20OLED/" in url
+        assert limit == 64 * 1024 * 1024                # the default cap
+    assert len(raw.calls) == 2                          # .f3d and .jpg skipped
+
+    raw.calls.clear()
+    ingest.download_cad(loaded.get("4741"), dest_root=tmp_path / "cad")
+    assert raw.calls == []                              # already on disk
+
+
+def test_a_products_second_folder_downloads_beside_the_first(loaded, raw,
+                                                              tmp_path):
+    from hwcase import ingest
+
+    e = loaded.get("1982")
+    first = ingest.download_cad(e, dest_root=tmp_path)
+    second = ingest.download_cad(e, dest_root=tmp_path, folder="1982 MPR121")
+    assert {p.parent.name for p in first} == {"1982"}
+    assert {p.parent.name for p in second} == {"1982 MPR121"}
+
+
+def test_a_folder_not_in_the_index_is_a_named_error(loaded, raw, tmp_path):
+    from hwcase import ingest
+
+    with pytest.raises(ValueError, match="not in the catalogue's index"):
+        ingest.download_cad(loaded.get("4741"), dest_root=tmp_path,
+                            folder="4741 Something Else")
+    bare = cat.CatalogEntry(id="1", name="no cad")
+    with pytest.raises(ValueError, match="no vendor CAD"):
+        ingest.download_cad(bare, dest_root=tmp_path)
+
+
+def test_a_download_over_the_cap_fails_naming_the_file_and_the_cap(
+        loaded, raw, tmp_path, monkeypatch):
+    """Checked against the indexed size before a single byte is fetched, so
+    an over-size folder never leaves half of itself on disk."""
+    from hwcase import ingest
+
+    monkeypatch.setenv("HWCASE_MAX_CAD_MB", "4")
+    with pytest.raises(ingest.CadTooLarge) as err:
+        ingest.download_cad(loaded.get("4741"), dest_root=tmp_path / "cad")
+    msg = str(err.value)
+    assert "4741 1.5-inch OLED/4741 1.5-inch OLED.step" in msg   # 5.1 MB
+    assert "4 MB" in msg and "HWCASE_MAX_CAD_MB" in msg
+    assert raw.calls == []
+    assert not (tmp_path / "cad" / "4741").exists()
+
+
+def test_a_body_larger_than_its_index_entry_is_stopped_at_the_cap(
+        loaded, raw, tmp_path, monkeypatch):
+    """An index can be wrong; the bytes are counted as well."""
+    from hwcase import ingest
+
+    monkeypatch.setenv("HWCASE_MAX_CAD_MB", "0.01")     # 10,485 bytes
+    raw.body = b"x" * 20_000                            # indexed at 1-2 kB
+    with pytest.raises(ingest.CadTooLarge, match=r"5752 Quad Rotary Breakout"
+                       r"/5752 Quad Rotary Breakout\.st[lp] came down larger"
+                       r".*0\.01 MB download cap"):
+        ingest.download_cad(loaded.get("5752"), dest_root=tmp_path)
+    assert all(limit == int(0.01 * 2**20) for _, limit in raw.calls)
+    assert not any(tmp_path.rglob("*.st*"))             # nothing half-written
+
+
+@pytest.mark.parametrize("bad", ["lots", "0", "-5"])
+def test_a_cap_that_is_not_a_positive_number_is_refused(monkeypatch, bad):
+    from hwcase import ingest
+
+    monkeypatch.setenv("HWCASE_MAX_CAD_MB", bad)
+    with pytest.raises(ValueError, match="HWCASE_MAX_CAD_MB"):
+        ingest.max_cad_bytes()
+
+
+# ---------------------------------------------------------------------------
+# the import survey
+# ---------------------------------------------------------------------------
+
+def _survey():
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / "tools" / "import_survey.py"
+    spec = importlib.util.spec_from_file_location("import_survey", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_survey_sample_is_deterministic(loaded):
+    survey = _survey()
+    a = survey.sample_folders(loaded.cad_index, 5, seed=1)
+    assert a == survey.sample_folders(loaded.cad_index, 5, seed=1)
+    assert a != survey.sample_folders(loaded.cad_index, 5, seed=2)
+    assert len(a) == 5 and set(a) <= set(loaded.cad_index)
+    assert survey.sample_folders(loaded.cad_index, None, 1) == \
+        sorted(loaded.cad_index)
+
+
+def test_the_survey_records_a_step_only_folder_without_downloading(loaded,
+                                                                   raw):
+    row = _survey().survey_one(loaded, "562 10K Potentiometer")
+    assert row["result"] == "failed"
+    assert row["reason"] == "no STL (f3d step)"
+    assert row["product_id"] == "562" and row["commit"] == SHA
+    assert raw.calls == []
+
+
+def test_the_survey_tries_folders_the_feed_no_longer_lists(tmp_path, monkeypatch):
+    fake = FakeVendor(folders={"7777 Retired Board": [("7777.stl", 10)]})
+    monkeypatch.setattr(cat, "_fetch", fake)
+    c = cat.Catalog(cache_dir=tmp_path / "c", ttl=3600).load()
+    assert c.get("7777") is None
+    e = c.cad_entry("7777 Retired Board")
+    assert e.id == "7777" and e.name == "Retired Board" and e.importable

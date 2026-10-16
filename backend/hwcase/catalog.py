@@ -525,6 +525,25 @@ class Catalog:
                     for fmt in _formats([c.name for c in self.cad_index[f]])),
             f))
 
+    def cad_entry(self, folder: str) -> Optional[CatalogEntry]:
+        """The entry to import one CAD folder as.
+
+        The feed's entry when the product is in it. The CAD repo also holds
+        folders for products the feed no longer lists; those get an entry
+        named after the folder, so a survey of the repository can still try
+        them rather than skipping a slice of it.
+        """
+        pid = _product_id(folder)
+        if pid is None or folder not in self.cad_index:
+            return None
+        found = self.get(pid)
+        if found is not None:
+            return found
+        e = CatalogEntry(id=pid, name=folder.split(" ", 1)[-1] or folder,
+                         url=f"https://www.adafruit.com/product/{pid}")
+        self._attach_cad([e])
+        return e
+
     def _attach_cad(self, entries: list[CatalogEntry]) -> None:
         by_id: dict[str, list[str]] = {}
         for folder in self.cad_index:
