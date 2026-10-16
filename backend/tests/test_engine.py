@@ -2649,8 +2649,14 @@ def _fake_catalog(tmp_path, products, cad=None):
     cache.mkdir(parents=True)
     (cache / "adafruit-products.json").write_text(json.dumps(products),
                                                   encoding="utf-8")
-    (cache / "adafruit-cad.json").write_text(json.dumps(cad or {}),
-                                             encoding="utf-8")
+    # `cad` stays {product id: folder}; the cache is the git-tree index now,
+    # so each folder gets one STL -- a model the importer can read.
+    index = {"repo": "adafruit/Adafruit_CAD_Parts", "commit": "0" * 40,
+             "truncated": False,
+             "folders": {folder: [{"name": f"{folder}.stl", "size": 1000}]
+                         for folder in (cad or {}).values()}}
+    (cache / "adafruit-cad-tree.json").write_text(json.dumps(index),
+                                                  encoding="utf-8")
     c = Catalog(cache_dir=cache, ttl=10 ** 9)
     c._read_cache()
     return c

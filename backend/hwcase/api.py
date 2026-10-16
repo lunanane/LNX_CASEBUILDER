@@ -663,6 +663,13 @@ def catalog_import(product_id: str, download: bool = True):
         raise HTTPException(
             422, f"{entry.name} has no vendor CAD, so there is nothing to "
                  f"measure -- it would have to be entered by hand")
+    if not entry.importable:
+        # Refused before the download, not after it: fetching megabytes of
+        # STEP only to fail with "no STL on disk" is the bug this replaced.
+        raise HTTPException(
+            422, f"{entry.name} has a vendor model only as "
+                 f"{', '.join(entry.formats) or 'unknown files'}, which hwcase "
+                 f"cannot measure yet -- the importer needs an STL")
 
     if download and not ingest.local_cad(product_id):
         try:

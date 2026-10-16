@@ -2749,10 +2749,15 @@ function renderCatalog(results, status) {
     const badge = e.in_library
       ? '<span class="tag measured">in library</span>'
       : (e.importable ? '<span class="tag datasheet">has CAD</span>'
-                      : '<span class="tag estimated">no CAD</span>');
+        : e.cad ? '<span class="tag estimated">no STL</span>'
+                : '<span class="tag estimated">no CAD</span>');
+    // A discontinued or out-of-stock board can still be imported -- people
+    // own them -- but nobody should design a new case around one unawares.
+    const avail = e.discontinued ? ' · discontinued'
+      : (e.in_stock === false ? ' · out of stock' : '');
     row.innerHTML =
       `<div class="name">${escapeHtml(e.name)}${badge}</div>` +
-      `<div class="meta">#${e.id}${e.category ? ' · ' + escapeHtml(e.category) : ''}</div>`;
+      `<div class="meta">#${e.id}${e.category ? ' · ' + escapeHtml(e.category) : ''}${avail}</div>`;
 
     if (e.in_library) {
       row.title = 'already in the palette above — click to add it to the scene';
@@ -2760,6 +2765,10 @@ function renderCatalog(results, status) {
     } else if (e.importable) {
       row.title = 'click to measure the vendor model and add it to the palette';
       row.onclick = () => importProduct(e, row);
+    } else if (e.cad) {
+      row.title = `Adafruit publish this one only as ${(e.formats || []).join(', ')}`
+        + ', which hwcase cannot measure yet — the importer needs an STL';
+      row.classList.add('disabled');
     } else {
       row.title = 'Adafruit publish no model for this one, so there is nothing '
         + 'to measure — it would have to be entered by hand';
