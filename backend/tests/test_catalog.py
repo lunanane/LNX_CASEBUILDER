@@ -523,6 +523,13 @@ def test_the_survey_sample_is_deterministic(loaded):
         sorted(loaded.cad_index)
 
 
+def test_a_full_survey_never_writes_over_the_committed_baseline():
+    survey = _survey()
+    assert survey.default_out(False) == survey.BASELINE
+    assert survey.default_out(True) != survey.BASELINE
+    assert survey.default_out(True).parent.name == "out"     # gitignored
+
+
 def test_the_survey_records_a_step_only_folder_without_downloading(loaded,
                                                                    raw):
     row = _survey().survey_one(loaded, "562 10K Potentiometer")

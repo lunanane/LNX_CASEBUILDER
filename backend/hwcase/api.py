@@ -673,6 +673,12 @@ def catalog_import(product_id: str, download: bool = True):
 
     if download and not ingest.local_cad(product_id):
         try:
+            ingest.max_cad_bytes()
+        except ValueError as exc:
+            # the operator's setting, not the vendor: say so, not "could not
+            # fetch vendor CAD"
+            raise HTTPException(500, f"server misconfigured: {exc}")
+        try:
             ingest.download_cad(entry)
         except ingest.CadTooLarge as exc:
             raise HTTPException(413, str(exc))

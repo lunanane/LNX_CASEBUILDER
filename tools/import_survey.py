@@ -10,7 +10,7 @@ number that a change to `measure.py` can be seen to move.
 
     cd backend
     python ../tools/import_survey.py --sample 40 --seed 1      # the baseline
-    python ../tools/import_survey.py --all --out survey.csv    # every folder
+    python ../tools/import_survey.py --all     # every folder, into out/
 
 The sample is deterministic for a given seed and a given index: folders are
 sorted by name before sampling, and the index is pinned to a commit, which the
@@ -38,6 +38,9 @@ from hwcase import catalog as cat  # noqa: E402
 from hwcase import ingest  # noqa: E402
 
 BASELINE = ROOT / "tools" / "import_survey_baseline.csv"
+#: A full survey is a different row set from the committed sample, so by
+#: default it goes to the ignored out/ rather than over the baseline.
+ALL_OUT = ROOT / "out" / "import_survey_all.csv"
 
 COLUMNS = ["folder", "product_id", "formats", "result", "reason", "flipped",
            "holes", "bodies", "commit"]
@@ -49,6 +52,11 @@ def sample_folders(index: dict, n: int | None, seed: int) -> list[str]:
     if n is None or n >= len(folders):
         return folders
     return sorted(random.Random(seed).sample(folders, n))
+
+
+def default_out(survey_all: bool) -> Path:
+    """Where the CSV goes when --out is not given."""
+    return ALL_OUT if survey_all else BASELINE
 
 
 def survey_one(c: cat.Catalog, folder: str) -> dict:
@@ -95,9 +103,11 @@ def main(argv=None) -> int:
     pick.add_argument("--all", action="store_true",
                       help="survey every folder (about a gigabyte)")
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--out", type=Path, default=BASELINE,
-                    help=f"CSV to write (default {BASELINE.relative_to(ROOT)})")
+    ap.add_argument("--out", type=Path, default=None,
+                    help=f"CSV to write (default {BASELINE.relative_to(ROOT)} "
+                         f"for a sample, {ALL_OUT.relative_to(ROOT)} for --all)")
     args = ap.parse_args(argv)
+    args.out = args.out or default_out(args.all)
 
     c = cat.shared()
     if not c.cad_index:
