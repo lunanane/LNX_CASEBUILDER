@@ -401,11 +401,19 @@ class Catalog:
             return None
         return time.time() - self.fetched_at
 
+    def _young(self, path: Path) -> bool:
+        return (path.exists()
+                and (time.time() - path.stat().st_mtime) < self.ttl)
+
     def fresh(self) -> bool:
-        """Is the cache on disk younger than the TTL, CAD index included?"""
-        return (self.products_path.exists() and self.cad_path.exists()
-                and (time.time() - self.products_path.stat().st_mtime)
-                < self.ttl)
+        """Are both cached feeds younger than the TTL?
+
+        Each by its own file's age. A refresh writes the product feed before
+        it asks GitHub, so when only the CAD index fails the feed is new and
+        the index is not -- and judging by the feed alone would serve that old
+        index for a whole TTL instead of retrying it after RETRY.
+        """
+        return self._young(self.products_path) and self._young(self.cad_path)
 
     def due(self) -> bool:
         """Does this request have to load -- read the cache or refresh it?
@@ -435,7 +443,11 @@ class Catalog:
 
         if refresh or not self.fresh():
             try:
-                self._refresh()
+                # only what has aged: retrying a failed CAD index should not
+                # re-download eight megabytes of product feed with it
+                self._refresh(
+                    products=refresh or not self._young(self.products_path),
+                    cad=refresh or not self._young(self.cad_path))
             except _FETCH_ERRORS as exc:
                 self.error = f"{type(exc).__name__}: {exc}"
                 self.stale = True
@@ -449,15 +461,19 @@ class Catalog:
             self.stale = False                # nothing old is being shown
         return self
 
-    def _refresh(self) -> None:
+    def _refresh(self, products: bool = True, cad: bool = True) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        raw = _fetch(PRODUCTS_URL)
-        json.loads(raw)                       # refuse to cache a truncated body
-        self.products_path.write_bytes(raw)
+        if products:
+            raw = _fetch(PRODUCTS_URL)
+            json.loads(raw)                   # refuse to cache a truncated body
+            self.products_path.write_bytes(raw)
+        if not cad:
+            return
 
         # The CAD index is a nicety, not a requirement: without it every
         # product simply looks un-importable, which is wrong but not broken.
-        # A failure keeps the previous index and says so.
+        # A failure keeps the previous index and says so, and counts as a
+        # failed refresh, so `due()` tries it again after RETRY.
         try:
             index = self._fetch_cad_index()
         except _FETCH_ERRORS as exc:

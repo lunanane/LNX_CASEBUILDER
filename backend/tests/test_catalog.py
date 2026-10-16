@@ -224,6 +224,48 @@ def test_a_failed_refresh_is_not_retried_on_every_request(tmp_path, vendor,
     assert cat.shared().stale is False and cat.shared().error is None
 
 
+def test_a_failed_cad_index_is_retried_after_retry_not_after_the_ttl(
+        tmp_path, vendor, monkeypatch):
+    """The product feed is written before GitHub is asked, so a CAD failure
+    leaves a fresh feed beside an old index. The index's own age must count,
+    or the old one is served for a whole TTL."""
+    cache = tmp_path / "catalog"
+    monkeypatch.setattr(cat, "_shared", cat.Catalog(cache_dir=cache, ttl=3600))
+    cat.search("oled")
+    _backdate(cache, 2 * 3600)
+
+    real_fetch = vendor.__call__
+
+    def github_down(url, timeout=120.0, headers=None):
+        if url != cat.PRODUCTS_URL:
+            vendor.calls.append((url, dict(headers or {})))
+            raise OSError("rate limited")
+        return real_fetch(url, timeout, headers)
+
+    monkeypatch.setattr(cat, "_fetch", github_down)
+    vendor.sha = SHA2
+    cat.search("oled")                                  # feed ok, index fails
+    assert cat.shared().stale and "CAD index unavailable" in cat.shared().error
+    assert cat.shared().commit == SHA                   # old index kept
+
+    now = [time.time()]
+    monkeypatch.setattr(cat.time, "time", lambda: now[0])
+
+    n = len(vendor.calls)
+    now[0] += cat.RETRY - 1                             # within RETRY: no retry
+    cat.search("oled")
+    assert len(vendor.calls) == n
+
+    monkeypatch.setattr(cat, "_fetch", vendor)          # GitHub is back
+    now[0] += 2                                         # RETRY has passed
+    cat.search("oled")
+    urls = [u for u, _ in vendor.calls[n:]]
+    assert cat.CAD_COMMIT_URL in urls                   # the index is retried
+    assert cat.PRODUCTS_URL not in urls                 # the fresh feed is not
+    assert cat.shared().commit == SHA2
+    assert cat.shared().stale is False and cat.shared().error is None
+
+
 def test_a_cache_from_before_the_tree_index_forces_a_refresh(tmp_path, vendor):
     """The old `adafruit-cad.json` had no files and no commit; it is not read,
     and its successor's absence makes the cache count as stale."""
