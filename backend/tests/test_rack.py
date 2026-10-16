@@ -680,3 +680,99 @@ def test_the_sheet_export_endpoint_reports_a_bad_frame():
     r = TestClient(api.app).post("/api/export/sheets/svg", json=bad)
     assert r.status_code == 400
     assert "unknown row format" in r.text
+
+
+# --------------------------------------------------------------------------
+# the command line, for a frame
+# --------------------------------------------------------------------------
+
+from hwcase import cli                                     # noqa: E402
+
+
+def test_check_prints_the_frame_summary(capsys):
+    _scene, model = _frame_6()
+    assert cli.main(["check", str(FRAME_6), "--strict"]) == 0
+    out = capsys.readouterr().out
+    assert "frame frame-6: 68 HP, 2 rows (3U + 3U)" in out
+    assert f"{model.width:.2f} mm between the panels" in out
+    assert f"depth   {model.depth:.2f} mm" in out
+    assert f"panel   {model.panel_height:.2f} mm tall" in out
+    assert "8 x M5 screws" in out and "4 x rails" in out
+    assert "U-channel order: length 345.4 mm" in out
+    assert "0 errors, 0 warnings" in out
+    # nothing of the layered report: no placements, no panels, no extent
+    assert "placements" not in out and "extent" not in out
+
+
+def _frame_scene(tmp_path, **case):
+    scene, _model = _frame_6()
+    if case:
+        scene.case = scene.case.model_copy(update=case)
+    path = tmp_path / "frame-test.yaml"
+    import yaml
+    path.write_text(yaml.safe_dump(scene.model_dump(mode="json")),
+                    encoding="utf-8")
+    return path
+
+
+def test_check_reports_a_frame_that_fits_no_stock(tmp_path, capsys):
+    path = _frame_scene(tmp_path, plates=[(120.0, 120.0)])
+    assert cli.main(["check", str(path)]) == 0
+    assert cli.main(["check", str(path), "--strict"]) == 1
+    out = capsys.readouterr().out
+    assert "[X] stock" in out and "side-left (side_panel)" in out
+
+
+def test_check_reports_a_frame_that_cannot_be_built(tmp_path, capsys):
+    import yaml
+
+    path = _frame_scene(tmp_path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["rack"]["rows"] = [{"format": "7U-nonsense"}]
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    assert cli.main(["check", str(path), "--strict"]) == 1
+    assert "unknown row format" in capsys.readouterr().out
+
+
+def test_build_writes_the_frame_sheets_and_cut_list(tmp_path, capsys):
+    _scene, model = _frame_6()
+    out = tmp_path / "out"
+    assert cli.main(["build", str(FRAME_6), "-o", str(out)]) == 0
+    sheets = out / "frame-6-sheets"
+    names = sorted(p.name for p in sheets.iterdir())
+    assert "frame-6-cutlist.txt" in names
+    assert any(n.endswith(".svg") for n in names)
+    assert any(n.endswith(".dxf") for n in names)
+    cut = (sheets / "frame-6-cutlist.txt").read_text(encoding="utf-8")
+    assert "side-left" in cut and "side-right" in cut
+    for r in model.rails:
+        assert f"{r.name:<12} {r.length:8.2f} mm" in cut
+    assert f"{2 * len(model.rails)} x M5 screw" in cut
+    assert "U-channel (order):" in cut
+    assert (out / "frame-6-frame.json").exists()
+
+
+def test_build_on_a_frame_never_writes_a_layered_case(tmp_path, monkeypatch):
+    """No layer strip, no case JSON, and `case.build` is never even called."""
+    from hwcase import case as case_mod
+
+    def refuse(*_a, **_k):
+        raise AssertionError("a frame scene reached the layered case builder")
+
+    monkeypatch.setattr(case_mod, "build", refuse)
+    monkeypatch.setattr(export, "write_all", refuse)
+    out = tmp_path / "out"
+    assert cli.main(["build", str(FRAME_6), "-o", str(out)]) == 0
+    written = [p.name for p in out.rglob("*") if p.is_file()]
+    assert written
+    for name in written:
+        assert "-layers." not in name and not name.endswith("-case.json")
+        assert not name.endswith("-scene.json")
+
+
+def test_build_fails_loudly_when_the_plates_fit_no_stock(tmp_path, capsys):
+    path = _frame_scene(tmp_path, plates=[(120.0, 120.0)])
+    assert cli.main(["build", str(path), "-o", str(tmp_path / "o")]) == 1
+    assert "fits none of the plates" in capsys.readouterr().out
+    assert not list((tmp_path / "o").glob("*-sheets")), \
+        "a half-written sheet folder for a frame that cannot be cut"
