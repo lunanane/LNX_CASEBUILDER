@@ -777,6 +777,15 @@ def sheet_files(source, fmt: str, basename: str = "case", stock=None
     if fmt not in ("svg", "dxf"):
         raise ValueError(f"unknown sheet format {fmt!r}")
     sheets = pack_sheets(source, stock=stock)
+    files = _sheet_texts(sheets, fmt, basename)
+    files.append((f"{basename}-cutlist.txt",
+                  sheet_manifest(sheets, stock if stock is not None else source)))
+    return files
+
+
+def _sheet_texts(sheets: list[PackedSheet], fmt: str, basename: str
+                 ) -> list[tuple[str, str]]:
+    """(filename, content) for each packed sheet, numbered `NN-of-NN`."""
     n = len(sheets)
     files = []
     for sheet in sheets:
@@ -784,8 +793,86 @@ def sheet_files(source, fmt: str, basename: str = "case", stock=None
         content = (sheet_to_svg(sheet) if fmt == "svg"
                    else sheet_to_dxf_text(sheet))
         files.append((name, content))
+    return files
+
+
+# ---------------------------------------------------------------------------
+# a frame's cut: its plates on sheets, and the rest of it as a shopping list
+# ---------------------------------------------------------------------------
+#
+# A frame is mostly bought, not cut. The rails are extrusion cut to length and
+# the body is a U-channel folded to order, so the laser only ever sees the
+# side panels -- and the cut list is where everything else goes, because the
+# person at the bench needs the rail lengths, the M5 count and the order form
+# for the channel as much as the panels.
+
+
+def rack_cutlist(model, sheets: list[PackedSheet], stock) -> str:
+    """The frame's cut list: the sheets, then the plates measured from their
+    datum edge, then the rails, the M5s and the U-channel order."""
+    from .flat import from_rack
+
+    plates = from_rack(model)
+    rows = " + ".join(r.fmt.name for r in model.rows)
+    lines = [
+        sheet_manifest(sheets, stock),
+        f"frame -- {model.hp:g} HP, {len(model.rows)} row(s) ({rows}), "
+        f"width {model.width:.2f} mm, depth {model.depth:.2f} mm, "
+        f"panel height {model.panel_height:.2f} mm",
+        "",
+        f"plates (cut) -- {len(plates)}:",
+    ]
+    for p in plates:
+        x0, y0, x1, y1 = p.outline.bounds
+        lines.append(f"  {p.name:<12} {p.material.name:<14} "
+                     f"{x1 - x0:6.1f} x {y1 - y0:6.1f} mm, "
+                     f"{len(p.holes)} x M5 clearance hole")
+        lines.append(f"    holes from the {p.datum.name} "
+                     f"(along it, then up from it):")
+        for note, along, into in p.datum_positions():
+            lines.append(f"      {along:7.2f} {into:7.2f} mm  {note}")
+    rails = model.rails
+    lines += [
+        "",
+        f"rails (aluminium, cut to length) -- {len(rails)} x "
+        f"{model.width:.2f} mm, {model.width * len(rails):.2f} mm in all:",
+    ]
+    for r in rails:
+        lines.append(f"  {r.name:<12} {r.length:8.2f} mm")
+    order = model.order_spec()
+    lines += [
+        "",
+        "fixings:",
+        f"  {2 * len(rails)} x M5 screw -- one through a side panel into "
+        f"each end of each of the {len(rails)} rails",
+        "",
+        "U-channel (order):",
+        f"  {order['part']}: length {order['length_mm']} mm, "
+        f"A / B / C {order['width_a_mm']} / {order['width_b_mm']} / "
+        f"{order['width_c_mm']} mm, {order['thickness_mm']} mm thick, "
+        f"developed {order['developed_mm']} mm",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def rack_sheet_files(model, fmt: str, basename: str = "frame", stock=None
+                     ) -> list[tuple[str, str]]:
+    """(filename, content) per sheet of the frame's plates, plus the cut list.
+
+    `stock` is the plate stock -- a frame scene's `case` spec carries the
+    same `plates`, `sheet_margin` and `sheet_spacing` a layered one does.
+    """
+    from .flat import from_rack
+    from .schema import CaseSpec
+
+    if fmt not in ("svg", "dxf"):
+        raise ValueError(f"unknown sheet format {fmt!r}")
+    stock = stock if stock is not None else CaseSpec()
+    sheets = pack_sheets(from_rack(model), stock=stock)
+    files = _sheet_texts(sheets, fmt, basename)
     files.append((f"{basename}-cutlist.txt",
-                  sheet_manifest(sheets, stock if stock is not None else source)))
+                  rack_cutlist(model, sheets, stock)))
     return files
 
 

@@ -500,3 +500,183 @@ def test_the_rail_engagement_never_changes_with_depth(depth):
 def test_a_case_too_shallow_for_the_rail_is_refused():
     with pytest.raises(ValueError, match="shorter than"):
         rack.build([ROW_3U], 68.0, module_depth=15.0)
+
+
+# --------------------------------------------------------------------------
+# the frame's cut: plates on sheets, and a cut list for everything else
+# --------------------------------------------------------------------------
+
+import io                                                  # noqa: E402
+from pathlib import Path                                   # noqa: E402
+
+from shapely.affinity import rotate as _rotate            # noqa: E402
+from shapely.geometry import Polygon                       # noqa: E402
+
+from hwcase import export, flat                            # noqa: E402
+from hwcase.case import kerf_compensated                   # noqa: E402
+from hwcase.library import load_scene                      # noqa: E402
+from hwcase.schema import CaseSpec                         # noqa: E402
+
+FRAME_6 = Path(__file__).resolve().parent.parent / "scenes" / "frame-6.yaml"
+
+
+def _frame_6():
+    scene = load_scene(FRAME_6)
+    return scene, rack.build_spec(scene.rack)
+
+
+def test_frame_cut_list_names_plates_rails_m5s_and_the_order():
+    scene, model = _frame_6()
+    files = export.rack_sheet_files(model, "dxf", "frame-6", scene.case)
+    names = [n for n, _ in files]
+    assert names[-1] == "frame-6-cutlist.txt"
+    assert len(names) >= 2, "at least one sheet besides the cut list"
+    text = files[-1][1]
+
+    for side in ("side-left", "side-right"):
+        assert side in text
+    rails = model.rails
+    assert len(rails) == 4
+    for r in rails:
+        assert f"{r.name:<12} {r.length:8.2f} mm" in text
+    assert f"{len(rails)} x {model.width:.2f} mm" in text
+    assert f"{2 * len(rails)} x M5 screw" in text
+    assert model.bill_of_materials()["M5 screws"] == 2 * len(rails)
+
+    order = model.order_spec()
+    assert "U-channel (order):" in text
+    assert (f"length {order['length_mm']} mm, A / B / C "
+            f"{order['width_a_mm']} / {order['width_b_mm']} / "
+            f"{order['width_c_mm']} mm") in text
+
+
+def test_the_cut_list_gives_each_m5_from_the_datum_edge():
+    scene, model = _frame_6()
+    text = export.rack_sheet_files(model, "svg", "f", scene.case)[-1][1]
+    panel = next(m for m in model.members if m.kind == "side_panel")
+    for h in panel.holes:
+        assert f"{h.at[0]:7.2f} {h.at[1]:7.2f} mm  {h.note}" in text
+
+
+def _dxf_hole_centres(text: str, layer: str) -> list[tuple[float, float]]:
+    """Centres of the small closed rings on one DXF layer: the drilled holes."""
+    import ezdxf
+
+    doc = ezdxf.read(io.StringIO(text))
+    out = []
+    for e in doc.modelspace().query("LWPOLYLINE"):
+        if e.dxf.layer != layer:
+            continue
+        ring = Polygon([(p[0], p[1]) for p in e.get_points()])
+        x0, y0, x1, y1 = ring.bounds
+        if max(x1 - x0, y1 - y0) < 2 * rack.M5_CLEAR:
+            out.append((ring.centroid.x, ring.centroid.y))
+    return out
+
+
+def test_side_panel_hole_centres_in_the_dxf_match_the_model():
+    """Holes that meet bought aluminium are held to 0.01 mm.
+
+    Every side panel on every sheet: each M5 the model drills, carried
+    through the placement the packer reports (turned if `rotated`, then the
+    kerf-compensated plate's corner moved to `x, y`), has a ring in the DXF
+    whose centre is within 0.01 mm of it -- and no ring is left over.
+    """
+    scene, model = _frame_6()
+    parts = flat.from_rack(model)
+    sheets = export.pack_sheets(parts, stock=scene.case)
+    checked = 0
+    for sheet in sheets:
+        text = export.sheet_to_dxf_text(sheet)
+        for pl in sheet.placements:
+            part = pl.part
+            ref = kerf_compensated(part.outline, part.material.kerf)
+            if pl.rotated:
+                ref = _rotate(ref, 90, origin=(0, 0))
+            dx, dy = pl.x - ref.bounds[0], pl.y - ref.bounds[1]
+            want = []
+            for h in part.holes:
+                x, y = h.at
+                if pl.rotated:
+                    x, y = -y, x
+                want.append((x + dx, y + dy))
+            got = _dxf_hole_centres(text, part.labels.cad_layer)
+            assert len(got) == len(want) == len(model.rails)
+            for wx, wy in want:
+                best = min(((gx - wx) ** 2 + (gy - wy) ** 2) ** 0.5
+                           for gx, gy in got)
+                assert best <= 0.01, f"{part.name}: M5 off by {best:.4f} mm"
+                checked += 1
+    assert checked == 2 * len(model.rails)
+
+
+def test_side_panel_hole_spacing_in_the_dxf_matches_the_model():
+    """The same check without trusting the placement: every distance
+    between two M5s on a cut panel is the model's distance."""
+    from itertools import combinations
+
+    scene, model = _frame_6()
+    panel = next(m for m in model.members if m.kind == "side_panel")
+    want = sorted(((a.at[0] - b.at[0]) ** 2 + (a.at[1] - b.at[1]) ** 2) ** 0.5
+                  for a, b in combinations(panel.holes, 2))
+    files = export.rack_sheet_files(model, "dxf", "f", scene.case)
+    seen = 0
+    for _name, text in files[:-1]:
+        for layer in ("side-left", "side-right"):
+            got = _dxf_hole_centres(text, layer)
+            if not got:
+                continue
+            seen += 1
+            dist = sorted(((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+                          for a, b in combinations(got, 2))
+            assert dist == pytest.approx(want, abs=0.01)
+    assert seen == 2, "both side panels are on the sheets"
+
+
+def test_frame_sheets_are_svg_too():
+    import xml.etree.ElementTree as ET
+
+    scene, model = _frame_6()
+    files = export.rack_sheet_files(model, "svg", "f", scene.case)
+    body = "".join(c for _n, c in files[:-1])
+    for _n, c in files[:-1]:
+        ET.fromstring(c)
+    assert 'id="side-left"' in body and 'id="side-right-outline"' in body
+    assert 'data-role="side_panel"' in body
+
+
+def test_a_frame_too_big_for_the_stock_is_a_clear_error():
+    _scene, model = _frame_6()
+    with pytest.raises(ValueError, match="side-left"):
+        export.rack_sheet_files(model, "svg", "f",
+                                CaseSpec(plates=[(120.0, 120.0)]))
+
+
+def test_the_sheet_export_endpoint_takes_a_frame():
+    from fastapi.testclient import TestClient
+
+    from hwcase import api
+
+    scene, model = _frame_6()
+    client = TestClient(api.app)
+    r = client.post("/api/export/sheets/dxf?as_json=true",
+                    json=scene.model_dump(mode="json"))
+    assert r.status_code == 200, r.text
+    got = r.json()
+    names = [s["name"] for s in got["sheets"]]
+    assert names[-1] == "frame-6-cutlist.txt"
+    assert got["count"] == len(names) - 1 >= 1
+    assert "U-channel (order):" in got["sheets"][-1]["content"]
+
+
+def test_the_sheet_export_endpoint_reports_a_bad_frame():
+    from fastapi.testclient import TestClient
+
+    from hwcase import api
+
+    scene, _model = _frame_6()
+    bad = scene.model_dump(mode="json")
+    bad["rack"]["rows"] = [{"format": "7U-nonsense"}]
+    r = TestClient(api.app).post("/api/export/sheets/svg", json=bad)
+    assert r.status_code == 400
+    assert "unknown row format" in r.text
