@@ -548,13 +548,23 @@ def export_sheets(fmt: str, scene: Scene = Body(...), as_json: bool = False):
     """
     if fmt not in ("svg", "dxf"):
         raise HTTPException(400, "format is svg or dxf")
-    lib = _lib_for(scene)
-    res = resolve(scene, lib)
-    model = case_mod.build(res, scene.case)
     base = re.sub(r"[^A-Za-z0-9._-]+", "-", scene.name or "case").strip("-") or "case"
+    if scene.kind == "rack":
+        # A frame's plates go on the same stock, from the scene's `case`
+        # spec; its cut list carries the rails, M5s and U-channel order too.
+        try:
+            frame = rack_mod.build_spec(scene.rack)
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(400, str(exc))
+        model = None
+    else:
+        lib = _lib_for(scene)
+        res = resolve(scene, lib)
+        model = case_mod.build(res, scene.case)
 
     try:
-        files = export.sheet_files(model, fmt, base)
+        files = (export.sheet_files(model, fmt, base) if model is not None
+                 else export.rack_sheet_files(frame, fmt, base, scene.case))
     except ValueError as exc:
         # a layer bigger than the bed is the user's problem to hear about,
         # not a 500

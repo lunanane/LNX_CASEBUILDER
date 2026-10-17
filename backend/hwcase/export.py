@@ -10,6 +10,7 @@ from shapely.affinity import translate
 from shapely.geometry import Polygon
 
 from .case import CaseModel, Layer, kerf_compensated
+from .flat import FlatPart, parts_of
 from .library import PartLibrary
 from .scene import Resolved
 
@@ -442,7 +443,7 @@ from dataclasses import dataclass, field as _field
 
 @dataclass
 class SheetPlacement:
-    layer: Layer
+    part: FlatPart
     x: float               # sheet coordinates of the part's min corner
     y: float
     rotated: bool          # turned 90 degrees counter-clockwise
@@ -451,6 +452,15 @@ class SheetPlacement:
     #: cut mirrored so its surface marks end up on the OUTSIDE face: the
     #: plate is installed engraved side down (only the floor does this)
     mirrored: bool = False
+
+    @property
+    def layer(self) -> FlatPart:
+        """The placed part, under the name the layered call sites know it by.
+
+        A flat part made from a layer carries that layer's `index` and
+        `role`, so `placement.layer.index` reads exactly as it always did.
+        """
+        return self.part
 
 
 @dataclass
@@ -483,14 +493,21 @@ def _placed(geom, rotated: bool, tx: float, ty: float, anchor=None):
     return translate(geom, tx - x0, ty - y0)
 
 
-def pack_sheets(case: CaseModel, apply_kerf: bool = True) -> list[PackedSheet]:
-    """Split the layers across the available cutting plates.
+def pack_sheets(source, apply_kerf: bool = True, stock=None
+                ) -> list[PackedSheet]:
+    """Split flat parts across the available cutting plates.
+
+    `source` is a list of `flat.FlatPart` with `stock` -- anything carrying
+    `plates`, `sheet_margin` and `sheet_spacing`, which is a `CaseSpec` -- or
+    a layered `CaseModel`, whose layers become flat parts and whose spec is
+    the stock. The second form is the one every layered call site has always
+    used, and it packs to exactly the same sheets.
 
     Tallest-part-first shelf packing with 90-degree rotation. Within a shelf
     the orientation that wastes the least shelf height wins; a part that only
     fits one way round is turned automatically.
 
-    `spec.plates` lists the plate sizes actually on the shelf -- one entry is
+    `stock.plates` lists the plate sizes actually on the shelf -- one entry is
     the ordinary "a stack of 350 x 350" case, several describe a mixed stock
     of full sheets and offcuts. When a part fits no open sheet, a new plate is
     started: the SMALLEST usable area that still holds the part. Parts arrive
@@ -498,11 +515,15 @@ def pack_sheets(case: CaseModel, apply_kerf: bool = True) -> list[PackedSheet]:
     and the small offcuts get consumed by exactly the work that fits them
     instead of a full sheet being broken for a 60 mm boss ring.
 
-    A layer that fits no plate in either orientation is a hard error naming
-    the layer and every plate -- silently dropping a floor plate is not an
+    A part that fits no plate in either orientation is a hard error naming
+    the part and every plate -- silently dropping a floor plate is not an
     export.
     """
-    spec = case.spec
+    parts_in = parts_of(source)
+    spec = stock if stock is not None else getattr(source, "spec", None)
+    if spec is None:
+        raise ValueError("flat parts need a stock to be packed onto -- pass "
+                         "stock= (plates, sheet_margin, sheet_spacing)")
     margin = max(0.0, spec.sheet_margin)
     gap = max(0.0, spec.sheet_spacing)
     if not spec.plates:
@@ -516,23 +537,24 @@ def pack_sheets(case: CaseModel, apply_kerf: bool = True) -> list[PackedSheet]:
                (h <= uw + 1e-9 and w <= uh + 1e-9)
 
     parts = []
-    for layer in case.layers:
-        geom = (kerf_compensated(layer.geom, layer.material.kerf)
-                if apply_kerf else layer.geom)
+    for part in parts_in:
+        geom = (kerf_compensated(part.outline, part.material.kerf)
+                if apply_kerf else part.outline)
         if geom.is_empty:
             continue
         x0, y0, x1, y1 = geom.bounds
         w, h = x1 - x0, y1 - y0
         if not any(fits_plate(w, h, uw, uh) for _pw, _ph, uw, uh in plates):
-            stock = ", ".join(f"{pw:.0f} x {ph:.0f}" for pw, ph, _u, _v in plates)
+            stock_txt = ", ".join(f"{pw:.0f} x {ph:.0f}"
+                                  for pw, ph, _u, _v in plates)
             raise ValueError(
-                f"layer {layer.index} ({layer.role}) is {w:.0f} x {h:.0f} mm "
-                f"and fits none of the plates ({stock}, each minus the "
+                f"{part.labels.called} is {w:.0f} x {h:.0f} mm "
+                f"and fits none of the plates ({stock_txt}, each minus the "
                 f"{margin:.0f} mm margin) in either orientation -- it cannot "
                 f"be cut from this stock")
-        engrave = layer.engrave
+        engrave = part.engrave
         mirrored = False
-        if (layer.role == "floor" and engrave is not None
+        if (part.engraved_face_down and engrave is not None
                 and not engrave.is_empty):
             # Surface marks on the floor belong on its OUTSIDE (bottom) face.
             # A laser engraves the face looking up at it, so the whole plate
@@ -543,7 +565,7 @@ def pack_sheets(case: CaseModel, apply_kerf: bool = True) -> list[PackedSheet]:
             geom = _scale(geom, xfact=-1, yfact=1, origin=(0, 0))
             engrave = _scale(engrave, xfact=-1, yfact=1, origin=(0, 0))
             mirrored = True
-        parts.append((layer, geom, engrave, mirrored, w, h))
+        parts.append((part, geom, engrave, mirrored, w, h))
 
     # Tallest first: shelf height is set by the tallest part in the row, so
     # placing tall parts together keeps short rows short.
@@ -558,7 +580,7 @@ def pack_sheets(case: CaseModel, apply_kerf: bool = True) -> list[PackedSheet]:
         if abs(w - h) > 1e-9:
             yield True, h, w
 
-    for layer, geom, engrave, mirrored, w, h in parts:
+    for part, geom, engrave, mirrored, w, h in parts:
         best = None  # (waste, sheet_i, shelf_i | None, rotated, pw, ph)
         for si, sheet in enumerate(sheets):
             shelves, uw, uh = sheet["shelves"], sheet["uw"], sheet["uh"]
@@ -603,7 +625,7 @@ def pack_sheets(case: CaseModel, apply_kerf: bool = True) -> list[PackedSheet]:
 
         tx, ty = margin + sx, margin + sy
         out[si].placements.append(SheetPlacement(
-            layer, tx, ty, rotated,
+            part, tx, ty, rotated,
             _placed(geom, rotated, tx, ty),
             _placed(engrave, rotated, tx, ty, anchor=geom)
             if engrave is not None and not engrave.is_empty
@@ -638,24 +660,23 @@ def sheet_to_svg(sheet: PackedSheet) -> str:
     parts: list[str] = []
     tail: list[str] = []
     for pl in sheet.placements:
-        layer = pl.layer
-        label = (f"{layer.index:02d} {layer.role} {layer.material.name}"
-                 + (" (rotated)" if pl.rotated else ""))
+        part, names = pl.part, pl.part.labels
+        label = names.title + (" (rotated)" if pl.rotated else "")
         holes, outlines = _holes_then_outlines(pl.geom)
         parts.append(
-            f'<g id="layer-{layer.index}" data-role="{layer.role}" '
-            f'data-pass="holes" data-material="{layer.material.name}">\n'
+            f'<g id="{names.group}" data-role="{part.role}" '
+            f'data-pass="holes" data-material="{part.material.name}">\n'
             f'  <title>{label} -- inner cuts first</title>\n  '
             + "\n  ".join(_ring_path(r) for r in holes) + "\n</g>")
         if pl.engrave is not None:
             parts.append(
-                f'<g id="engrave-{layer.index}" data-role="engrave" '
+                f'<g id="{names.engrave}" data-role="engrave" '
                 f'stroke="#0000ff">\n'
                 f'  <title>{label} -- ENGRAVE, do not cut</title>\n'
                 + "\n".join(_path_group(pl.engrave)) + "\n</g>")
         tail.append(
-            f'<g id="layer-{layer.index}-outline" data-role="{layer.role}" '
-            f'data-pass="outline" data-material="{layer.material.name}">\n'
+            f'<g id="{names.group}-outline" data-role="{part.role}" '
+            f'data-pass="outline" data-material="{part.material.name}">\n'
             f'  <title>{label} -- outer edge, cut last</title>\n  '
             + "\n  ".join(_ring_path(r) for r in outlines) + "\n</g>")
 
@@ -682,7 +703,7 @@ def sheet_to_dxf_text(sheet: PackedSheet) -> str:
     # no SHEET frame: cutters that run the whole file were cutting it
     deferred: list[tuple[list, str]] = []
     for pl in sheet.placements:
-        name = f"L{pl.layer.index:02d}_{pl.layer.role}"
+        name = pl.part.labels.cad_layer
         if name not in doc.layers:
             doc.layers.add(name)
         holes, outlines = _holes_then_outlines(pl.geom)
@@ -709,9 +730,13 @@ def sheet_to_dxf_text(sheet: PackedSheet) -> str:
     return buf.getvalue()
 
 
-def sheet_manifest(sheets: list[PackedSheet], case: CaseModel) -> str:
-    """The paper that goes to the machine with the files."""
-    spec = case.spec
+def sheet_manifest(sheets: list[PackedSheet], stock) -> str:
+    """The paper that goes to the machine with the files.
+
+    `stock` is the plate stock (a `CaseSpec`), or a layered `CaseModel`,
+    whose spec it is.
+    """
+    spec = getattr(stock, "spec", stock)
     # what to actually pull from the shelf, per size
     counts: dict[tuple[float, float], int] = {}
     for sheet in sheets:
@@ -733,23 +758,34 @@ def sheet_manifest(sheets: list[PackedSheet], case: CaseModel) -> str:
         lines.append(f"sheet {sheet.index + 1} "
                      f"({sheet.width:.0f} x {sheet.height:.0f} mm):")
         for pl in sheet.placements:
-            layer = pl.layer
             x0, y0, x1, y1 = pl.geom.bounds
             lines.append(
-                f"  layer {layer.index:02d} {layer.role:<6} "
-                f"{layer.material.name:<20} {x1 - x0:6.1f} x {y1 - y0:6.1f} mm"
+                f"  {pl.part.labels.listing} {x1 - x0:6.1f} x {y1 - y0:6.1f} mm"
                 f"{'  (rotated 90)' if pl.rotated else ''}"
                 f"{'  (MIRRORED: install engraved face down)' if pl.mirrored else ''}")
         lines.append("")
     return "\n".join(lines)
 
 
-def sheet_files(case: CaseModel, fmt: str, basename: str = "case"
+def sheet_files(source, fmt: str, basename: str = "case", stock=None
                 ) -> list[tuple[str, str]]:
-    """(filename, content) per sheet, plus the manifest."""
+    """(filename, content) per sheet, plus the manifest.
+
+    `source` and `stock` as for `pack_sheets`: a layered case on its own, or
+    flat parts with the stock they are cut from.
+    """
     if fmt not in ("svg", "dxf"):
         raise ValueError(f"unknown sheet format {fmt!r}")
-    sheets = pack_sheets(case)
+    sheets = pack_sheets(source, stock=stock)
+    files = _sheet_texts(sheets, fmt, basename)
+    files.append((f"{basename}-cutlist.txt",
+                  sheet_manifest(sheets, stock if stock is not None else source)))
+    return files
+
+
+def _sheet_texts(sheets: list[PackedSheet], fmt: str, basename: str
+                 ) -> list[tuple[str, str]]:
+    """(filename, content) for each packed sheet, numbered `NN-of-NN`."""
     n = len(sheets)
     files = []
     for sheet in sheets:
@@ -757,16 +793,95 @@ def sheet_files(case: CaseModel, fmt: str, basename: str = "case"
         content = (sheet_to_svg(sheet) if fmt == "svg"
                    else sheet_to_dxf_text(sheet))
         files.append((name, content))
-    files.append((f"{basename}-cutlist.txt", sheet_manifest(sheets, case)))
     return files
 
 
-def sheets_zip(case: CaseModel, fmt: str, basename: str = "case") -> bytes:
+# ---------------------------------------------------------------------------
+# a frame's cut: its plates on sheets, and the rest of it as a shopping list
+# ---------------------------------------------------------------------------
+#
+# A frame is mostly bought, not cut. The rails are extrusion cut to length and
+# the body is a U-channel folded to order, so the laser only ever sees the
+# side panels -- and the cut list is where everything else goes, because the
+# person at the bench needs the rail lengths, the M5 count and the order form
+# for the channel as much as the panels.
+
+
+def rack_cutlist(model, sheets: list[PackedSheet], stock) -> str:
+    """The frame's cut list: the sheets, then the plates measured from their
+    datum edge, then the rails, the M5s and the U-channel order."""
+    from .flat import from_rack
+
+    plates = from_rack(model)
+    rows = " + ".join(r.fmt.name for r in model.rows)
+    lines = [
+        sheet_manifest(sheets, stock),
+        f"frame -- {model.hp:g} HP, {len(model.rows)} row(s) ({rows}), "
+        f"width {model.width:.2f} mm, depth {model.depth:.2f} mm, "
+        f"panel height {model.panel_height:.2f} mm",
+        "",
+        f"plates (cut) -- {len(plates)}:",
+    ]
+    for p in plates:
+        x0, y0, x1, y1 = p.outline.bounds
+        lines.append(f"  {p.name:<12} {p.material.name:<14} "
+                     f"{x1 - x0:6.1f} x {y1 - y0:6.1f} mm, "
+                     f"{len(p.holes)} x M5 clearance hole")
+        lines.append(f"    holes from the {p.datum.name} "
+                     f"(along it, then up from it):")
+        for note, along, into in p.datum_positions():
+            lines.append(f"      {along:7.2f} {into:7.2f} mm  {note}")
+    rails = model.rails
+    lines += [
+        "",
+        f"rails (aluminium, cut to length) -- {len(rails)} x "
+        f"{model.width:.2f} mm, {model.width * len(rails):.2f} mm in all:",
+    ]
+    for r in rails:
+        lines.append(f"  {r.name:<12} {r.length:8.2f} mm")
+    order = model.order_spec()
+    lines += [
+        "",
+        "fixings:",
+        f"  {2 * len(rails)} x M5 screw -- one through a side panel into "
+        f"each end of each of the {len(rails)} rails",
+        "",
+        "U-channel (order):",
+        f"  {order['part']}: length {order['length_mm']} mm, "
+        f"A / B / C {order['width_a_mm']} / {order['width_b_mm']} / "
+        f"{order['width_c_mm']} mm, {order['thickness_mm']} mm thick, "
+        f"developed {order['developed_mm']} mm",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def rack_sheet_files(model, fmt: str, basename: str = "frame", stock=None
+                     ) -> list[tuple[str, str]]:
+    """(filename, content) per sheet of the frame's plates, plus the cut list.
+
+    `stock` is the plate stock -- a frame scene's `case` spec carries the
+    same `plates`, `sheet_margin` and `sheet_spacing` a layered one does.
+    """
+    from .flat import from_rack
+    from .schema import CaseSpec
+
+    if fmt not in ("svg", "dxf"):
+        raise ValueError(f"unknown sheet format {fmt!r}")
+    stock = stock if stock is not None else CaseSpec()
+    sheets = pack_sheets(from_rack(model), stock=stock)
+    files = _sheet_texts(sheets, fmt, basename)
+    files.append((f"{basename}-cutlist.txt",
+                  rack_cutlist(model, sheets, stock)))
+    return files
+
+
+def sheets_zip(source, fmt: str, basename: str = "case", stock=None) -> bytes:
     import io
     import zipfile
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for name, content in sheet_files(case, fmt, basename):
+        for name, content in sheet_files(source, fmt, basename, stock):
             z.writestr(name, content)
     return buf.getvalue()
