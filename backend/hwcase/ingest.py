@@ -37,7 +37,8 @@ from pathlib import Path
 from typing import Optional
 
 from .catalog import USER_AGENT, CadFile, CatalogEntry
-from .measure import Body, HoleGroup, bodies, step_holes
+from .measure import (Body, HoleGroup, board_footprint, bodies, hole_groups,
+                      step_holes)
 
 __all__ = ["CadFile", "CadTooLarge", "Draft", "cad_files", "download_cad",
            "draft_part", "max_cad_bytes", "GENERATED"]
@@ -288,20 +289,35 @@ def draft_part(entry: CatalogEntry, cad: Optional[Path] = None,
         local = local_cad(entry.id)
         meshes = [p for p in local if p.suffix.lower() == ".stl"]
         steps = [p for p in local if p.suffix.lower() in (".step", ".stp")]
-        if not meshes:
-            raise ValueError(f"{entry.id}: no STL on disk to measure")
-        cad, step = meshes[0], (step or (steps[0] if steps else None))
+        if steps:
+            # A STEP says more than an STL: its solids are exact, and the
+            # holes can be read from the same geometry as the bodies instead
+            # of from a text parse in a frame nobody checked.
+            cad, step = steps[0], None
+        elif meshes:
+            cad = meshes[0]
+        else:
+            raise ValueError(f"{entry.id}: no STL or STEP on disk to measure")
 
+    from_step = Path(cad).suffix.lower() in (".step", ".stp")
     found = bodies(cad)
     if not found:
         raise ValueError(f"{cad.name}: no bodies in the model")
 
     warnings: list[str] = []
+    if len(found) == 1:
+        # Some vendor models are one solid -- a battery, a speaker, a board
+        # drawn as a block. It imports, and it is nothing like a board: no
+        # components, no holes, no way to tell what is on it.
+        warnings.append("the model is a single solid, a simplified block -- "
+                        "there is no board, no components and no holes to "
+                        "read, only an envelope")
     pcb_i = _pick_pcb(found)
     pcb = found[pcb_i]
     flip, why = _should_flip(found, pcb)
     if why:
         warnings.append(why)
+    warnings += _plausibility(pcb)
 
     width = pcb.size[0]
     placed = []
@@ -346,19 +362,42 @@ def draft_part(entry: CatalogEntry, cad: Optional[Path] = None,
                             f"tallest {max(abs(z0), abs(z1)):.2f} mm"},
         })
 
+    # The board's true shape, from its own mesh. A rectangle unless the board
+    # visibly is not one -- a ring or a notched breakout fits a rectangle
+    # badly, and the case pockets what the outline says.
+    fp = board_footprint(pcb)
+    outline, outline_poly = _outline(pcb, fp, width, flip, warnings)
+
     holes = []
-    if step and Path(step).exists():
+    groups: list[HoleGroup] = []
+    how = ""
+    if from_step:
+        how = "from the STEP geometry"
+        if fp is None:
+            warnings.append("could not read the board's footprint, so no "
+                            "mounting holes")
+        else:
+            groups = hole_groups(fp)
+            if not groups:
+                warnings.append("no mounting-hole pattern found in the STEP")
+    elif step and Path(step).exists():
+        how = "from the vendor STEP"
         try:
             groups = step_holes(Path(step))
         except Exception as exc:              # pragma: no cover - vendor file
             warnings.append(f"could not read holes from {Path(step).name}: {exc}")
-            groups = []
-        if groups:
-            holes = _holes_from(groups[0], pcb, width, flip)
-        else:
+        if not groups:
             warnings.append("no mounting-hole pattern found in the STEP")
     else:
         warnings.append("no STEP file, so no mounting holes -- STL has none")
+
+    if groups:
+        found_holes = _holes_from(groups[0], pcb, width, flip, how)
+        problem = _hole_problem(found_holes, outline_poly, placed, pcb.height)
+        if problem:
+            warnings.append(f"mounting holes dropped: {problem}")
+        else:
+            holes = found_holes
 
     part = {
         "id": slug(entry.name),
@@ -368,11 +407,7 @@ def draft_part(entry: CatalogEntry, cad: Optional[Path] = None,
         "url": entry.url,
         "category": _category(entry),
         "cad": f"adafruit/{entry.id}/{cad.name}",
-        "outline": {
-            "type": "rect",
-            "size": [round(pcb.size[0], 2), round(pcb.size[1], 2)],
-            "origin": "min",
-        },
+        "outline": outline,
         "pcb_thickness": round(pcb.height, 2),
         "volumes": volumes,
         "connectors": [],
@@ -388,7 +423,7 @@ def draft_part(entry: CatalogEntry, cad: Optional[Path] = None,
 
 
 def _holes_from(group: HoleGroup, pcb: Body, width: float,
-                flip: bool) -> list[dict]:
+                flip: bool, how: str = "from the vendor STEP") -> list[dict]:
     """Mounting holes in the part frame."""
     out = []
     for i, (x, y) in enumerate(group.centres, 1):
@@ -400,9 +435,100 @@ def _holes_from(group: HoleGroup, pcb: Body, width: float,
             "at": [round(px, 2), round(py, 2)],
             "diameter": round(group.diameter, 2),
             "screw": group.screw or "?",
-            "src": {"confidence": "datasheet", "note": "from the vendor STEP"},
+            "src": {"confidence": "datasheet", "note": how},
         })
     return out
+
+
+#: A board this far from a rectangle is imported as the polygon it is. Below
+#: it, corner radii and a chamfer are noise a rectangle is right to ignore.
+RECT_FILL = 0.95
+
+#: Boards and sheets outside these are almost certainly a units mistake or the
+#: wrong body picked as the board, and an import should say so rather than
+#: carry the error into every height in a case.
+BOARD_THICKNESS = (0.4, 3.2)
+BOARD_SPAN = (5.0, 500.0)
+
+#: How far outside the outline a hole's centre may fall before the hole set is
+#: judged to be in a different frame from the board.
+HOLE_SLACK = 0.25
+
+
+def _plausibility(pcb: Body) -> list[str]:
+    """Warnings for a board that cannot be what it was read as."""
+    out = []
+    lo, hi = BOARD_THICKNESS
+    if not lo <= pcb.height <= hi:
+        out.append(f"the board body is {pcb.height:.2f} mm thick, outside "
+                   f"{lo}-{hi} mm -- check the file's units, or whether the "
+                   f"right body was taken as the board")
+    span = max(pcb.size[0], pcb.size[1])
+    if not BOARD_SPAN[0] <= span <= BOARD_SPAN[1]:
+        out.append(f"the board is {span:.1f} mm across, outside "
+                   f"{BOARD_SPAN[0]:.0f}-{BOARD_SPAN[1]:.0f} mm -- check the "
+                   f"file's units")
+    return out
+
+
+def _outline(pcb: Body, fp, width: float, flip: bool,
+             warnings: list[str]):
+    """The part's outline, and the same shape as a polygon for later checks.
+
+    A rectangle when the board is one (or looks like one within corner radii);
+    otherwise the footprint's own polygon in the part frame, simplified to a
+    twentieth of a millimetre so a rounded corner is a handful of points.
+    """
+    from shapely.geometry import Polygon, box
+
+    w, d = pcb.size[0], pcb.size[1]
+    rect = {"type": "rect", "size": [round(w, 2), round(d, 2)], "origin": "min"}
+    if fp is None or fp.fill >= RECT_FILL:
+        return rect, box(0.0, 0.0, w, d)
+
+    shape = fp.outline.simplify(0.05, preserve_topology=True)
+    pts = []
+    for x, y in list(shape.exterior.coords)[:-1]:
+        px, py = x - pcb.x0, y - pcb.y0
+        pts.append((round(width - px if flip else px, 2), round(py, 2)))
+    warnings.append(f"the board fills {fp.fill:.0%} of its bounding box, so "
+                    f"it is imported as a {len(pts)}-point polygon, not a "
+                    f"rectangle")
+    return {"type": "poly", "points": [list(p) for p in pts]}, Polygon(pts)
+
+
+def _hole_problem(holes: list[dict], outline, placed: list[Body],
+                  thickness: float) -> str:
+    """Why this hole set cannot be trusted, or '' when it can.
+
+    Two ways a set goes wrong without any error being raised. Holes read in
+    one frame and a board measured in another land off the board entirely;
+    and a hole inside a part that straddles the board is not a hole anyone
+    could put a screw through. Either way the whole set is dropped: a
+    half-right pattern is worse than none, because the case would build posts
+    on it.
+    """
+    from shapely.geometry import Point
+
+    reach = outline.buffer(HOLE_SLACK)
+    outside = [h["name"] for h in holes if not reach.contains(Point(*h["at"]))]
+    if outside:
+        return (f"{len(outside)} of {len(holes)} fall outside the board "
+                f"outline ({', '.join(outside[:4])}"
+                f"{'...' if len(outside) > 4 else ''}) -- the STEP and the "
+                f"mesh are probably not in the same frame")
+    for h in holes:
+        p = Point(*h["at"])
+        for b in placed:
+            if b.footprint < COMPONENT_FOOTPRINT:
+                continue
+            # a body that reaches through the board's own thickness
+            if b.z0 < thickness and b.z1 > 0.0 and (
+                    b.x0 <= p.x <= b.x1 and b.y0 <= p.y <= b.y1):
+                return (f"{h['name']} at ({p.x:.1f}, {p.y:.1f}) is inside a "
+                        f"{b.size[0]:.1f} x {b.size[1]:.1f} mm body that "
+                        f"passes through the board")
+    return ""
 
 
 def _category(entry: CatalogEntry) -> str:

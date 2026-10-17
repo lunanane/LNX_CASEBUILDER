@@ -10,6 +10,11 @@ trimesh>=4.0
 # catalogue import is dead on arrival. networkx is the light way to have one:
 # pure Python, where the alternative (scipy) is forty megabytes.
 networkx>=3.0
+# Reads STEP: tessellates a vendor model's solids (OpenCASCADE) so a STEP-only
+# product imports with real geometry. About 16-27 MB, wheels for CPython 3.10
+# on Windows and 3.12 on Linux. Required, not optional: 158 of the 478 vendor
+# CAD folders have no STL at all.
+cascadio>=0.1.1
 fastapi>=0.110
 uvicorn[standard]>=0.27
 pytest>=8.0
