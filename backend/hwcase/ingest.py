@@ -29,25 +29,34 @@ point to check, not an answer, and the generated YAML is written to say so.
 
 from __future__ import annotations
 
-import json
+import os
 import re
-import urllib.error
-import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from .catalog import CAD_REPO, USER_AGENT, CatalogEntry
+from .catalog import USER_AGENT, CadFile, CatalogEntry
 from .measure import Body, HoleGroup, bodies, step_holes
 
-__all__ = ["CadFile", "Draft", "cad_files", "download_cad", "draft_part",
-           "GENERATED"]
+__all__ = ["CadFile", "CadTooLarge", "Draft", "cad_files", "download_cad",
+           "draft_part", "max_cad_bytes", "GENERATED"]
 
-CONTENTS = f"https://api.github.com/repos/{CAD_REPO}/contents"
-
-#: Vendor CAD lands here; one folder per product, mirroring the repo.
+#: Vendor CAD lands here: one folder per product, named by its ID. A product's
+#: second CAD folder (six IDs have one) lands under its full repo folder name
+#: instead, so two revisions of a board never share a directory and get their
+#: files mixed.
 CAD_ROOT = Path(__file__).resolve().parent.parent.parent / "vendor" / "cad" / "adafruit"
+
+#: The download cap, in MB, unless HWCASE_MAX_CAD_MB says otherwise. The
+#: largest model in the repo is 55 MB and the average 1.7 MB, so 64 lets every
+#: real board through and stops one import from pulling a gigabyte into a
+#: hosted worker because somebody pushed a scan.
+MAX_CAD_MB = 64.0
+
+
+class CadTooLarge(ValueError):
+    """A vendor CAD file is over the download cap."""
 
 #: Imported parts go in their own file, so a human-written library is never
 #: rewritten by a machine and a bad import is one file to delete.
@@ -61,58 +70,117 @@ KEEP = (".stl", ".step", ".stp")
 COMPONENT_FOOTPRINT = 60.0
 
 
-def _get(url: str, timeout: float = 60.0) -> bytes:
+def _get(url: str, timeout: float = 60.0,
+         limit: Optional[int] = None) -> bytes:
+    """GET a URL; with `limit`, read at most one byte past it.
+
+    The one extra byte is how an over-size body is told apart from one exactly
+    at the cap, without ever holding more than the cap in memory.
+    """
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+        return r.read() if limit is None else r.read(limit + 1)
+
+
+def max_cad_bytes() -> int:
+    """The download cap in bytes, read from HWCASE_MAX_CAD_MB on every call.
+
+    Read per call rather than at import, so a test or an operator changing the
+    variable is obeyed without a restart. A value that is not a positive number
+    is refused by name -- silently falling back to the default would leave
+    somebody believing their cap was in force.
+    """
+    raw = os.environ.get("HWCASE_MAX_CAD_MB", "").strip()
+    if not raw:
+        return int(MAX_CAD_MB * 1024 * 1024)
+    try:
+        mb = float(raw)
+    except ValueError:
+        mb = 0.0
+    if not mb > 0:
+        raise ValueError(f"HWCASE_MAX_CAD_MB={raw!r} is not a positive number "
+                         f"of megabytes")
+    return int(mb * 1024 * 1024)
+
+
+def _too_large(f: CadFile, cap: int, size: Optional[int] = None) -> CadTooLarge:
+    """The error for an over-size file: which file, and which cap.
+
+    `size` is the indexed size when known; when the body itself ran past the
+    cap, only "more than" is known, because the rest was never read.
+    """
+    how = (f"is {size / 2**20:.1f} MB" if size is not None
+           else "came down larger than its indexed size, and is")
+    return CadTooLarge(
+        f"{f.folder}/{f.name} {how} over the {cap / 2**20:.3g} MB download cap "
+        f"(HWCASE_MAX_CAD_MB)")
 
 
 # ---------------------------------------------------------------------------
 # fetching
 # ---------------------------------------------------------------------------
 
-@dataclass
-class CadFile:
-    name: str
-    url: str
-    size: int = 0
+def cad_files(entry: CatalogEntry, folder: Optional[str] = None) -> list[CadFile]:
+    """The model files in one of a product's CAD folders, from the index.
 
-    @property
-    def suffix(self) -> str:
-        return Path(self.name).suffix.lower()
+    No network: the catalogue's git-tree index already lists every file with
+    its size, so an import no longer spends an API request -- of sixty an hour
+    -- asking GitHub what is in a folder.
+    """
+    folder = folder or entry.cad
+    if not folder:
+        raise ValueError(f"{entry.id}: no vendor CAD published")
+    if folder not in entry.cad_files:
+        raise ValueError(f"{entry.id}: CAD folder {folder!r} is not in the "
+                         f"catalogue's index -- refresh the catalogue")
+    return [f for f in entry.cad_files[folder] if f.suffix in KEEP]
 
 
-def cad_files(folder: str) -> list[CadFile]:
-    """The CAD files in one product's folder in the vendor repo."""
-    url = f"{CONTENTS}/{urllib.parse.quote(folder)}"
-    out = []
-    for item in json.loads(_get(url)):
-        if item.get("type") != "file":
-            continue
-        name = item.get("name", "")
-        if Path(name).suffix.lower() in KEEP and item.get("download_url"):
-            out.append(CadFile(name, item["download_url"], item.get("size", 0)))
-    return out
+def cad_dir(entry: CatalogEntry, folder: Optional[str] = None,
+            root: Path = CAD_ROOT) -> Path:
+    """Where one of a product's CAD folders lives on disk.
+
+    The folder an import uses goes under the bare product ID, which is where
+    `local_cad` and the files already in this repo expect it. Any other folder
+    for the same ID goes under its own repo name, so it never mixes with it.
+    """
+    folder = folder or entry.cad
+    if folder and folder != entry.cad:
+        return Path(root) / folder
+    return Path(root) / entry.id
 
 
 def download_cad(entry: CatalogEntry, dest_root: Path = CAD_ROOT,
-                 overwrite: bool = False) -> list[Path]:
-    """Mirror one product's CAD folder locally, returning what is on disk.
+                 overwrite: bool = False,
+                 folder: Optional[str] = None) -> list[Path]:
+    """Mirror one of a product's CAD folders locally, returning what is on disk.
+
+    The file list and sizes come from the catalogue's index, and the files
+    from the raw host at the commit that index was built from. Every size is
+    checked against the cap before anything is fetched, so an over-size folder
+    fails whole instead of leaving half of itself on disk; the bytes are
+    checked again as they arrive, because an index can be wrong.
 
     Files already present are left alone: the vendor repo does not churn, and
     re-downloading eight megabytes to re-measure the same board is rude to
     somebody else's bandwidth.
     """
-    if not entry.cad:
-        raise ValueError(f"{entry.id}: no vendor CAD published")
+    files = cad_files(entry, folder)
+    cap = max_cad_bytes()
+    for f in files:
+        if f.size > cap:
+            raise _too_large(f, cap, f.size)
 
-    dest = Path(dest_root) / entry.id
+    dest = cad_dir(entry, folder, dest_root)
     dest.mkdir(parents=True, exist_ok=True)
     got = []
-    for f in cad_files(entry.cad):
-        target = dest / f.name
+    for f in files:
+        target = dest / Path(f.name).name
         if overwrite or not target.exists():
-            target.write_bytes(_get(f.url, timeout=180))
+            data = _get(f.url, timeout=180, limit=cap)
+            if len(data) > cap:
+                raise _too_large(f, cap)
+            target.write_bytes(data)
         got.append(target)
     return got
 
