@@ -247,13 +247,30 @@ def scene_to_json(res: Resolved, lib: PartLibrary, issues: Iterable = ()) -> dic
     }
 
 
+#: Material fields younger than the browser's case JSON. Each is written only
+#: when the scene sets it to something other than its default, so every case
+#: built before they existed exports byte-for-byte as it did -- and the
+#: browser loses nothing, since an absent `finish` already means "read it
+#: off the name" and the joint clearance means nothing to a layered case.
+_MATERIAL_EXTRAS = ("joint_clearance", "finish")
+
+
+def _material_json(m) -> dict:
+    d = m.model_dump(mode="json")
+    defaults = type(m).model_fields
+    for key in _MATERIAL_EXTRAS:
+        if getattr(m, key) == defaults[key].default:
+            d.pop(key)
+    return d
+
+
 def case_to_json(case: CaseModel) -> dict:
     return {
         "z0": case.z0, "z1": case.z1,
         "bom": case.bill_of_materials(),
         "layers": [{
             "index": l.index, "role": l.role, "z0": l.z0, "z1": l.z1,
-            "material": l.material.model_dump(mode="json"),
+            "material": _material_json(l.material),
             "notes": l.notes,
             "rings": [[list(c) for c in ring]
                       for poly in _polys(l.geom) for ring in _rings(poly)],

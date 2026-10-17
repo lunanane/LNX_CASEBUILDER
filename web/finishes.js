@@ -50,9 +50,17 @@ export function parseColor(value) {
   return parseInt(s, 16);
 }
 
-/** PBR parameters for one case material. */
+/** PBR parameters for one case material.
+ *
+ *  A `finish` set on the material names its preset outright, for the stock
+ *  whose name says nothing about how it looks ("birch-4mm"); without one the
+ *  name decides, as it always has. An unknown finish is the engine's to
+ *  reject, so here it simply falls back to the name. */
 export function finishFor(material) {
-  const f = presetFor(material?.name);
+  const named = material?.finish;
+  const f = named && Object.hasOwn(FINISHES, named)
+    ? { ...FINISHES[named], preset: named }
+    : presetFor(material?.name);
   const explicit = parseColor(material?.color);
   return { ...f, color: explicit == null ? f.color : explicit };
 }

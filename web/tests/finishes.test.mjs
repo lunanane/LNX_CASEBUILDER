@@ -67,3 +67,17 @@ test('a garbage colour does not poison the material', () => {
 test('precedence covers every preset, so none is unreachable', () => {
   assert.deepEqual([...PRECEDENCE].sort(), Object.keys(FINISHES).sort());
 });
+
+test('a declared finish beats the name', () => {
+  // the name says nothing useful; the finish says aluminium
+  const f = finishFor({ name: 'birch-4mm', finish: 'aluminium' });
+  assert.equal(f.preset, 'aluminium');
+  assert.equal(f.metalness, FINISHES.aluminium.metalness);
+  // and an explicit finish wins even over a name that means something else
+  assert.equal(finishFor({ name: 'plywood-3mm', finish: 'acrylic' }).preset, 'acrylic');
+});
+
+test('an absent or unknown finish falls back to the name', () => {
+  assert.equal(finishFor({ name: 'plywood-3mm', finish: null }).preset, 'plywood');
+  assert.equal(finishFor({ name: 'plywood-3mm', finish: 'chrome' }).preset, 'plywood');
+});

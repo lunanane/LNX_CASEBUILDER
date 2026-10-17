@@ -456,12 +456,49 @@ class Placement(Strict):
     panel_offset: float = 0.0
 
 
+class Finish(str, Enum):
+    """How a material looks when the preview is rendered, not drawn.
+
+    The same keys as `FINISHES` in web/finishes.js -- a test holds the two
+    lists together. Left unset, the browser reads the finish off the
+    material's name (`plywood-3mm` is plywood), which is what every scene
+    written before this field existed relies on.
+    """
+
+    plywood = "plywood"
+    mdf = "mdf"
+    acrylic = "acrylic"
+    smoked = "smoked"
+    aluminium = "aluminium"
+    brass = "brass"
+    steel = "steel"
+    cardboard = "cardboard"
+    felt = "felt"
+
+
 class Material(Strict):
+    """One sheet stock, as it actually is on the bench.
+
+    Every number a joint is computed from lives here and is the user's to
+    set (D-2): nominal 3 mm plywood measures anywhere from 2.7 to 3.2, the
+    kerf depends on the laser and the focus, and how tight a tab sits in its
+    slot is a matter of taste and glue. None of them is a constant anywhere
+    else in the code.
+    """
+
     name: str = "plywood-3mm"
-    thickness: float = 3.0
-    kerf: float = 0.15
+    #: measured, not nominal -- finger and slot depths are cut to this
+    thickness: float = Field(3.0, gt=0)
+    #: width of the cut the beam takes; outlines are offset by half of it
+    kerf: float = Field(0.15, ge=0)
     sheet: Vec2 = (600.0, 300.0)
     color: str = "#c8a165"
+    #: the gap left between a tab and its slot once the kerf has been
+    #: compensated -- 0 is a press fit, 0.1 slides together, more rattles.
+    #: Only joints read it, so a layered case is unaffected by it.
+    joint_clearance: float = Field(0.1, ge=0)
+    #: the render preset; None means "read it off the name", as before
+    finish: Optional[Finish] = None
 
 
 class CaseScrews(str, Enum):
