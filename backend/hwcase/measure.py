@@ -27,14 +27,15 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import numpy as np
 
 __all__ = [
-    "Band", "Body", "Step", "Measurement", "HoleGroup",
+    "Band", "Body", "Step", "Measurement", "HoleGroup", "Footprint",
     "bodies", "load_points", "z_bands", "feature_stack", "measure",
-    "step_holes", "name_bodies", "to_yaml_block",
+    "step_holes", "board_footprint", "hole_groups", "name_bodies",
+    "to_yaml_block",
 ]
 
 
@@ -293,6 +294,16 @@ def step_holes(path: Path, *, min_count: int = 2, min_spread: float = 10.0,
         x, y, _z = points[origin]
         by_radius[round(float(m.group(3)), 4)].add((round(x, 3), round(y, 3)))
 
+    return _groups_from(by_radius, min_count, min_spread, screws_only)
+
+
+def _groups_from(by_radius: dict[float, set], min_count: int,
+                 min_spread: float, screws_only: bool) -> list[HoleGroup]:
+    """Mounting patterns out of circles grouped by radius.
+
+    Shared by the STEP-text parse and the geometric finder below, so a hole is
+    a mounting hole by the same three rules whichever way it was found.
+    """
     groups = []
     for radius, centres in sorted(by_radius.items()):
         if len(centres) < min_count:
@@ -306,6 +317,90 @@ def step_holes(path: Path, *, min_count: int = 2, min_spread: float = 10.0,
             continue
         groups.append(g)
     return sorted(groups, key=lambda g: -g.spread)
+
+
+# ---------------------------------------------------------------------------
+# the board's own footprint -- outline and holes from the same mesh
+# ---------------------------------------------------------------------------
+#
+# The STEP text parse above reads a hole's position in the file's own frame and
+# knows nothing about assembly transforms. Bodies measured from a tessellated
+# STEP are in the *assembled* frame, so mixing the two can put every hole in
+# the wrong place without a single error. Reading the holes out of the board's
+# own mesh -- the rings in its projected footprint -- uses one frame for both.
+
+@dataclass
+class Footprint:
+    """A board's outline and its round holes, in the mesh's own frame."""
+
+    outline: Any                                  # shapely Polygon, no holes
+    #: (x, y, radius) of every round hole, vias and pin holes included
+    holes: list[tuple[float, float, float]] = field(default_factory=list)
+
+    @property
+    def fill(self) -> float:
+        """How much of its bounding box the outline covers: 1.0 is a plain
+        rectangle, a round board is about 0.79."""
+        x0, y0, x1, y1 = self.outline.bounds
+        box = (x1 - x0) * (y1 - y0)
+        return self.outline.area / box if box > 0 else 1.0
+
+
+#: A ring is a round hole when it fills this much of its circumcircle. A
+#: tessellated circle is about 0.99; a slot is nowhere near, and neither is a
+#: keyhole, which a mounting screw cannot use.
+ROUND = 0.85
+
+
+def board_footprint(body: "Body") -> Optional[Footprint]:
+    """The outline and round holes of a board body, from its mesh.
+
+    Uses the upward faces at the board's top. A flat board has exactly that
+    surface, and taking only the topmost keeps copper layers and solder-mask
+    steps from adding noise. None when the body carries no mesh.
+    """
+    mesh = getattr(body, "mesh", None)
+    if mesh is None or not len(mesh.faces):
+        return None
+    import shapely
+
+    tri3 = mesh.vertices[mesh.faces]
+    up = mesh.face_normals[:, 2] > 0.99
+    top = tri3[:, :, 2].min(axis=1) > body.z1 - 0.05
+    tri = tri3[up & top][:, :, :2]
+    if not len(tri):
+        tri = tri3[up][:, :, :2]
+    if not len(tri):
+        return None
+
+    polys = shapely.polygons(np.concatenate([tri, tri[:, :1]], axis=1))
+    polys = polys[shapely.area(polys) > 1e-9]
+    if not len(polys):
+        return None
+    union = shapely.union_all(polys)
+    if union.geom_type != "Polygon":
+        union = max(union.geoms, key=lambda g: g.area)
+
+    holes = []
+    for ring in union.interiors:
+        hole = shapely.Polygon(ring)
+        cx, cy = hole.centroid.x, hole.centroid.y
+        coords = np.asarray(ring.coords)
+        # the vertices of a tessellated circle lie on it, so the farthest one
+        # is the true radius; the area-equivalent radius would read low
+        radius = float(np.hypot(coords[:, 0] - cx, coords[:, 1] - cy).max())
+        if radius > 0 and hole.area / (np.pi * radius * radius) >= ROUND:
+            holes.append((float(cx), float(cy), radius))
+    return Footprint(outline=shapely.Polygon(union.exterior), holes=holes)
+
+
+def hole_groups(fp: Footprint, *, min_count: int = 2, min_spread: float = 10.0,
+                screws_only: bool = True) -> list[HoleGroup]:
+    """Mounting-hole patterns from a footprint's round holes."""
+    by_radius: dict[float, set] = defaultdict(set)
+    for x, y, r in fp.holes:
+        by_radius[round(r, 2)].add((round(x, 3), round(y, 3)))
+    return _groups_from(by_radius, min_count, min_spread, screws_only)
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +432,10 @@ class Body:
     z1: float
     vertices: int = 0
     name: str = ""
+    #: the shell's own triangles, in the file's frame and millimetres. Kept so
+    #: the board can give up its true outline and holes; not carried through
+    #: `shifted` / `flipped`, which are about placing the *box*.
+    mesh: Any = field(default=None, repr=False, compare=False)
 
     @property
     def size(self) -> tuple[float, float, float]:
@@ -369,19 +468,76 @@ class Body:
                     pcb_top - self.z1, pcb_top - self.z0, self.vertices, self.name)
 
 
-def bodies(path: Path, min_footprint: float = 0.0) -> list[Body]:
-    """Every connected shell in a mesh, largest footprint first."""
+#: Millimetres per file unit, for the unit names trimesh reports. STEP is
+#: metric in practice but the file says which, and "the file said metres" is
+#: a better reason to scale by 1000 than "it looked small".
+_UNIT_MM = {
+    "millimeters": 1.0, "millimeter": 1.0, "mm": 1.0,
+    "centimeters": 10.0, "centimeter": 10.0, "cm": 10.0,
+    "meters": 1000.0, "meter": 1000.0, "m": 1000.0,
+    "inches": 25.4, "inch": 25.4, "in": 25.4,
+}
+
+
+def _step_meshes(path: Path) -> list:
+    """The solids of a STEP file as triangle meshes, in millimetres.
+
+    One mesh per solid, with the assembly's placement transforms already
+    applied -- which is exactly what the text parse in `step_holes` cannot do.
+    cascadio (OpenCASCADE) does the tessellation; trimesh only drives it.
+    """
+    try:
+        import cascadio  # noqa: F401  -- trimesh's STEP loader needs it
+    except ImportError as exc:        # pragma: no cover - a required dependency
+        raise RuntimeError(
+            f"{path.name}: reading STEP needs the `cascadio` package "
+            f"(it is in backend/requirements.txt: pip install cascadio)") from exc
     import trimesh
 
-    mesh = trimesh.load_mesh(str(path))
-    if isinstance(mesh, trimesh.Scene):
-        mesh = trimesh.util.concatenate(list(mesh.geometry.values()))
+    scene = trimesh.load(str(path), force="scene")
+    meshes = [m for m in scene.dump(concatenate=False) if len(m.faces)]
+    if not meshes:
+        return []
+
+    units = (getattr(scene, "units", None) or "").lower()
+    if units in _UNIT_MM:
+        scale = _UNIT_MM[units]
+    elif units:
+        raise ValueError(f"{path.name}: the file's unit {units!r} is not one "
+                         f"this importer knows ({', '.join(sorted(_UNIT_MM))})")
+    else:
+        # No unit in the file. A board is never under a millimetre across, so
+        # an extent below 1.0 can only be metres.
+        extent = max(float((m.bounds[1] - m.bounds[0]).max()) for m in meshes)
+        scale = 1000.0 if extent < 1.0 else 1.0
+    if scale != 1.0:
+        for m in meshes:
+            m.apply_scale(scale)
+    return meshes
+
+
+def bodies(path: Path, min_footprint: float = 0.0) -> list[Body]:
+    """Every distinct object in a model, largest footprint first.
+
+    An STL is split into connected shells. A STEP already knows its solids, so
+    each one is a body as it stands.
+    """
+    path = Path(path)
+    if path.suffix.lower() in (".step", ".stp"):
+        shells = _step_meshes(path)
+    else:
+        import trimesh
+
+        mesh = trimesh.load_mesh(str(path))
+        if isinstance(mesh, trimesh.Scene):
+            mesh = trimesh.util.concatenate(list(mesh.geometry.values()))
+        shells = mesh.split(only_watertight=False)
 
     out = []
-    for shell in mesh.split(only_watertight=False):
+    for shell in shells:
         (bx0, by0, bz0), (bx1, by1, bz1) = shell.bounds
         b = Body(float(bx0), float(bx1), float(by0), float(by1),
-                 float(bz0), float(bz1), len(shell.vertices))
+                 float(bz0), float(bz1), len(shell.vertices), mesh=shell)
         if b.footprint >= min_footprint:
             out.append(b)
     return sorted(out, key=lambda b: -b.footprint)

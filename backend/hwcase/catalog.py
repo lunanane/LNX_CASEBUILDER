@@ -82,11 +82,11 @@ MODEL_FORMATS = {
     ".f3z": "f3z", ".3mf": "3mf", ".fbx": "fbx", ".smt": "smt", ".dxf": "dxf",
 }
 
-#: The formats the importer can measure. STL only: STEP needs a CAD kernel to
-#: turn into triangles, and until it has one a STEP-only product must not be
-#: offered as importable -- 158 of 478 folders are STEP-only, and promising them
-#: an import that fails after the download is the bug this replaced.
-IMPORTABLE_FORMATS = ("stl",)
+#: The formats the importer can measure. STEP counts since `cascadio` gives it
+#: a CAD kernel to tessellate with: 158 of 478 folders are STEP-only, and
+#: before that they were offered as importable and failed after the download.
+#: A format added here must be one `hwcase.measure.bodies` can read.
+IMPORTABLE_FORMATS = ("stl", "step")
 
 #: Categories that could plausibly end up in an enclosure. Everything else --
 #: wire, solder, tools, books, kits -- is noise in this context, so it is
@@ -533,13 +533,21 @@ class Catalog:
                           f"{self.commit}: some folders are missing")
 
     def folders_for(self, product_id: str) -> list[str]:
-        """Every CAD folder for one product, the one an import uses first."""
+        """Every CAD folder for one product, the one an import uses first.
+
+        The folder with the most formats the importer can read goes first, so
+        an STL beside a STEP beats either alone and a folder of only Fusion
+        files goes last; ties fall back to the name.
+        """
         pid = str(product_id).strip()
         hits = [f for f in self.cad_index if _product_id(f) == pid]
-        return sorted(hits, key=lambda f: (
-            not any(fmt in IMPORTABLE_FORMATS
-                    for fmt in _formats([c.name for c in self.cad_index[f]])),
-            f))
+
+        def readable(folder: str) -> int:
+            return len({fmt for fmt in _formats(
+                [c.name for c in self.cad_index[folder]])
+                if fmt in IMPORTABLE_FORMATS})
+
+        return sorted(hits, key=lambda f: (-readable(f), f))
 
     def cad_entry(self, folder: str) -> Optional[CatalogEntry]:
         """The entry to import one CAD folder as.

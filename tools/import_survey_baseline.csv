@@ -1,41 +1,41 @@
 folder,product_id,formats,result,reason,flipped,holes,bodies,commit
-1054 Laser Diode,1054,f3d step stl,imported,no mounting-hole pattern found in the STEP,no,0,746,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-1264 1.2in 7 Segment Display,1264,f3d step stl,imported,"flipped: the model stands 4.0 mm proud below the board against 0.2 mm above, and tall features (knobs, sockets, switches) belong on the face you see",yes,4,49,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-1304 MicroLipo Charger,1304,f3d step stl,imported,,no,2,433,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-1313 Speaker 3in 8Ohm 1W,1313,f3d step,failed,no STL (f3d step),,,,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-1317 150mAh Lipo Battery,1317,f3d step,failed,no STL (f3d step),,,,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-1606 Perma-Proto FullSize,1606,f3d step stl,imported,,no,3,1,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-1910 Alphanumeric Backpack STEMMA QT,1910,3mf f3d step,failed,no STL (3mf f3d step),,,,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-1982 MPR121 Stemma Breakout,1982,f3d step stl,imported,,no,2,438,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-2133 Audio FX Soundboard with Headphone,2133,f3d step stl,imported,,no,4,54,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-2232 5in HDMI Backpack,2232,f3d step,failed,no STL (f3d step),,,,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-2926 Terminal Block FeatherWing,2926,3mf f3d step,failed,no STL (3mf f3d step),,,,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-3027 Adafruit FONA Feather 32u4,3027,f3d step,failed,no STL (f3d step),,,,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-3221 Toggle Switch,3221,f3d step stl,imported,"flipped: a large flat body (7.9 x 13.2) sits alone under the board, which is what a display module looks like",yes,4,244,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-3316 VL6180 ToF Sensor,3316,3mf f3d step,failed,no STL (3mf f3d step),,,,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-364 NFC Breakout,364,f3d step stl,imported,,no,4,270,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-4097 ADXL343 Accelerometer,4097,f3d step stl,imported,,no,4,228,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-4161 VCNL4040 Sensor,4161,3mf f3d step,failed,no STL (3mf f3d step),,,,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-4400 EdgeBadge,4400,f3d step stl,imported,"flipped: a large flat body (46.6 x 3.0) sits alone under the board, which is what a display module looks like",yes,7,296,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-4469 MLX90640 Stemma,4469,f3d step stl,imported,,no,4,246,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-4479 LIS3MDL,4479,f3d step stl,imported,,no,4,349,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-4600 QT Py,4600,f3d step stl,imported,no mounting-hole pattern found in the STEP,no,0,114,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-4698 AS7341 Light Color Sensor,4698,f3d step stl,imported,,no,4,376,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-4739 MPM3610 5V Buck,4739,f3d step stl,imported,no mounting-hole pattern found in the STEP,no,0,509,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-5100 MacroPad RP2040,5100,f3d step stl,imported,,no,2,363,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-5295 NeoSlider Stemma,5295,f3d step stl,imported,"flipped: a large flat body (75.0 x 9.5) sits alone under the board, which is what a display module looks like",yes,5,454,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-"5359 Mag Connector (5-pin, Right Angle)",5359,f3d step stl,imported,,no,2,3260,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-5625 Stemma 5 Port Hub,5625,f3d step stl,imported,,no,4,258,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-5626 PCA9548 Stemma,5626,f3d step stl,imported,,no,2,259,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-5745 PiCowbell DVI,5745,f3d step stl,imported,no mounting-hole pattern found in the STEP,no,0,28,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-5880 Rotary Encoder I2C STEMMA QT,5880,3mf f3d step,failed,no STL (3mf f3d step),,,,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-5997 CH334F 4-Port Hub,5997,3mf f3d step,failed,no STL (3mf f3d step),,,,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-5998 Pixel Trinkey Case,5998,f3z step stl,imported,,no,6,1,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-5999 CH334F 2-Port HUB,5999,f3d step stl,imported,,no,14,1523,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-6000 Feather RP2350,6000,f3d step stl,imported,,no,12,1470,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-6092 BQ25185 3V Buck,6092,f3d step stl,imported,,no,14,1280,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-6121 TMC2209 Driver,6121,f3d step stl,imported,,no,10,894,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-6335 OPT4048 XYZ Color Sensor,6335,3mf f3d step,failed,no STL (3mf f3d step),,,,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-6358 Triple LED Matrix Bonnet,6358,3mf f3d step,failed,no STL (3mf f3d step),,,,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-6524 TSL2585 UVA Ambient Light Sensor,6524,3mf f3d step,failed,no STL (3mf f3d step),,,,c128bceb1f96b6ea8b68f250bda986ba85da24ea
-723 Minty Perma-Proto,723,f3d step,failed,no STL (f3d step),,,,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+1054 Laser Diode,1054,f3d step stl,imported,"the model is a single solid, a simplified block -- there is no board, no components and no holes to read, only an envelope; the board body is 38.80 mm thick, outside 0.4-3.2 mm -- check the file's uni",no,0,1,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+1264 1.2in 7 Segment Display,1264,f3d step stl,imported,"the model is a single solid, a simplified block -- there is no board, no components and no holes to read, only an envelope; the board body is 13.70 mm thick, outside 0.4-3.2 mm -- check the file's uni",no,0,1,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+1304 MicroLipo Charger,1304,f3d step stl,imported,no mounting-hole pattern found in the STEP,no,0,12,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+1313 Speaker 3in 8Ohm 1W,1313,f3d step,imported,"the model is a single solid, a simplified block -- there is no board, no components and no holes to read, only an envelope; the board body is 26.00 mm thick, outside 0.4-3.2 mm -- check the file's uni",no,0,1,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+1317 150mAh Lipo Battery,1317,f3d step,imported,"the model is a single solid, a simplified block -- there is no board, no components and no holes to read, only an envelope; the board body is 3.80 mm thick, outside 0.4-3.2 mm -- check the file's unit",no,0,1,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+1606 Perma-Proto FullSize,1606,f3d step stl,imported,"the model is a single solid, a simplified block -- there is no board, no components and no holes to read, only an envelope",no,3,1,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+1910 Alphanumeric Backpack STEMMA QT,1910,3mf f3d step,imported,"flipped: the model stands 7.7 mm proud below the board against 4.3 mm above, and tall features (knobs, sockets, switches) belong on the face you see",yes,4,16,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+1982 MPR121 Stemma Breakout,1982,f3d step stl,imported,,no,2,18,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+2133 Audio FX Soundboard with Headphone,2133,f3d step stl,imported,,no,4,31,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+2232 5in HDMI Backpack,2232,f3d step,imported,"the model is a single solid, a simplified block -- there is no board, no components and no holes to read, only an envelope; the board body is 12.30 mm thick, outside 0.4-3.2 mm -- check the file's uni",no,0,1,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+2926 Terminal Block FeatherWing,2926,3mf f3d step,imported,,no,4,16,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+3027 Adafruit FONA Feather 32u4,3027,f3d step,imported,"the model is a single solid, a simplified block -- there is no board, no components and no holes to read, only an envelope; the board body is 7.20 mm thick, outside 0.4-3.2 mm -- check the file's unit",no,0,1,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+3221 Toggle Switch,3221,f3d step stl,imported,"the model is a single solid, a simplified block -- there is no board, no components and no holes to read, only an envelope; the board body is 33.33 mm thick, outside 0.4-3.2 mm -- check the file's uni",no,0,1,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+3316 VL6180 ToF Sensor,3316,3mf f3d step,imported,,no,4,15,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+364 NFC Breakout,364,f3d step stl,imported,,no,4,42,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+4097 ADXL343 Accelerometer,4097,f3d step stl,imported,,no,4,13,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+4161 VCNL4040 Sensor,4161,3mf f3d step,imported,,no,4,12,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+4400 EdgeBadge,4400,f3d step stl,imported,"flipped: a large flat body (46.6 x 3.0) sits alone under the board, which is what a display module looks like; the board is 3.2 mm across, outside 5-500 mm -- check the file's units; the board fills 5",yes,0,82,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+4469 MLX90640 Stemma,4469,f3d step stl,imported,,no,4,12,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+4479 LIS3MDL,4479,f3d step stl,imported,,no,4,17,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+4600 QT Py,4600,f3d step stl,imported,no mounting-hole pattern found in the STEP,no,0,16,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+4698 AS7341 Light Color Sensor,4698,f3d step stl,imported,,no,4,15,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+4739 MPM3610 5V Buck,4739,f3d step stl,imported,no mounting-hole pattern found in the STEP,no,0,7,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+5100 MacroPad RP2040,5100,f3d step stl,imported,"mounting holes dropped: h1 at (8.2, 5.7) is inside a 15.9 x 5.9 mm body that passes through the board",no,0,87,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+5295 NeoSlider Stemma,5295,f3d step stl,imported,"flipped: the model stands 15.5 mm proud below the board against 3.0 mm above, and tall features (knobs, sockets, switches) belong on the face you see",yes,4,23,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+"5359 Mag Connector (5-pin, Right Angle)",5359,f3d step stl,imported,"the board body is 4.00 mm thick, outside 0.4-3.2 mm -- check the file's units, or whether the right body was taken as the board",no,2,3,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+5625 Stemma 5 Port Hub,5625,f3d step stl,imported,,no,4,8,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+5626 PCA9548 Stemma,5626,f3d step stl,imported,,no,2,22,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+5745 PiCowbell DVI,5745,f3d step stl,imported,no mounting-hole pattern found in the STEP,no,0,15,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+5880 Rotary Encoder I2C STEMMA QT,5880,3mf f3d step,imported,"flipped: the model stands 21.4 mm proud below the board against 3.0 mm above, and tall features (knobs, sockets, switches) belong on the face you see",yes,4,17,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+5997 CH334F 4-Port Hub,5997,3mf f3d step,imported,,no,4,22,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+5998 Pixel Trinkey Case,5998,f3z step stl,imported,no mounting-hole pattern found in the STEP,no,0,19,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+5999 CH334F 2-Port HUB,5999,f3d step stl,imported,,no,4,17,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+6000 Feather RP2350,6000,f3d step stl,imported,,no,2,59,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+6092 BQ25185 3V Buck,6092,f3d step stl,imported,,no,4,30,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+6121 TMC2209 Driver,6121,f3d step stl,imported,,no,4,20,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+6335 OPT4048 XYZ Color Sensor,6335,3mf f3d step,imported,,no,4,10,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+6358 Triple LED Matrix Bonnet,6358,3mf f3d step,imported,,no,4,11,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+6524 TSL2585 UVA Ambient Light Sensor,6524,3mf f3d step,imported,,no,4,20,c128bceb1f96b6ea8b68f250bda986ba85da24ea
+723 Minty Perma-Proto,723,f3d step,imported,"the model is a single solid, a simplified block -- there is no board, no components and no holes to read, only an envelope; the board body is 56.90 mm thick, outside 0.4-3.2 mm -- check the file's uni",no,0,1,c128bceb1f96b6ea8b68f250bda986ba85da24ea

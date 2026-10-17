@@ -71,7 +71,8 @@ def survey_one(c: cat.Catalog, folder: str) -> dict:
         row["reason"] = "folder name carries no product id"
         return row
     if not any(f in cat.IMPORTABLE_FORMATS for f in formats):
-        row["reason"] = f"no STL ({' '.join(formats) or 'no model files'})"
+        row["reason"] = (f"no readable model "
+                         f"({' '.join(formats) or 'no model files'})")
         return row
 
     try:
@@ -79,10 +80,10 @@ def survey_one(c: cat.Catalog, folder: str) -> dict:
         stls = sorted(p for p in paths if p.suffix.lower() == ".stl")
         steps = sorted(p for p in paths
                        if p.suffix.lower() in (".step", ".stp"))
-        # the importer's own choice when a folder holds several STLs: the
-        # first by name (review F5) -- surveyed as it behaves, not as it should
-        draft = ingest.draft_part(entry, cad=stls[0],
-                                  step=steps[0] if steps else None)
+        # the importer's own choice: a STEP when the folder has one, else an
+        # STL; and when it holds several, the first by name (review F5) --
+        # surveyed as it behaves, not as it should
+        draft = ingest.draft_part(entry, cad=(steps or stls)[0])
     except Exception as exc:                  # every failure is a result here
         row["reason"] = f"{type(exc).__name__}: {exc}"[:200]
         return row

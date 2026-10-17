@@ -285,14 +285,21 @@ def test_a_cache_from_before_the_tree_index_forces_a_refresh(tmp_path, vendor):
 # acceptance (3): importable means "a format we can measure"
 # ---------------------------------------------------------------------------
 
-def test_a_step_only_product_is_not_importable(loaded):
+def test_a_step_only_product_is_importable_since_m2(loaded):
+    """M1 held this back until STEP could be read; M2 reads it."""
     e = loaded.get("562")
-    assert e.cad == "562 10K Potentiometer"             # it has CAD...
+    assert e.cad == "562 10K Potentiometer"
     assert e.formats == ["f3d", "step"]
-    assert e.importable is False                        # ...but none we read
-    assert e.as_dict()["importable"] is False
+    assert e.importable is True
+    assert e.as_dict()["importable"] is True
     assert loaded.get("5752").importable is True        # .stp + .stl
     assert loaded.get("1234").importable is False       # no CAD at all
+
+
+def test_a_folder_of_only_fusion_files_is_not_importable():
+    fusion = cat.CatalogEntry(id="9", name="x", cad="9 x",
+                              formats=["3mf", "f3d"])
+    assert fusion.importable is False
 
 
 def test_an_unreadable_model_does_not_rank_as_importable(loaded):
@@ -301,8 +308,12 @@ def test_an_unreadable_model_does_not_rank_as_importable(loaded):
     assert step_only.id == "562"
     plain = cat.CatalogEntry(id="562", name=step_only.name,
                              category=step_only.category)
-    assert cat.score(step_only, ["potentiometer"]) == \
-        cat.score(plain, ["potentiometer"])
+    fusion_only = cat.CatalogEntry(id="562", name=step_only.name,
+                                   category=step_only.category, cad="562 x",
+                                   formats=["3mf", "f3d"])
+    terms = ["potentiometer"]
+    assert cat.score(step_only, terms) > cat.score(plain, terms)   # STEP reads
+    assert cat.score(fusion_only, terms) == cat.score(plain, terms)
 
 
 # ---------------------------------------------------------------------------
@@ -530,12 +541,19 @@ def test_a_full_survey_never_writes_over_the_committed_baseline():
     assert survey.default_out(True).parent.name == "out"     # gitignored
 
 
-def test_the_survey_records_a_step_only_folder_without_downloading(loaded,
-                                                                   raw):
-    row = _survey().survey_one(loaded, "562 10K Potentiometer")
+def test_the_survey_records_an_unreadable_folder_without_downloading(
+        tmp_path, monkeypatch, raw):
+    """A folder of only Fusion files: nothing to read, so nothing to fetch."""
+    fake = FakeVendor(folders={"8888 Fusion Only": [("8888.f3d", 10),
+                                                    ("8888.3mf", 10)]})
+    monkeypatch.setattr(cat, "_fetch", fake)
+    c = cat.Catalog(cache_dir=tmp_path / "c", ttl=3600).load()
+
+    row = _survey().survey_one(c, "8888 Fusion Only")
+
     assert row["result"] == "failed"
-    assert row["reason"] == "no STL (f3d step)"
-    assert row["product_id"] == "562" and row["commit"] == SHA
+    assert row["reason"] == "no readable model (3mf f3d)"
+    assert row["product_id"] == "8888" and row["commit"] == SHA
     assert raw.calls == []
 
 
