@@ -680,15 +680,12 @@ def catalog_status(refresh: bool = False):
     return cat.shared(refresh=refresh).status()
 
 
-@app.post("/api/catalog/import/{product_id}")
-def catalog_import(product_id: str, download: bool = True):
-    """Measure a product's vendor model and add it to the library.
+def _measure_product(product_id: str, download: bool = True,
+                     file: Optional[str] = None, flip: Optional[bool] = None):
+    """(entry, draft, model files on disk) for one catalogue product.
 
-    The result is a draft: real envelope, real mounting holes, guessed
-    orientation, unnamed volumes and *no connectors at all*. Those caveats ride
-    along in the response and in the part's own notes rather than being
-    smoothed over, because a board that silently asks for no cable room is a
-    case you find out about with a soldering iron.
+    Shared by the preview and the import, so what was reviewed is exactly
+    what gets saved: the same model file, the same way up.
     """
     from . import catalog as cat
     from . import ingest
@@ -709,7 +706,7 @@ def catalog_import(product_id: str, download: bool = True):
         raise HTTPException(
             422, f"{entry.name} has a vendor model only as "
                  f"{', '.join(entry.formats) or 'unknown files'}, which hwcase "
-                 f"cannot measure yet -- the importer needs an STL")
+                 f"cannot measure -- the importer reads STL and STEP")
 
     if download and not ingest.local_cad(product_id):
         try:
@@ -725,10 +722,59 @@ def catalog_import(product_id: str, download: bool = True):
         except Exception as exc:
             raise HTTPException(502, f"could not fetch vendor CAD: {exc}")
 
+    models = [p for p in ingest.local_cad(product_id)
+              if p.suffix.lower() in (".stl", ".step", ".stp")]
+    cad = None
+    if file is not None:
+        cad = next((p for p in models if p.name == file), None)
+        if cad is None:
+            raise HTTPException(404, f"{file!r} is not one of {entry.name}'s "
+                                     f"models: {', '.join(p.name for p in models)}")
     try:
-        draft = ingest.draft_part(entry)
+        draft = ingest.draft_part(entry, cad=cad, flip=flip)
     except Exception as exc:
         raise HTTPException(422, f"could not measure {entry.name}: {exc}")
+    return entry, draft, models
+
+
+@app.post("/api/catalog/preview/{product_id}")
+def catalog_preview(product_id: str, download: bool = True,
+                    file: Optional[str] = None, flip: Optional[bool] = None):
+    """What an import would save, without saving it.
+
+    The editor shows this before anything is filed: which of the product's
+    models was measured (and the others to choose from), whether it was
+    turned over, the connectors proposed from body sizes, and every warning.
+    `file` and `flip` override the importer's own choices; the import takes
+    the same two, so the part saved is the part that was reviewed.
+    """
+    entry, draft, models = _measure_product(product_id, download, file, flip)
+    return {
+        "product": entry.as_dict(),
+        "part": draft.part,
+        "warnings": draft.warnings,
+        "file": Path(draft.source).name,
+        "files": [p.name for p in models],
+        "flipped": draft.flipped,
+        "connectors": draft.part.get("connectors", []),
+    }
+
+
+@app.post("/api/catalog/import/{product_id}")
+def catalog_import(product_id: str, download: bool = True,
+                   file: Optional[str] = None, flip: Optional[bool] = None):
+    """Measure a product's vendor model and add it to the library.
+
+    The result is a draft: real envelope, real mounting holes, an orientation
+    that is guessed unless `flip` says otherwise, unnamed volumes, and
+    connectors that are at best *proposed* from body sizes. Those caveats
+    ride along in the response and in the part's own notes rather than being
+    smoothed over, because a board that silently asks for no cable room is a
+    case you find out about with a soldering iron.
+    """
+    from . import ingest
+
+    entry, draft, _models = _measure_product(product_id, download, file, flip)
 
     if HOSTED:
         # Nothing is filed. The draft goes back to the browser, which keeps it

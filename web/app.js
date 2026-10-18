@@ -4,6 +4,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { snapDelta, snapLines } from './snap.js';
 import { FINISHES, finishFor } from './finishes.js';
 import { createHistory } from './history.js';
+import { choiceOf, importQuery, reviewHtml } from './importer.js';
 import { STOCK, restockName } from './stock.js';
 import { wireMenus } from './menu.js';
 import { store, files, nameFromFile, NAME_RE } from './store.js';
@@ -2994,13 +2995,54 @@ function escapeHtml(s) {
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/** Show what an import would save and let the user change the model file
+ *  or turn the board over before anything is filed. Each change measures
+ *  again. Resolves to the reviewed choice, or null if dismissed. */
+function reviewImport(entry, first) {
+  return new Promise((resolve) => {
+    let preview = first;
+    const render = () => {
+      $('modal-body').innerHTML = reviewHtml(preview);
+      const again = async () => {
+        const choice = { file: $('imp-file').value, flip: $('imp-flip').checked };
+        catStatus(`measuring ${choice.file}…`);
+        try {
+          preview = await api(`/api/catalog/preview/${entry.id}`
+            + importQuery(choice), { method: 'POST' });
+          render();
+          catStatus('');
+        } catch (err) {
+          catStatus('could not measure that: ' + err.message, 'err');
+        }
+      };
+      $('imp-file').onchange = again;
+      $('imp-flip').onchange = again;
+    };
+    showModal(`import ${entry.name}?`, '', [
+      { label: 'import it', act: () => resolve(choiceOf(preview)) },
+    ]);
+    render();
+    const bar = $('modal-actions');
+    const dismiss = bar.lastElementChild;
+    const prev = dismiss.onclick;
+    dismiss.onclick = () => { prev?.(); resolve(null); };
+  });
+}
+
 async function importProduct(entry, row) {
   if (catalog.busy) return;
   catalog.busy = true;
   row.classList.add('working');
   catStatus(`fetching and measuring ${entry.name}…`);
   try {
-    const r = await api(`/api/catalog/import/${entry.id}`, { method: 'POST' });
+    // Review before filing: the model, which way up, the proposed connectors.
+    const first = await api(`/api/catalog/preview/${entry.id}`, { method: 'POST' });
+    catStatus('');
+    const choice = await reviewImport(entry, first);
+    if (!choice) { catStatus('import cancelled'); return; }
+    catStatus(`importing ${entry.name}…`);
+    const r = await api(`/api/catalog/import/${entry.id}` + importQuery(choice),
+      { method: 'POST' });
     if (r.stored === false) {
       // Nothing was filed on the server -- one visitor importing a board must
       // not change what every other visitor sees -- so it goes into the scene
@@ -3018,13 +3060,13 @@ async function importProduct(entry, row) {
     }
     await reloadParts(r.stored !== false);
 
-    // Say what was guessed. An imported board has no connectors, so it asks
-    // the case for no cable room -- that is worth interrupting for.
+    // Say what was guessed. Connectors are at best proposed from body sizes,
+    // and one that is missing asks the case for no cable room.
     const lines = [
       `${r.part.name} imported from ${r.bodies} bodies in ${r.source}.`,
       'This is a DRAFT: the envelope and mounting holes are measured, but the '
-        + 'volumes are unnamed and it has no connectors, so it will ask the '
-        + 'case for no cable room until you add them.',
+        + 'volumes are unnamed and any connectors were proposed from body '
+        + 'sizes -- check them, and add what was missed, before you cut.',
     ];
     if (r.flipped) lines.push('It was turned over — check the side you expect '
       + 'to face the panel really does.');

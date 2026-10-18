@@ -19,9 +19,11 @@ const js = fs.readFileSync(path.join(here, '..', 'app.js'), 'utf8');
 
 const staticIds = new Set([...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
 
-/** Ids app.js builds at runtime, via innerHTML in a render function. */
+/** Ids built at runtime, via innerHTML in a render function -- in app.js, or
+ *  in a module that renders markup for it (the import review, importer.js). */
+const rendered = js + fs.readFileSync(path.join(here, '..', 'importer.js'), 'utf8');
 const builtIds = new Set(
-  [...js.matchAll(/id=["'`]([a-z][\w-]*)["'`]/g)].map((m) => m[1]));
+  [...rendered.matchAll(/id=["'`]([a-z][\w-]*)["'`]/g)].map((m) => m[1]));
 
 /** Ids app.js looks up with $(). Template literals are skipped: those are
  *  computed and cannot be checked statically. */

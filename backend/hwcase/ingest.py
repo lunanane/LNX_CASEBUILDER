@@ -277,7 +277,8 @@ def _should_flip(found: list[Body], pcb: Body) -> tuple[bool, str]:
 
 
 def draft_part(entry: CatalogEntry, cad: Optional[Path] = None,
-               step: Optional[Path] = None) -> Draft:
+               step: Optional[Path] = None,
+               flip: Optional[bool] = None) -> Draft:
     """Read a part definition off a vendor model.
 
     Returns a draft with real numbers and an honest account of what in it is
@@ -314,9 +315,17 @@ def draft_part(entry: CatalogEntry, cad: Optional[Path] = None,
                         "read, only an envelope")
     pcb_i = _pick_pcb(found)
     pcb = found[pcb_i]
-    flip, why = _should_flip(found, pcb)
-    if why:
-        warnings.append(why)
+    guess, why = _should_flip(found, pcb)
+    if flip is None:
+        flip = guess
+        if why:
+            warnings.append(why)
+    else:
+        # a person looked at it and said which way up -- that beats any rule
+        warnings.append(("turned over" if flip else "kept the way it is "
+                         "modelled") + " by hand at import"
+                        + ("" if flip == guess else
+                           f" (the heuristic would have {'turned it over' if guess else 'kept it'})"))
     warnings += _plausibility(pcb)
 
     width = pcb.size[0]
@@ -361,6 +370,14 @@ def draft_part(entry: CatalogEntry, cad: Optional[Path] = None,
                     "note": f"{len(small)} small bodies on this face, "
                             f"tallest {max(abs(z0), abs(z1)):.2f} mm"},
         })
+
+    # Connectors a body's size and place give away: estimated, to be confirmed.
+    from .connectors import propose
+    proposed = propose(placed, width, pcb.size[1], entry.name)
+    if proposed:
+        warnings.append(f"{len(proposed)} connector(s) proposed from body "
+                        f"sizes ({', '.join(c['name'] for c in proposed)}) -- "
+                        f"estimated, confirm each")
 
     # The board's true shape, from its own mesh. A rectangle unless the board
     # visibly is not one -- a ring or a notched breakout fits a rectangle
@@ -410,7 +427,7 @@ def draft_part(entry: CatalogEntry, cad: Optional[Path] = None,
         "outline": outline,
         "pcb_thickness": round(pcb.height, 2),
         "volumes": volumes,
-        "connectors": [],
+        "connectors": proposed,
         "src": {"confidence": "datasheet",
                 "url": "https://github.com/adafruit/Adafruit_CAD_Parts"},
         "notes": _notes(entry, cad, found, flip, warnings),
@@ -552,9 +569,11 @@ def _notes(entry: CatalogEntry, cad: Path, found: list[Body], flip: bool,
         "  * the volumes are named body_1, body_2... because a mesh does not "
         "say what they are, and a case treats a socket differently from a "
         "capacitor. Name them.",
-        "  * there are no connectors. A mesh cannot tell you where a cable "
-        "plugs in, so this board currently asks the case for no cable room at "
-        "all. Add them before you cut anything.",
+        "  * connectors are at best PROPOSED. A mesh cannot tell you where a "
+        "cable plugs in; any listed were matched from a body's size and place "
+        "at an edge, are tagged estimated, and may be wrong or missing. A "
+        "board with none asks the case for no cable room at all. Check every "
+        "one, and add what it missed, before you cut anything.",
     ]
     if flip:
         lines.append("  * the part has been turned over -- check that the side "
