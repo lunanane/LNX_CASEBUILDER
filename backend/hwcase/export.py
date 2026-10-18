@@ -359,10 +359,12 @@ def rack_to_json(model) -> dict:
 
 
 def rack_panels_svg(model, apply_kerf: bool = True, kerf: float = 0.15) -> str:
-    """The frame's side panels, as one SVG ready for a laser.
+    """The frame's cut plates, as one SVG ready for a laser.
 
-    Only the panels: the rails and the U-channel are bought as extrusion and
-    folded sheet, so what a cutter needs from this pipeline is the acrylic.
+    Only what is cut: the rails and the U-channel are bought as extrusion and
+    folded sheet. That is the side panels of a U-channel frame, and every
+    plate of a laser-cut one -- each drawn from its flat outline, joints and
+    all, and kerf-compensated with its own sheet's kerf.
 
     Same conventions as `to_svg`, because they are the ones that stop a job
     going wrong: every hole is cut before any outline (a cutter runs paths in
@@ -370,7 +372,7 @@ def rack_panels_svg(model, apply_kerf: bool = True, kerf: float = 0.15) -> str:
     while its holes are still to come), and the y axis is flipped so the file
     reads the same way up as the 3D view.
     """
-    panels = [m for m in model.members if m.kind == "side_panel"]
+    panels = list(model.plates)
     if not panels:
         raise ValueError("this frame has no side panels")
 
@@ -379,9 +381,10 @@ def rack_panels_svg(model, apply_kerf: bool = True, kerf: float = 0.15) -> str:
     max_x = max_y = 0.0
     dx = SHEET_MARGIN
     for i, panel in enumerate(panels):
-        geom = panel.section
+        geom = panel.cut if panel.cut is not None else panel.section
         if apply_kerf:
-            geom = kerf_compensated(geom, kerf)
+            geom = kerf_compensated(
+                geom, panel.stock.kerf if panel.stock is not None else kerf)
         geom = translate(geom, dx, SHEET_MARGIN)
         x0, y0, x1, y1 = geom.bounds
         max_x, max_y = max(max_x, x1), max(max_y, y1)

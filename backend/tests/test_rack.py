@@ -1003,3 +1003,13 @@ def test_m7_exports_a_cut_list_without_a_u_channel():
         assert name in cut
     assert export.rack_to_json(_laser())["order"] is None
     assert export.rack_to_json(_laser())["style"] == "laser"
+
+
+def test_m7_the_plate_svg_carries_every_cut_plate():
+    """U-channel: the two side panels. Laser: cheeks, base, back and top,
+    each drawn from its flat outline, joints and all."""
+    u = export.rack_panels_svg(rack.build(SIX_U, 68.0))
+    lz = export.rack_panels_svg(_laser())
+    assert u.count('data-pass="outline"') == 2
+    assert lz.count('data-pass="outline"') == 5
+    assert lz.index('data-pass="holes"') < lz.index('data-pass="outline"')
