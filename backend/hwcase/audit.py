@@ -164,6 +164,19 @@ def audit_part(part, tolerance: float = 0.3) -> PartAudit:
                 f"the model{turned}: declared {declared_bottom:.2f} below / "
                 f"{declared_top:.2f} above, model {below:.2f} / {above:.2f}"))
 
+    # A display model that does not sit on the part's boxes is worse than
+    # none: it shows a board somewhere the engine does not think it is.
+    if getattr(part, "model", None) is not None:
+        from . import models
+
+        if not (models.CAD_ROOT / part.model.file).exists():
+            result.findings.append(Finding(
+                part.id, "model", f"display model {part.model.file} is not on "
+                f"disk", severity="error"))
+        else:
+            for problem in models.alignment(part, tol=max(0.5, tolerance)):
+                result.findings.append(Finding(part.id, "model", problem))
+
     return result
 
 

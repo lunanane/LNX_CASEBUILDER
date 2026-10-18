@@ -434,6 +434,11 @@ def draft_part(entry: CatalogEntry, cad: Optional[Path] = None,
     }
     if holes:
         part["holes"] = holes
+    # the vendor mesh itself, for display: the same two moves the boxes made
+    from .models import PCB_COLOR, matrix_for
+    part["model"] = {"file": part["cad"],
+                     "matrix": [round(v, 4) for v in matrix_for(pcb, flip)],
+                     "color": PCB_COLOR}
 
     return Draft(part=part, source=str(cad), warnings=warnings,
                  flipped=flip, bodies=len(found))

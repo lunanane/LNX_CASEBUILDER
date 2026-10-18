@@ -39,3 +39,6 @@ export/
 
 # Local design-evidence ledger; DEVELOPMENT_PLAN.md and EXECUTION_PROMPTS.md are authoritative.
 .docs/DEVELOPMENT_PLAN_HISTORY.md
+
+# display models built from vendor CAD (hwcase.models): a cache, rebuilt on demand
+vendor/cad/.models/

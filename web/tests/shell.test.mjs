@@ -227,3 +227,15 @@ test('rack bays can be added to a box, and the box draws its rails', () => {
   assert.match(js, /module_depth: 40, module_panel_t: 2, modules: \[\]/);
   assert.match(js, /\[\.\.\.model\.plates, \.\.\.\(model\.members \|\| \[\]\)\]/);
 });
+
+test('real models are vendored, mapped, toggled and placed by the engine', () => {
+  // M4: the glTF loader from the same three.js release, lazily fetched models
+  assert.match(html, /"three\/addons\/loaders\/GLTFLoader\.js": "\.\/vendor\/loaders\/GLTFLoader\.js"/);
+  assert.ok(fs.existsSync(path.join(here, '..', 'vendor', 'loaders', 'GLTFLoader.js')));
+  assert.ok(fs.existsSync(path.join(here, '..', 'vendor', 'utils', 'BufferGeometryUtils.js')));
+  assert.ok(staticIds.has('chk-models'));
+  assert.match(js, /\$\('chk-models'\)\.onchange =/);
+  // the pose comes from the server's frame matrix, never worked out here
+  assert.match(js, /new THREE\.Matrix4\(\)\.set\(\.\.\.frame\.matrix\)/);
+  assert.match(js, /\/api\/parts\/\$\{encodeURIComponent\(partId\)\}\/model\.glb/);
+});

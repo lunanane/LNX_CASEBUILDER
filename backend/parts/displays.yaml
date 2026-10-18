@@ -83,6 +83,12 @@ parts:
     category: display
     tags: [oled, i2c, stemma_qt, spi]
     cad: adafruit/4741/4741 1.5-inch OLED.stl
+    # the vendor mesh, shown in place of the boxes (display only): turned
+    # over, as the importer turns it, so the glass faces the panel
+    model:
+      file: adafruit/4741/4741 1.5-inch OLED.stl
+      matrix: [-1.0, 0.0, 0.0, 35.56, 0.0, 1.0, 0.0, 5.08, 0.0, 0.0, -1.0, 1.57, 0.0, 0.0, 0.0, 1.0]
+      color: "#1b1b1f"
     notes: >-
       Measured by splitting the vendor mesh into connected bodies rather than
       by slicing it into bands -- band slicing merged the two STEMMA QT
