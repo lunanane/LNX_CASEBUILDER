@@ -215,6 +215,27 @@
         <input type="number" id="fr-depth" step="1" min="18"><span class="unit">mm</span>
       </div>
 
+      <h2>construction</h2>
+      <div class="field">
+        <label title="U-channel: the rails, a folded aluminium body and two side panels. Laser-cut: the same rails, and every other piece cut from one sheet and jointed together.">style</label>
+        <select id="fr-style">
+          <option value="u_channel">U-channel</option>
+          <option value="laser">laser-cut</option>
+        </select>
+      </div>
+      <div class="field">
+        <label title="the sheet the laser-cut frame is cut from, as it measures on the bench -- the joints follow it">sheet</label>
+        <input type="number" id="fr-sheet-t" step="0.1" min="1"><span class="unit">mm</span>
+      </div>
+      <div class="field">
+        <label title="T-slots take an M3 bolt and a captive nut and come apart again; finger joints are glued">joints</label>
+        <select id="fr-joint">
+          <option value="tslot">T-slot + M3 nut</option>
+          <option value="finger">finger (glued)</option>
+        </select>
+      </div>
+      <label class="check" title="close the top of a laser-cut frame with a plate, as the U-channel's top flange does"><input type="checkbox" id="fr-top-plate"> top plate</label>
+
       <h2>rows</h2>
       <div id="fr-rows"></div>
       <button id="fr-add-3u" title="add a 3U row at the top">+ 3U</button>

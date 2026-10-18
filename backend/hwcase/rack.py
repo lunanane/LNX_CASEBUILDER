@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field, replace
-from typing import Literal
+from typing import Literal, Optional
 
 from shapely.affinity import scale
 from shapely.geometry import Point, Polygon
@@ -38,6 +38,7 @@ from shapely.geometry import box as shapely_box
 
 from .eurorack import (HP, RACK_U, RowFormat, SLOT_EDGE_INSET, frame_width,
                        slot_span)
+from .schema import Material
 
 # --------------------------------------------------------------------------
 # the rail, as installed
@@ -339,7 +340,8 @@ class Member:
     """
 
     name: str
-    kind: Literal["rail", "body", "side_panel"]
+    #: `plate` is a laser-cut frame's base, back or top
+    kind: Literal["rail", "body", "side_panel", "plate"]
     section: Polygon
     length: float
     origin: tuple[float, float, float]
@@ -347,6 +349,14 @@ class Member:
     material: str = "aluminium"
     holes: list[Hole] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    #: The plate as it is cut, in its own flat frame, when that is not the
+    #: section. A base plate is drawn for the 3D view as a slab swept across
+    #: the width; its joints are at the two ends of that sweep, which a
+    #: section cannot show, so the cutter gets this instead.
+    cut: Optional[Polygon] = None
+    #: The sheet it is cut from, when the frame knows it (laser style). Left
+    #: unset, a plate is cut from `material` at `length` thick.
+    stock: Optional[Material] = None
 
 
 @dataclass
@@ -375,6 +385,18 @@ class RackModel:
     overhang: float = RAIL_OVERHANG
     module_depth: float = MODULE_DEPTH
     plan: PanelPlan = field(default_factory=lambda: PanelPlan())
+    #: `u_channel`: rails, a folded aluminium body and two side panels.
+    #: `laser`: the same rails, and every other piece cut from sheet.
+    style: Literal["u_channel", "laser"] = "u_channel"
+    #: how thick each side panel (cheek) is
+    panel_t: float = SIDE_PANEL_T
+    #: laser style: every joint between two plates, for the BOM and checks
+    joints: list = field(default_factory=list)
+    #: laser style: the margin the plates and their joints need; the panel's
+    #: margins were raised to at least this
+    min_margin: Optional[float] = None
+    #: laser style: 'tslot' or 'finger'
+    joint: str = ""
 
     @property
     def margin(self) -> float:
@@ -395,7 +417,13 @@ class RackModel:
     @property
     def outer_width(self) -> float:
         """Rail span plus a side panel either side."""
-        return self.width + 2 * SIDE_PANEL_T
+        return self.width + 2 * self.panel_t
+
+    @property
+    def plates(self) -> list[Member]:
+        """Everything cut from sheet: the side panels, and a laser frame's
+        base, back and top."""
+        return [m for m in self.members if m.kind in ("side_panel", "plate")]
 
     @property
     def stands_on(self) -> str:
@@ -412,14 +440,18 @@ class RackModel:
             zs += [m.origin[2] + d0, m.origin[2] + d1]
         return (min(xs), min(ys), min(zs), max(xs), max(ys), max(zs))
 
-    def order_spec(self) -> dict[str, float | str]:
+    def order_spec(self) -> Optional[dict[str, float | str]]:
         """The U-channel, in the fields a sheet-metal shop's form asks for.
 
         Suppliers who fold to order want a length and the three flats of the
         developed cross-section, in order: `A / B / C`. That is exactly what
         the built case was ordered as (al5905100upko, 376 x 40/216/40 x 1.0),
         so this is the same form filled in for whatever you have designed.
+
+        None for a laser-cut frame, which has no U-channel to order.
         """
+        if self.style == "laser":
+            return None
         return {
             "part": "aluminium U-channel, folded, cut to size",
             "length_mm": round(self.width, 1),
@@ -432,13 +464,25 @@ class RackModel:
         }
 
     def bill_of_materials(self) -> dict[str, int | float]:
-        return {
+        if self.style != "laser":
+            return {
+                "rail mm": round(self.width, 2) * len(self.rails),
+                "rails": len(self.rails),
+                "body mm": round(self.width, 2),
+                "side panels": 2,
+                "M5 screws": 2 * len(self.rails),
+            }
+        out: dict[str, int | float] = {
             "rail mm": round(self.width, 2) * len(self.rails),
             "rails": len(self.rails),
-            "body mm": round(self.width, 2),
             "side panels": 2,
+            "plates": len([m for m in self.members if m.kind == "plate"]),
             "M5 screws": 2 * len(self.rails),
         }
+        for j in self.joints:
+            for item, n in j.bom().items():
+                out[item] = out.get(item, 0) + n
+        return out
 
 
 # --------------------------------------------------------------------------
@@ -568,16 +612,20 @@ def side_panel_section(rows: list[RowFormat], hp: float,
                        overhang: float = RAIL_OVERHANG,
                        plan: "PanelPlan | None" = None,
                        module_depth: float = MODULE_DEPTH,
+                       depth: Optional[float] = None,
                        ) -> tuple[Polygon, list[Hole]]:
     """The side panel outline and every hole in it.
 
     The M5 pattern is *derived* from where the rails land, never tabulated --
     which is the point: change the row stack and the drilling follows. The
     built 5U panel is a regression fixture for this, not its source.
+
+    `depth` overrides the case's depth: a laser frame's cheek runs past its
+    back plate rather than stopping at a U-channel's web.
     """
     q = (plan or PanelPlan()).resolved(overhang)
     h = panel_height(rows, overhang, q)
-    depth = case_depth(module_depth)
+    depth = case_depth(module_depth) if depth is None else depth
     base = panel_base(rows, overhang, q)
     # The panel's own frame starts at its front-bottom corner, so a front
     # overhang pushes the case's depth 0 to `q.front` rather than moving
@@ -630,8 +678,16 @@ def build(rows: list[RowFormat], hp: float, inserts_per_row: int = 0,
           insert_hp: float = 4.0,
           overhang: float = RAIL_OVERHANG,
           plan: "PanelPlan | None" = None,
-          module_depth: float = MODULE_DEPTH) -> RackModel:
+          module_depth: float = MODULE_DEPTH, *,
+          style: Literal["u_channel", "laser"] = "u_channel",
+          material: Optional[Material] = None,
+          joint: Literal["tslot", "finger"] = "tslot",
+          top_plate: bool = True,
+          fastener: str = "M3") -> RackModel:
     """Turn a row stack and a width into every piece of the frame.
+
+    `style="laser"` builds the same rails with cut plates in place of the
+    folded body; see `_build_laser`. The U-channel frame is described below.
 
     Three datums, and everything else hangs off them:
 
@@ -644,6 +700,14 @@ def build(rows: list[RowFormat], hp: float, inserts_per_row: int = 0,
     * **the rails span the width exactly**, and the side panels bolt to their
       ends from outside, so the panels add their own thickness either side.
     """
+    if style == "laser":
+        return _build_laser(rows, hp, inserts_per_row, overhang,
+                            plan or PanelPlan(), module_depth,
+                            material or LASER_MATERIAL, joint, top_plate,
+                            fastener)
+    if style != "u_channel":
+        raise ValueError(f"unknown frame style {style!r}: "
+                         f"'u_channel' or 'laser'")
     plan = (plan or PanelPlan()).resolved(overhang)
     body_flange(module_depth)          # fail loudly on an impossible depth
     width = frame_width(hp)
@@ -651,26 +715,7 @@ def build(rows: list[RowFormat], hp: float, inserts_per_row: int = 0,
     ph = panel_height(rows, overhang, plan)
     placed = layout_rows(rows, overhang)
 
-    members: list[Member] = []
-
-    # Every rail is the same extrusion; the upper rail of a pair is mirrored
-    # so the two lips face outwards and the two slots face each other.
-    lower = rail_section(flip=False, overhang=overhang)
-    upper = rail_section(flip=True, overhang=overhang)
-    for i, row in enumerate(placed):
-        for end, y, section in (("lo", row.slots[0], lower),
-                                ("hi", row.slots[1], upper)):
-            members.append(Member(
-                name=f"rail-r{i}-{end}",
-                kind="rail",
-                section=section,
-                length=width,
-                origin=(0.0, y - RAIL_SLOT_C if end == "lo"
-                        else y - (RAIL_H - RAIL_SLOT_C), 0.0),
-                axis="x",
-                notes=[f"row {i} ({row.fmt.name}) {end} rail, "
-                       f"slot centre y={y:.2f}"],
-            ))
+    members: list[Member] = _rails(placed, width, overhang)
 
     # The body sits `overhang` above the bottom rail's outer edge, and its web
     # lands on the back of the case.
@@ -708,6 +753,242 @@ def build(rows: list[RowFormat], hp: float, inserts_per_row: int = 0,
                      module_depth=module_depth)
 
 
+def _rails(placed: list[Row], width: float, overhang: float) -> list[Member]:
+    """Two rails per row, spanning the width exactly. Shared by both styles,
+    so a laser frame's rails -- and therefore its M5s -- are the U-channel
+    frame's to the hundredth."""
+    out: list[Member] = []
+    # Every rail is the same extrusion; the upper rail of a pair is mirrored
+    # so the two lips face outwards and the two slots face each other.
+    lower = rail_section(flip=False, overhang=overhang)
+    upper = rail_section(flip=True, overhang=overhang)
+    for i, row in enumerate(placed):
+        for end, y, section in (("lo", row.slots[0], lower),
+                                ("hi", row.slots[1], upper)):
+            out.append(Member(
+                name=f"rail-r{i}-{end}",
+                kind="rail",
+                section=section,
+                length=width,
+                origin=(0.0, y - RAIL_SLOT_C if end == "lo"
+                        else y - (RAIL_H - RAIL_SLOT_C), 0.0),
+                axis="x",
+                notes=[f"row {i} ({row.fmt.name}) {end} rail, "
+                       f"slot centre y={y:.2f}"],
+            ))
+    return out
+
+
+# --------------------------------------------------------------------------
+# the laser-cut frame
+# --------------------------------------------------------------------------
+#
+# The same rails, bolted the same way into two cheeks; the folded body is
+# replaced by a base, a back and (optionally) a top plate, each jointed into
+# both cheeks. The cheeks are the side panels as they always were -- the same
+# outline arithmetic, the same M5s -- only cut from the frame's sheet, deeper
+# by the back plate, and with the joints cut into them.
+#
+# Where the plates go:
+#
+# * base and top run *behind* the rails, from the rails' back face to the back
+#   plate, so no plate ever crosses a rail whatever its thickness;
+# * their outer faces sit on the cheek's edge for finger joints, and one sheet
+#   inside it for T-slots, whose slots in the cheek need material on both
+#   sides to be closed;
+# * the back plate's inner face is the module depth -- the same meaning the
+#   setting has on a U-channel frame -- and it covers the ends of base and
+#   top. The corners there are butt joints: both plates are already held by
+#   both cheeks.
+
+#: The sheet a laser frame is cut from when the scene names none: 5 mm, the
+#: thickness the acrylic side panels always were.
+LASER_MATERIAL = Material(name="plywood-5mm", thickness=5.0, kerf=0.15,
+                          color="#c8a165")
+
+#: Air between a base or top plate and the outer edge of the nearest rail.
+#: The plate runs behind the rails, so this is not about the rail: it keeps
+#: the plate out of the space a module's PCB hangs into.
+LASER_RAIL_GAP = 0.5
+
+
+def laser_keep_clear(t: float) -> float:
+    """Sheet kept between a joint cut and a cheek's M5 hole: half a sheet,
+    the same web every closed slot in a joint is held to."""
+    return t / 2
+
+
+def laser_min_margin(t: float, joint: str = "tslot",
+                     overhang: float = RAIL_OVERHANG,
+                     clearance: float = 0.1) -> float:
+    """The smallest panel margin that fits a base or top plate.
+
+    A margin is measured from the body's edge, which the rail overhangs by
+    `overhang`. Two things have to fit in it, and the larger wins:
+
+    * the plate: its outer face at the cheek's edge (finger) or a sheet inside
+      it (T-slot), its inner face clear of the rail's outer edge by
+      `LASER_RAIL_GAP`;
+    * the joint's cuts in the cheek, which reach a sheet (plus half the
+      clearance) in from the plate's outer face, and must stay
+      `laser_keep_clear` away from the nearest M5 hole -- which sits at the
+      rail's mid-height, just above that edge.
+    """
+    inset = t if joint == "tslot" else 0.0
+    plate = overhang + inset + t + LASER_RAIL_GAP
+    hole_low = (RAIL_SLOT_C - overhang) - M5_CLEAR / 2   # hole bottom - margin
+    cuts = inset + t + clearance / 2 + laser_keep_clear(t) - hole_low
+    return max(plate, cuts)
+
+
+@dataclass
+class FrameJoint:
+    """One joint of a laser frame: which plate, which cheek, and the record."""
+
+    plate: str
+    side: Literal["left", "right"]
+    joint: object                    # joinery.Joint
+
+    def bom(self) -> dict[str, int]:
+        return self.joint.bom()
+
+
+def _build_laser(rows, hp, inserts_per_row, overhang, plan, module_depth,
+                 material: Material, joint: str, top_plate: bool,
+                 fastener: str) -> RackModel:
+    from . import joinery as jn
+
+    if joint not in ("tslot", "finger"):
+        raise ValueError(f"unknown joint {joint!r}: 'tslot' or 'finger'")
+    if inserts_per_row:
+        raise ValueError(
+            "side panel inserts are not available on a laser-cut frame: the "
+            "back plate closes the slot a module would slide in through")
+    t = material.thickness
+    inset = t if joint == "tslot" else 0.0
+
+    # Margins rise to fit the plates, the way they already rise to keep the
+    # M5s on the panel; the cheek's notes say so.
+    q = plan.resolved(overhang)
+    need = laser_min_margin(t, joint, overhang, material.joint_clearance)
+    raised = [f"{edge} margin raised from {v:.2f} to {need:.2f} mm to fit the "
+              f"{t:g} mm {name} plate under the rails"
+              for edge, v, name, wanted in (("bottom", q.bottom, "base", True),
+                                            ("top", q.top, "top", top_plate))
+              if wanted and v < need]
+    q = replace(q, bottom=max(q.bottom, need),
+                top=max(q.top, need) if top_plate else q.top)
+    if joint == "finger":
+        square = [n for n, v in (("back", q.back),
+                                 ("r_bottom_back", q.r_bottom_back),
+                                 ("r_top_back", q.r_top_back)) if v > 0]
+        if square:
+            raise ValueError(
+                f"finger joints are cut into the cheek's own edges, so its "
+                f"back edge has to be flush and its back corners square: set "
+                f"{', '.join(square)} to 0, or use T-slots")
+
+    width = frame_width(hp)
+    web = web_height(rows, overhang)
+    ph = panel_height(rows, overhang, q)
+    placed = layout_rows(rows, overhang)
+    base = panel_base(rows, overhang, q)       # world y of the cheeks' bottom
+    cheek, holes = side_panel_section(rows, hp, 0, 4.0, overhang, q,
+                                      module_depth,
+                                      depth=module_depth + t + inset)
+    keep = tuple(Point(*h.at).buffer(h.diameter / 2, quad_segs=12)
+                 for h in holes)
+
+    f = q.front
+    wt = width + 2 * t                          # plates run to the outer faces
+    y_lo, y_hi = inset, ph - inset              # base and top outer faces
+    z_back = f + module_depth + t               # back plate's outer face
+
+    # Base and top run from where the cheek's front corner radius ends to
+    # the back plate. The raised margin already keeps them clear of the
+    # rails, and the joints keep clear of the M5s on their own.
+    def front(r: float) -> float:
+        return max(f, r) - f                    # world z where a plate starts
+
+    # Each plate in its own frame: u across the width (0 at the left cheek's
+    # outer face), v along the joint. `trim` shortens the joint at either end
+    # by a sheet where another plate's joint meets it in the cheek -- only a
+    # T-slot needs this, its slots want a web of cheek all round -- and the
+    # plate is notched there so it does not stand in the cheek.
+    specs = []
+    zb = front(q.r_bottom_front)
+    specs.append(("base", module_depth - zb, (0.0, 0.0),
+                  jn.Segment((f + zb, y_lo), (f + module_depth, y_lo), "left"),
+                  shapely_box(0.0, 0.0, module_depth - zb, t),
+                  (-t, base + y_lo, zb)))
+    if top_plate:
+        zt = front(q.r_top_front)
+        specs.append(("top", module_depth - zt, (0.0, 0.0),
+                      jn.Segment((f + zt, y_hi), (f + module_depth, y_hi),
+                                 "right"),
+                      shapely_box(0.0, 0.0, module_depth - zt, t),
+                      (-t, base + y_hi - t, zt)))
+    back_h = y_hi - y_lo
+    lo_trim = t if joint == "tslot" else 0.0
+    hi_trim = t if (joint == "tslot" and top_plate) else 0.0
+    specs.append(("back", back_h, (lo_trim, hi_trim),
+                  jn.Segment((z_back, y_lo + lo_trim),
+                             (z_back, y_hi - hi_trim), "left"),
+                  shapely_box(0.0, 0.0, t, back_h),
+                  (-t, base + y_lo, module_depth)))
+
+    make = jn.tslot_joint if joint == "tslot" else jn.finger_joint
+    kw = {"fastener": fastener} if joint == "tslot" else {}
+    cheeks = {s: jn.Plate(cheek, material, keep, laser_keep_clear(t))
+              for s in ("left", "right")}
+    joints: list[FrameJoint] = []
+    cut: dict[str, Polygon] = {}
+    for name, length, (t0, t1), cheek_seg, _section, _origin in specs:
+        geom = shapely_box(0.0, 0.0, wt, length)
+        for u0 in (0.0, wt - t):
+            if t0:
+                geom = geom.difference(shapely_box(u0, 0.0, u0 + t, t0))
+            if t1:
+                geom = geom.difference(
+                    shapely_box(u0, length - t1, u0 + t, length))
+        plate = jn.Plate(geom, material)
+        for side, own in (
+                ("left", jn.Segment((0.0, t0), (0.0, length - t1), "right")),
+                ("right", jn.Segment((wt, t0), (wt, length - t1), "left"))):
+            try:
+                cheeks[side], plate, j = make(
+                    jn.Edge(cheek_seg, own), cheeks[side], plate, **kw)
+            except jn.JointError as exc:
+                raise ValueError(
+                    f"the {name} plate cannot be joined to the {side} cheek: "
+                    f"{exc}. A deeper frame, thinner sheet or finger joints "
+                    f"give it more room.") from None
+            joints.append(FrameJoint(name, side, j))
+        cut[name] = plate.geom
+
+    members = _rails(placed, width, overhang)
+    plate_names = ", ".join(s[0] for s in specs)
+    for side, x in (("left", -t), ("right", width)):
+        members.append(Member(
+            name=f"side-{side}", kind="side_panel", section=cheeks[side].geom,
+            length=t, origin=(x, base, -f), material=material.name,
+            holes=list(holes), stock=material,
+            notes=[f"{len(holes)} x M5 into rail ends",
+                   f"{joint} joints to the {plate_names} plates", *raised]))
+    for name, _length, _trim, _seg, section, origin in specs:
+        members.append(Member(
+            name=name, kind="plate", section=section, length=wt,
+            origin=origin, material=material.name, cut=cut[name],
+            stock=material,
+            notes=[f"{t:g} mm {material.name}, {joint} joints into both "
+                   f"cheeks"]))
+
+    return RackModel(rows=placed, members=members, hp=hp, width=width,
+                     web=web, panel_height=ph, overhang=overhang, plan=q,
+                     module_depth=module_depth, style="laser", panel_t=t,
+                     joints=joints, min_margin=need, joint=joint)
+
+
 def build_spec(spec) -> RackModel:
     """Build from a `schema.RackSpec`, resolving row format names."""
     from .eurorack import ROW_FORMATS
@@ -737,4 +1018,9 @@ def build_spec(spec) -> RackModel:
     ) if panel is not None else PanelPlan()
     return build(rows, spec.hp, spec.inserts_per_row, spec.insert_hp,
                  RAIL_OVERHANG, plan,
-                 getattr(spec, "module_depth", MODULE_DEPTH))
+                 getattr(spec, "module_depth", MODULE_DEPTH),
+                 style=getattr(spec, "style", "u_channel"),
+                 material=getattr(spec, "material", None),
+                 joint=getattr(spec, "joint", "tslot"),
+                 top_plate=getattr(spec, "top_plate", True),
+                 fastener=getattr(spec, "fastener", "M3"))

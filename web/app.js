@@ -484,7 +484,12 @@ const MEMBER_STYLE = {
   rail:       { color: 0xd8dade, roughness: 0.34, metalness: 0.82, opacity: 1 },
   body:       { color: 0x2b57a8, roughness: 0.46, metalness: 0.55, opacity: 1 },
   side_panel: { color: 0x6b4bd8, roughness: 0.12, metalness: 0.02, opacity: 0.55 },
+  // a laser frame's base, back and top: sheet, not metal
+  plate:      { color: 0xc8a165, roughness: 0.78, metalness: 0.0, opacity: 1 },
 };
+
+/** The sheet a laser frame is cut from, unless the scene names one. */
+const LASER_SHEET = { name: 'plywood-5mm', thickness: 5, kerf: 0.15 };
 
 function buildRack(model) {
   caseGroup.clear();
@@ -533,6 +538,36 @@ const PANEL_FIELDS = [
 
 const ROW_CHOICES = ['3U', '1U-intellijel', '1U-pulplogic'];
 
+/** The U-channel, in the fields a folding shop's form asks for. */
+function frameOrderHtml(o) {
+  return '<h2>order the U-channel</h2>' +
+    '<div class="field"><label>length</label><span>' + o.length_mm + ' mm</span></div>' +
+    '<div class="field"><label>width A</label><span>' + o.width_a_mm + ' mm</span></div>' +
+    '<div class="field"><label>width B</label><span>' + o.width_b_mm + ' mm</span></div>' +
+    '<div class="field"><label>width C</label><span>' + o.width_c_mm + ' mm</span></div>' +
+    '<div class="field"><label>thickness</label><span>' + o.thickness_mm + ' mm</span></div>' +
+    '<p class="note">Folded from a ' + o.developed_mm + ' mm flat. A / B / C are' +
+    ' the three flats in order, which is what a folding shop\'s form asks for.</p>';
+}
+
+/** A laser frame: what is cut, and the bolts and nuts its T-slots take. */
+function laserPlatesHtml(m) {
+  const plates = m.members.filter((x) => x.kind === 'plate' || x.kind === 'side_panel');
+  const hardware = Object.entries(m.bom || {})
+    .filter(([k]) => / (bolt|nut)$/.test(k))
+    .map(([k, n]) => '<div class="field"><label>' + escapeHtml(k) +
+         '</label><span>' + n + '</span></div>').join('');
+  return '<h2>cut from sheet</h2>' +
+    '<div class="field"><label>plates</label><span>' + plates.length +
+    ' x ' + (+m.panel_t).toFixed(1) + ' mm</span></div>' +
+    '<div class="field"><label>joints</label><span>' +
+    (m.joint === 'finger' ? 'finger (glued)' : 'T-slot') + '</span></div>' +
+    hardware +
+    '<p class="note">Base and top run under and over the rails; the back ' +
+    'plate\'s inner face is the module depth. The cut list gives every ' +
+    'plate, the rails and the fixings.</p>';
+}
+
 function rackSpec() {
   if (!state.scene.rack) {
     state.scene.rack = {
@@ -554,7 +589,8 @@ function renderFramePanel() {
   if (!state.scene || !$('fr-hp')) return;
   const isRack = state.scene.kind === 'rack';
   for (const id of ['fr-hp', 'fr-depth', 'fr-inserts', 'fr-add-3u',
-                    'fr-add-1u', ...PANEL_FIELDS.map((f) => f[0])]) {
+                    'fr-add-1u', 'fr-style', 'fr-sheet-t', 'fr-joint',
+                    'fr-top-plate', ...PANEL_FIELDS.map((f) => f[0])]) {
     if ($(id)) $(id).disabled = !isRack;
   }
 
@@ -577,6 +613,20 @@ function renderFramePanel() {
   }
   $('fr-hp-mm').textContent = '= ' + (spec.hp * 5.08).toFixed(2) + ' mm';
   $('fr-inserts').checked = !!spec.inserts_per_row;
+
+  // construction: the laser-only controls are live only for a laser frame,
+  // and the inserts only for a U-channel one -- a back plate closes them
+  const laser = spec.style === 'laser';
+  $('fr-style').value = laser ? 'laser' : 'u_channel';
+  if (document.activeElement !== $('fr-sheet-t')) {
+    $('fr-sheet-t').value = spec.material?.thickness ?? LASER_SHEET.thickness;
+  }
+  $('fr-joint').value = spec.joint === 'finger' ? 'finger' : 'tslot';
+  $('fr-top-plate').checked = spec.top_plate !== false;
+  for (const id of ['fr-sheet-t', 'fr-joint', 'fr-top-plate']) {
+    $(id).disabled = !laser;
+  }
+  $('fr-inserts').disabled = laser;
   for (const [id, key, dflt] of PANEL_FIELDS) {
     const el = $(id);
     if (el && document.activeElement !== el) {
@@ -663,16 +713,9 @@ function renderFramePanel() {
     '<div class="field"><label>capacity</label><span>' + cap + ' HP</span></div>' +
     '<p class="note">Rail slot centres ' + slots +
     ' mm from the panel bottom edge.</p>' +
-    '<h2>order the U-channel</h2>' +
-    '<div class="field"><label>length</label><span>' + o.length_mm + ' mm</span></div>' +
-    '<div class="field"><label>width A</label><span>' + o.width_a_mm + ' mm</span></div>' +
-    '<div class="field"><label>width B</label><span>' + o.width_b_mm + ' mm</span></div>' +
-    '<div class="field"><label>width C</label><span>' + o.width_c_mm + ' mm</span></div>' +
-    '<div class="field"><label>thickness</label><span>' + o.thickness_mm + ' mm</span></div>' +
-    '<p class="note">Folded from a ' + o.developed_mm + ' mm flat. A / B / C are' +
-    ' the three flats in order, which is what a folding shop\'s form asks for.</p>' +
-    '<button id="fr-svg" title="the two side panels as one SVG, ready to cut">' +
-    'export side panels (SVG)</button>';
+    (m.order ? frameOrderHtml(o) : laserPlatesHtml(m)) +
+    '<button id="fr-svg" title="the frame\'s cut plates as one SVG, ready to cut">' +
+    'export ' + (m.order ? 'side panels' : 'plates') + ' (SVG)</button>';
   const btn = $('fr-svg');
   if (btn) btn.onclick = exportSidePanels;
 }
@@ -815,6 +858,38 @@ async function exportSidePanels() {
 
 function wireFramePanel() {
   if (!$('fr-hp')) return;
+  $('fr-style').onchange = () => {
+    edit();
+    const spec = rackSpec();
+    spec.style = $('fr-style').value;
+    if (spec.style === 'laser') {
+      spec.inserts_per_row = 0;       // a back plate closes the insert slots
+      if (!spec.material) spec.material = { ...LASER_SHEET };
+    }
+    renderFramePanel();
+    doResolve();
+  };
+  $('fr-sheet-t').oninput = () => {
+    const v = parseFloat($('fr-sheet-t').value);
+    if (!Number.isFinite(v) || v < 1) return;
+    edit('fr-sheet-t');
+    const spec = rackSpec();
+    const was = spec.material || LASER_SHEET;
+    // the name carries the thickness, as the case's materials do
+    const stem = (was.name || 'plywood').replace(/-[\d.]+mm$/, '');
+    spec.material = { ...was, name: stem + '-' + v + 'mm', thickness: v };
+    scheduleResolve(250);
+  };
+  $('fr-joint').onchange = () => {
+    edit();
+    rackSpec().joint = $('fr-joint').value;
+    doResolve();
+  };
+  $('fr-top-plate').onchange = () => {
+    edit();
+    rackSpec().top_plate = $('fr-top-plate').checked;
+    doResolve();
+  };
   $('fr-depth').oninput = () => {
     const v = parseFloat($('fr-depth').value);
     if (!Number.isFinite(v) || v < 18) return;

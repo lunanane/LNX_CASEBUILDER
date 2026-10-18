@@ -95,6 +95,10 @@ def _frame_summary(scene, model) -> None:
         print(f"  {n:g} x {item}" if not item.endswith(" mm")
               else f"  {item[:-3]}: {n:.2f} mm")
     order = model.order_spec()
+    if order is None:
+        print(f"\nlaser-cut: {len(model.plates)} plates, "
+              f"{model.panel_t:g} mm sheet, {len(model.joints)} joints")
+        return
     print(f"\nU-channel order: length {order['length_mm']} mm, "
           f"A / B / C {order['width_a_mm']} / {order['width_b_mm']} / "
           f"{order['width_c_mm']} mm, {order['thickness_mm']} mm thick")

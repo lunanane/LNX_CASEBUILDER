@@ -196,3 +196,14 @@ test('saving falls back when there is no save dialog', () => {
   assert.match(fn[1], /downloadBlob\(/, 'no fallback path');
   assert.match(fn[1], /AbortError/, 'a cancelled save must not read as an error');
 });
+
+test('the frame pane offers both constructions, and every control is wired', () => {
+  // M7: a U-channel frame and a laser-cut one are chosen in the same pane
+  assert.match(html, /<select id="fr-style">[\s\S]*value="u_channel"[\s\S]*value="laser"/);
+  assert.match(html, /<select id="fr-joint">[\s\S]*value="tslot"[\s\S]*value="finger"/);
+  for (const id of ['fr-style', 'fr-sheet-t', 'fr-joint', 'fr-top-plate']) {
+    assert.ok(staticIds.has(id), `${id} is missing from index.html`);
+    assert.match(js, new RegExp(`\\$\\('${id}'\\)\\.(onchange|oninput) =`),
+      `${id} has no handler`);
+  }
+});
