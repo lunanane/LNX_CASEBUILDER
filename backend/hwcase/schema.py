@@ -242,6 +242,21 @@ class Mate(Strict):
 # part
 # --------------------------------------------------------------------------
 
+class PartModel(Strict):
+    """A part's vendor mesh, for display only. See `hwcase.models`.
+
+    Checks and cuts never read this: they run on the boxes. It is what a
+    person sees in the editor and the photograph.
+    """
+
+    #: the model file, relative to vendor/cad
+    file: str
+    #: row-major 4x4 from the file's millimetres to the part's frame
+    matrix: list[float] = Field(min_length=16, max_length=16)
+    #: the board's colour; everything on it is drawn as neutral metal
+    color: Optional[str] = None
+
+
 class Part(Strict):
     id: str
     name: str
@@ -261,6 +276,8 @@ class Part(Strict):
 
     #: reference CAD we downloaded, relative to vendor/cad/
     cad: Optional[str] = None
+    #: the vendor mesh to show in place of the boxes, when there is one
+    model: Optional[PartModel] = None
     notes: Optional[str] = None
     src: Source = Field(default_factory=Source)
 

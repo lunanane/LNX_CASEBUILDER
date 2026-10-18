@@ -7,6 +7,11 @@ parts:
     category: input
     tags: [i2c, seesaw, neopixel, keypad, tileable]
     cad: adafruit/3954/Adafruit NeoTrellis 4x4 v2.stl
+    # the vendor mesh, shown in place of the boxes (display only)
+    model:
+      file: adafruit/3954/Adafruit NeoTrellis 4x4 v2.stl
+      matrix: [1.0, 0.0, 0.0, 30.028, 0.0, 1.0, 0.0, 29.972, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+      color: "#1b1b1f"
     notes: >-
       Vendor mesh gives 60.000 x 60.000 x 7.570 mm, confirming both the shop
       spec and the 60 mm tiling grid -- two of these are exactly 120 x 60, with
@@ -158,6 +163,12 @@ parts:
     category: input
     tags: [i2c, seesaw, encoder, neopixel, stemma_qt]
     cad: adafruit/5752/5752 Quad Rotary Breakout.stl
+    # the vendor mesh, shown in place of the boxes (display only): turned
+    # over, so the encoder shafts face the panel
+    model:
+      file: adafruit/5752/5752 Quad Rotary Breakout.stl
+      matrix: [-1.0, 0.0, 0.0, 38.1, 0.0, 1.0, 0.0, 10.795, 0.0, 0.0, -1.0, 1.57, 0.0, 0.0, 0.0, 1.0]
+      color: "#1b1b1f"
     notes: >-
       CAREFUL: shop listings (and several distributors) quote 25.6 x 25.3 x
       4.6 mm for this board. That is the single-encoder 4991, not this one.

@@ -70,6 +70,24 @@ class Frame:
             self.pos[2] + z,
         )
 
+    def matrix(self) -> list[float]:
+        """Row-major 4x4 of `point`: part frame to world. What a renderer
+        needs to put a part's own mesh exactly where its boxes are."""
+        t = self.tilt % 360
+        tilt = {0: ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
+                90: ((1, 0, 0), (0, 0, -1), (0, 1, 0)),
+                180: ((1, 0, 0), (0, -1, 0), (0, 0, -1)),
+                270: ((1, 0, 0), (0, 0, 1), (0, -1, 0))}[t]
+        a = math.radians(self.rot_z)
+        ca, sa = math.cos(a), math.sin(a)
+        rz = ((ca, -sa, 0.0), (sa, ca, 0.0), (0.0, 0.0, 1.0))
+        r = [[sum(rz[i][k] * tilt[k][j] for k in range(3)) for j in range(3)]
+             for i in range(3)]
+        return [r[0][0], r[0][1], r[0][2], self.pos[0],
+                r[1][0], r[1][1], r[1][2], self.pos[1],
+                r[2][0], r[2][1], r[2][2], self.pos[2],
+                0.0, 0.0, 0.0, 1.0]
+
     def direction(self, d: Vec3) -> Vec3:
         """Rotate a direction vector; no translation."""
         x, y, z = self._tilt_point(d)

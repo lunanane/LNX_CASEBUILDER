@@ -214,6 +214,34 @@ def get_part(part_id: str):
         raise HTTPException(404, f"unknown part {part_id}")
 
 
+@app.get("/api/parts/{part_id}/model.glb")
+def get_part_model(part_id: str):
+    """The part's vendor mesh, reduced and coloured, in the part's frame.
+
+    Display only: the editor fetches it when real models are switched on,
+    and places it with the placement's frame matrix. Built once per part
+    and cached beside the vendor CAD, which is shared by every visitor.
+    """
+    from . import models
+
+    try:
+        part = library()[part_id]
+    except KeyError:
+        raise HTTPException(404, f"unknown part {part_id}")
+    if part.model is None:
+        raise HTTPException(404, f"{part_id} has no display model")
+    if not (models.CAD_ROOT / part.model.file).exists():
+        raise HTTPException(404, f"{part_id}'s model file is not on this "
+                                 f"server: {part.model.file}")
+    try:
+        path = models.glb_for(part)
+    except Exception as exc:
+        raise HTTPException(422, f"could not build {part_id}'s model: {exc}")
+    return FileResponse(path, media_type="model/gltf-binary",
+                        filename=f"{part_id}.glb",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+
 # --------------------------------------------------------------------------
 # scenes on disk
 # --------------------------------------------------------------------------
@@ -879,7 +907,7 @@ def render_image(scene: Scene = Body(...), samples: int = 96,
 
         def trace(out: Path) -> None:
             try:
-                raytrace.render(res, model, out, settings)
+                raytrace.render(res, model, out, settings, lib=lib)
             except RuntimeError as exc:
                 raise HTTPException(503, str(exc))
             except Exception as exc:

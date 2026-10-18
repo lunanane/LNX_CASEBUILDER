@@ -285,8 +285,40 @@ def _look_at(target, radius: float, s: RenderSettings):
     )
 
 
+def _write_models(res: Resolved, lib, workdir: Path, scene: dict) -> set[str]:
+    """Each placement whose part has a display model, as a PLY in the world.
+    Returns the placements drawn that way, so their blocks are left out."""
+    from . import models
+
+    done: set[str] = set()
+    for pl in res.scene.placements:
+        try:
+            part = lib[pl.part]
+        except KeyError:
+            continue
+        if part.model is None or pl.id not in res.frames:
+            continue
+        try:
+            mesh = models.mesh_for(part)
+        except Exception:                      # a missing file: keep the blocks
+            continue
+        mesh.apply_transform(np.array(res.frames[pl.id].matrix(), float)
+                             .reshape(4, 4))
+        ply = _write_ply(workdir / f"model-{pl.id}.ply",
+                         np.asarray(mesh.vertices), np.asarray(mesh.faces))
+        scene[f"model-{pl.id}"] = {
+            "type": "ply", "filename": str(ply),
+            "bsdf": _twosided({"type": "roughplastic",
+                               "diffuse_reflectance": {"type": "rgb",
+                                                       "value": [0.06, 0.06, 0.07]},
+                               "alpha": 0.12, "int_ior": 1.5}),
+        }
+        done.add(pl.id)
+    return done
+
+
 def build_scene_dict(res: Resolved, case: CaseModel, s: RenderSettings,
-                     workdir: Path) -> dict:
+                     workdir: Path, lib=None) -> dict:
     """A Mitsuba scene, with the meshes written out beside it.
 
     Split from `render` so the translation can be tested without Mitsuba
@@ -372,9 +404,15 @@ def build_scene_dict(res: Resolved, case: CaseModel, s: RenderSettings,
                                                        "value": [0.05, 0.05, 0.06]}}),
                 }
 
-    # The hardware, as blocks. Not pretty, but a picture of an empty box is
+    # The hardware as its vendor models, where a part has one (M4): the same
+    # mesh the editor shows, placed by the same frame matrix.
+    modelled = _write_models(res, lib, workdir, scene) if lib is not None else set()
+
+    # Everything else as blocks. Not pretty, but a picture of an empty box is
     # not a picture of the machine, and the boards are what it is for.
     for i, solid in enumerate(res.bodies()):
+        if solid.placement in modelled:
+            continue
         verts, faces = _extrude([solid.poly], solid.z[0], solid.z[1])
         if not len(faces):
             continue
@@ -456,7 +494,7 @@ def _transform_ground(centre, z0: float, radius: float) -> list[list[float]]:
 
 def render(res: Resolved, case: CaseModel, out: Path,
            settings: Optional[RenderSettings] = None,
-           workdir: Optional[Path] = None) -> Path:
+           workdir: Optional[Path] = None, lib=None) -> Path:
     """Render the machine to a PNG. Slow on purpose."""
     try:
         import mitsuba as mi
@@ -472,7 +510,7 @@ def render(res: Resolved, case: CaseModel, out: Path,
     mi.set_variant("scalar_rgb")
 
     work = Path(workdir) if workdir else out.parent / f".{out.stem}-meshes"
-    scene_dict = build_scene_dict(res, case, s, work)
+    scene_dict = build_scene_dict(res, case, s, work, lib=lib)
     image = mi.render(mi.load_dict(_with_transforms(scene_dict, mi)))
 
     out.parent.mkdir(parents=True, exist_ok=True)
