@@ -217,3 +217,11 @@ test('the case pane offers a box of plates, and its controls are wired', () => {
   }
   assert.match(js, /caseModel\.kind === 'box'\) \{ buildBox\(caseModel\)/);
 });
+
+test('rack bays can be added to a box, and the box draws its rails', () => {
+  // M10: bays live in the case pane; the 3D view draws plates and members
+  assert.ok(staticIds.has('bay-list') && staticIds.has('btn-add-bay'));
+  assert.match(js, /\$\('btn-add-bay'\)\.onclick =/);
+  assert.match(js, /module_depth: 40, module_panel_t: 2, modules: \[\]/);
+  assert.match(js, /\[\.\.\.model\.plates, \.\.\.\(model\.members \|\| \[\]\)\]/);
+});

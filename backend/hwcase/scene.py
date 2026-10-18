@@ -951,6 +951,12 @@ def check(res: Resolved, lib: PartLibrary) -> list[Issue]:
         from .panel import depth_issues
         for code, message, refs in depth_issues(res, res.scene.case):
             issues.append(Issue("error", code, message, refs))
+
+    # 8. rack bays: modules fit their bay, nothing else enters it
+    if res.scene.racks:
+        from .hybrid import bay_issues
+        for level, code, message, refs in bay_issues(res, res.scene.case):
+            issues.append(Issue(level, code, message, refs))
     return issues
 
 

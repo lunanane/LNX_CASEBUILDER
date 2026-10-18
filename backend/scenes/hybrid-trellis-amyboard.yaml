@@ -1,0 +1,81 @@
+# A Eurorack hybrid: a rack bay and Adafruit boards in one laser-cut box.
+#
+# The left of the deck is a 28 HP, 3U Eurorack bay. The AMYboard sits in it
+# as a module -- its own 10 HP panel resting on the rails -- with 18 HP to
+# spare for other modules. The module faces are the case's upper surface
+# (decision D-3), so the deck around the bay is flush with them.
+#
+# The right of the deck is two NeoTrellis boards side by side, each with its
+# elastomer 4x4 pad: 32 buttons whose tops are flush with the same surface,
+# the boards screwed up under the deck on standoffs.
+#
+# The box is 3 mm plywood with captive-nut T-slots. Its floor drops to the
+# bay's 40 mm module depth, so a module has 40 mm of clear room behind its
+# face, as it would in a 40 mm frame.
+
+name: hybrid-trellis-amyboard
+
+panels:
+- name: main
+  z: 0.0
+  note: "The module faces and the button tops -- the case's upper surface."
+
+racks:
+- id: bay
+  at: [0.0, 0.0]
+  hp: 28
+  rows:
+  - {format: 3U}
+  module_depth: 40.0
+  module_panel_t: 2.0
+  modules: [amy, amy_panel]
+
+placements:
+# --- the module: AMYboard behind its own 10 HP panel ----------------------
+- id: amy
+  part: shorepine-amyboard
+  pos: [1.15, 13.35, 0.0]
+  on_panel: main
+  panel_ref: face            # its panel's face is the module face
+  support: none              # a module hangs from the rails, not the box
+- id: amy_panel
+  part: shorepine-amyboard-panel
+  parent: amy
+  parent_mate: panel
+  mate: board
+
+# --- 4 x 8 buttons: two NeoTrellis with elastomer pads ---------------------
+- id: trellis_a
+  part: adafruit-3954-neotrellis
+  pos: [160.0, 36.0, 0.0]
+  on_panel: main
+  panel_ref: buttons         # the pad's button tops, not the PCB's
+  support: from_lid
+- id: pad_a
+  part: adafruit-1611-keypad
+  parent: trellis_a
+  parent_mate: keypad
+  mate: pcb
+- id: trellis_b
+  part: adafruit-3954-neotrellis
+  pos: [220.0, 36.0, 0.0]    # 60 mm on: the button pitch runs on across the seam
+  on_panel: main
+  panel_ref: buttons
+  support: from_lid
+- id: pad_b
+  part: adafruit-1611-keypad
+  parent: trellis_b
+  parent_mate: keypad
+  mate: pcb
+
+case:
+  style: box
+  box_joint: tslot
+  materials:
+  - {name: plywood-3mm, thickness: 3.0, kerf: 0.15, color: "#c8a165"}
+  wall: 6.0
+  floor_gap: 3.0
+  ceiling_gap: 1.0
+  part_clearance: 0.6
+  plates:
+  - [600.0, 400.0]
