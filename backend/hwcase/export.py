@@ -324,8 +324,12 @@ def rack_to_json(model) -> dict:
         "module_depth": model.module_depth,
         "overhang": model.overhang,
         "margin": model.margin,
-        "margin_min": rack_min_margin(model.overhang),
+        "margin_min": (model.min_margin if model.min_margin is not None
+                       else rack_min_margin(model.overhang)),
         "stands_on": model.stands_on,
+        "style": model.style,
+        "joint": model.joint,
+        "panel_t": model.panel_t,
         "panel": {
             "top": model.plan.top, "bottom": model.plan.bottom,
             "front": model.plan.front, "back": model.plan.back,
@@ -841,13 +845,14 @@ def rack_cutlist(model, sheets: list[PackedSheet], stock) -> str:
     ]
     for p in plates:
         x0, y0, x1, y1 = p.outline.bounds
+        drilled = (f", {len(p.holes)} x M5 clearance hole" if p.holes else "")
         lines.append(f"  {p.name:<12} {p.material.name:<14} "
-                     f"{x1 - x0:6.1f} x {y1 - y0:6.1f} mm, "
-                     f"{len(p.holes)} x M5 clearance hole")
-        lines.append(f"    holes from the {p.datum.name} "
-                     f"(along it, then up from it):")
-        for note, along, into in p.datum_positions():
-            lines.append(f"      {along:7.2f} {into:7.2f} mm  {note}")
+                     f"{x1 - x0:6.1f} x {y1 - y0:6.1f} mm{drilled}")
+        if p.holes:
+            lines.append(f"    holes from the {p.datum.name} "
+                         f"(along it, then up from it):")
+            for note, along, into in p.datum_positions():
+                lines.append(f"      {along:7.2f} {into:7.2f} mm  {note}")
     rails = model.rails
     lines += [
         "",
@@ -856,20 +861,27 @@ def rack_cutlist(model, sheets: list[PackedSheet], stock) -> str:
     ]
     for r in rails:
         lines.append(f"  {r.name:<12} {r.length:8.2f} mm")
-    order = model.order_spec()
     lines += [
         "",
         "fixings:",
         f"  {2 * len(rails)} x M5 screw -- one through a side panel into "
         f"each end of each of the {len(rails)} rails",
-        "",
-        "U-channel (order):",
-        f"  {order['part']}: length {order['length_mm']} mm, "
-        f"A / B / C {order['width_a_mm']} / {order['width_b_mm']} / "
-        f"{order['width_c_mm']} mm, {order['thickness_mm']} mm thick, "
-        f"developed {order['developed_mm']} mm",
-        "",
     ]
+    # a laser frame's joints: bolts by length, and their captive nuts
+    for item, n in model.bill_of_materials().items():
+        if item.endswith((" bolt", " nut")):
+            lines.append(f"  {n} x {item}")
+    order = model.order_spec()
+    if order is not None:
+        lines += [
+            "",
+            "U-channel (order):",
+            f"  {order['part']}: length {order['length_mm']} mm, "
+            f"A / B / C {order['width_a_mm']} / {order['width_b_mm']} / "
+            f"{order['width_c_mm']} mm, {order['thickness_mm']} mm thick, "
+            f"developed {order['developed_mm']} mm",
+        ]
+    lines.append("")
     return "\n".join(lines)
 
 

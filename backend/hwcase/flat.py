@@ -221,7 +221,13 @@ RACK_PLATE_KERF = 0.15
 
 def rack_plate_material(member: "Member", kerf: float = RACK_PLATE_KERF
                         ) -> Material:
-    """The sheet a frame plate is cut from, named with its thickness."""
+    """The sheet a frame plate is cut from, named with its thickness.
+
+    A laser frame knows its sheet; a U-channel frame's acrylic panels are
+    named from the member, as they always were.
+    """
+    if getattr(member, "stock", None) is not None:
+        return member.stock
     return Material(name=f"{member.material}-{member.length:g}mm",
                     thickness=member.length, kerf=kerf, color="#d8dde3")
 
@@ -230,28 +236,38 @@ def from_member(member: "Member", index: int,
                 kerf: float = RACK_PLATE_KERF) -> FlatPart:
     """One frame plate as a flat part.
 
-    A plate member's section is drawn in (depth, height) with its origin at
+    A side panel's section is drawn in (depth, height) with its origin at
     the front-bottom corner, and its `length` is the plate's thickness. The
     datum is the bottom edge, front to back: it is the outside of the case,
     and the edge both the rails' height and the M5 drilling are measured up
     from.
+
+    A laser frame's base, back and top are cut from their own flat outline
+    (`member.cut`), with the joints at its two ends; their datum is the edge
+    along the front (base, top) or the bottom (back), left to right.
     """
-    if member.kind != "side_panel":
+    if member.kind not in ("side_panel", "plate"):
         raise ValueError(
             f"{member.name} is a {member.kind}, which is bought as extrusion "
             f"or folded sheet, not cut from a plate")
     mat = rack_plate_material(member, kerf)
-    _x0, _y0, x1, _y1 = member.section.bounds
+    outline = member.cut if getattr(member, "cut", None) is not None \
+        else member.section
+    _x0, _y0, x1, _y1 = outline.bounds
+    along = ("bottom edge, front to back" if member.kind == "side_panel"
+             else "back plate's bottom edge, left to right"
+             if member.name == "back"
+             else f"{member.name} plate's front edge, left to right")
     return FlatPart(
         name=member.name,
         material=mat,
-        outline=member.section,
+        outline=outline,
         role=member.kind,
         index=index,
         labels=Labels.plain(member.name, member.kind, mat),
         holes=list(member.holes),
         notes=list(member.notes),
-        datum=Edge((0.0, 0.0), (x1, 0.0), "bottom edge, front to back"),
+        datum=Edge((0.0, 0.0), (x1, 0.0), along),
     )
 
 
@@ -260,11 +276,12 @@ def from_rack(model: "RackModel", kerf: float = RACK_PLATE_KERF
     """Every plate of a frame. The rails and the U-channel are bought, not
     cut, so they are the cut list's business and not the packer's.
 
-    Both side panels come out of the same outline. They are mirror images
-    as installed, and a plate turned over is its own mirror image -- so the
-    second one is simply cut the same and flipped at assembly.
+    A U-channel frame's two side panels come out of the same outline: they
+    are mirror images as installed, and a plate turned over is its own mirror
+    image, so the second is simply cut the same and flipped at assembly. A
+    laser frame's cheeks carry their own joint cuts, so each is cut as drawn.
     """
-    plates = [m for m in model.members if m.kind == "side_panel"]
+    plates = [m for m in model.members if m.kind in ("side_panel", "plate")]
     return [from_member(m, i, kerf) for i, m in enumerate(plates)]
 
 

@@ -776,3 +776,230 @@ def test_build_fails_loudly_when_the_plates_fit_no_stock(tmp_path, capsys):
     assert "fits none of the plates" in capsys.readouterr().out
     assert not list((tmp_path / "o").glob("*-sheets")), \
         "a half-written sheet folder for a frame that cannot be cut"
+
+
+# --------------------------------------------------------------------------
+# M7: the fully laser-cut frame
+# --------------------------------------------------------------------------
+
+from hwcase import joinery as _jn                           # noqa: E402
+from hwcase.schema import Material, RackSpec               # noqa: E402
+
+SIX_U = [ROW_3U, ROW_3U]
+#: stock wide enough for a 68 HP plate; the default 350 x 350 bed is not
+WIDE_STOCK = CaseSpec(plates=[(600.0, 400.0)])
+
+
+def _sheet(t: float, name: str = "plywood") -> Material:
+    return Material(name=f"{name}-{t:g}mm", thickness=t, kerf=0.15)
+
+
+def _laser(rows=SIX_U, hp=68.0, t=5.0, joint="tslot", **kw):
+    return rack.build(rows, hp, style="laser", joint=joint,
+                      material=_sheet(t), **kw)
+
+
+def _member(model, name):
+    return next(m for m in model.members if m.name == name)
+
+
+def _world_holes(model, member):
+    """M5 hole centres as (z, y) in the frame's world: depth and height."""
+    return sorted((round(h.at[0] - model.plan.front, 6),
+                   round(member.origin[1] + h.at[1], 6)) for h in member.holes)
+
+
+def test_m7_row1_u_channel_frames_are_unchanged_by_the_style_switch():
+    for rows in (SIX_U, BUILT_ROWS, [ROW_3U]):
+        a = rack.build(rows, 68.0)
+        b = rack.build(rows, 68.0, style="u_channel")
+        assert [m.name for m in a.members] == [m.name for m in b.members]
+        for x, y in zip(a.members, b.members):
+            assert x.section.equals_exact(y.section, 1e-12)
+            assert (x.origin, x.length, x.material) == \
+                (y.origin, y.length, y.material)
+        assert a.style == "u_channel" and a.order_spec() is not None
+
+
+def test_m7_a_spec_without_a_style_builds_the_u_channel():
+    model = rack.build_spec(RackSpec())
+    assert model.style == "u_channel"
+    assert [m.kind for m in model.members].count("body") == 1
+
+
+@pytest.mark.parametrize("joint", ["tslot", "finger"])
+def test_m7_row2_cheek_m5s_land_where_the_side_panel_m5s_do(joint):
+    """In the world: the rails do not move, so neither may the screws."""
+    u = rack.build(SIX_U, 68.0, module_depth=51.0)
+    lz = _laser(joint=joint, module_depth=51.0)
+    side = _member(u, "side-left")
+    for name in ("side-left", "side-right"):
+        cheek = _member(lz, name)
+        for (z1, y1), (z2, y2) in zip(_world_holes(u, side),
+                                      _world_holes(lz, cheek)):
+            assert z1 == pytest.approx(z2, abs=0.01)
+            assert y1 == pytest.approx(y2, abs=0.01)
+    # one M5 per rail end: four rails in 6U, so four holes in each cheek
+    assert len(_member(lz, "side-left").holes) == len(side.holes) == 4
+
+
+def test_m7_row2_with_unraised_margins_the_panel_frames_agree_too():
+    """3 mm finger joints fit the default 10.5 mm margin: nothing moves."""
+    u = rack.build(SIX_U, 68.0)
+    lz = _laser(t=3.0, joint="finger")
+    assert lz.plan.bottom == pytest.approx(u.plan.bottom)
+    assert sorted(h.at for h in _member(lz, "side-left").holes) == \
+        pytest.approx(sorted(h.at for h in _member(u, "side-left").holes))
+
+
+def _plate(model, member) -> "_jn.Plate":
+    keep = tuple(Point(*h.at).buffer(h.diameter / 2, quad_segs=12)
+                 for h in member.holes)
+    geom = member.cut if member.cut is not None else member.section
+    return _jn.Plate(geom, member.stock, keep,
+                     rack.laser_keep_clear(member.stock.thickness)
+                     if member.kind == "side_panel" else None)
+
+
+@pytest.mark.parametrize("joint", ["tslot", "finger"])
+@pytest.mark.parametrize("rows", [SIX_U, BUILT_ROWS, [ROW_3U]],
+                         ids=["6U", "1U+3U+1U", "3U"])
+def test_m7_row3_every_joint_validates_against_the_finished_plates(rows, joint):
+    """Each joint is checked again once every other joint is also cut in."""
+    model = _laser(rows=rows, joint=joint)
+    assert len(model.joints) == 6                  # 3 plates x 2 cheeks
+    for fj in model.joints:
+        cheek = _member(model, f"side-{fj.side}")
+        plate = _member(model, fj.plate)
+        problems = _jn.validate_joint(fj.joint, _plate(model, cheek),
+                                      _plate(model, plate))
+        assert problems == [], (fj.plate, fj.side, problems)
+
+
+@pytest.mark.parametrize("joint", ["tslot", "finger"])
+def test_m7_row4_every_plate_fits_the_configured_stock(joint):
+    model = _laser(joint=joint)
+    parts = flat.from_rack(model)
+    assert {p.name for p in parts} == {"side-left", "side-right",
+                                       "base", "top", "back"}
+    sheets = export.pack_sheets(parts, stock=WIDE_STOCK)
+    placed = {pl.part.name for s in sheets for pl in s.placements}
+    assert placed == {p.name for p in parts}
+
+
+def test_m7_row4_a_plate_too_wide_for_the_bed_is_refused_by_name():
+    """355 mm of base plate does not go on a 350 mm bed, and says so."""
+    with pytest.raises(ValueError, match="base"):
+        export.pack_sheets(flat.from_rack(_laser()), stock=CaseSpec())
+
+
+@pytest.mark.parametrize("joint", ["tslot", "finger"])
+def test_m7_row5_thicker_sheet_changes_the_cut_and_still_validates(joint):
+    thin, thick = _laser(t=3.0, joint=joint), _laser(t=6.0, joint=joint)
+    for model, t in ((thin, 3.0), (thick, 6.0)):
+        assert model.panel_t == t
+        assert model.outer_width == pytest.approx(model.width + 2 * t)
+        for fj in model.joints:
+            slots = [f for _, f in fj.joint.of("a", "slot")]
+            assert slots
+            # a T-slot's slot is the sheet plus the fit all round; a finger
+            # notch is exactly a sheet deep, its fit is along the joint
+            deep = t + fj.joint.clearance if joint == "tslot" else t
+            for s in slots:
+                assert s.deep == pytest.approx(deep, abs=1e-6)
+    assert not _member(thin, "side-left").section.equals(
+        _member(thick, "side-left").section)
+
+
+def test_m7_row6_one_m3_nut_per_t_slot_bolt():
+    model = _laser()
+    bom = model.bill_of_materials()
+    bolts = sum(len(fj.joint.bolts) for fj in model.joints)
+    assert bolts > 0
+    assert bom["M3 hex nut"] == bolts
+    assert sum(n for k, n in bom.items() if k.endswith(" bolt")) == bolts
+    assert "body mm" not in bom and bom["plates"] == 3
+    assert bom["M5 screws"] == 2 * bom["rails"]
+
+
+def test_m7_finger_joints_need_no_hardware():
+    bom = _laser(joint="finger").bill_of_materials()
+    assert not any("nut" in k or "bolt" in k for k in bom)
+
+
+def test_m7_margins_rise_to_fit_the_plates_and_say_so():
+    model = _laser(t=6.0)
+    need = rack.laser_min_margin(6.0, "tslot")
+    assert model.plan.bottom == pytest.approx(need)
+    assert model.plan.top == pytest.approx(need)
+    assert model.min_margin == pytest.approx(need)
+    assert any("bottom margin raised" in n
+               for n in _member(model, "side-left").notes)
+
+
+def test_m7_no_plate_crosses_a_rail():
+    """Base and top stay outside the rails' outer edges, with the gap."""
+    for t, joint in ((3.0, "finger"), (5.0, "tslot"), (6.0, "tslot")):
+        model = _laser(t=t, joint=joint)
+        rails = [m for m in model.members if m.kind == "rail"]
+        low = min(r.origin[1] for r in rails)
+        high = max(r.origin[1] + rack.RAIL_H for r in rails)
+        base, top = _member(model, "base"), _member(model, "top")
+        assert base.origin[1] + t <= low - rack.LASER_RAIL_GAP + 1e-9
+        assert top.origin[1] >= high + rack.LASER_RAIL_GAP - 1e-9
+
+
+def test_m7_the_back_plate_sits_at_the_module_depth():
+    model = _laser(module_depth=46.0)
+    back = _member(model, "back")
+    assert back.origin[2] == pytest.approx(46.0)
+    assert model.depth >= 46.0 + model.panel_t
+
+
+def test_m7_finger_joints_refuse_a_rounded_back_corner():
+    plan = rack.PanelPlan(r_bottom_back=1.0)
+    with pytest.raises(ValueError, match="r_bottom_back"):
+        _laser(joint="finger", plan=plan)
+    _laser(joint="tslot", plan=plan)              # a T-slot is inside it
+
+
+def test_m7_side_panel_inserts_are_refused_on_a_laser_frame():
+    with pytest.raises(ValueError, match="back plate closes the slot"):
+        _laser(inserts_per_row=1)
+
+
+def test_m7_a_frame_too_shallow_for_the_joint_says_what_would_help():
+    with pytest.raises(ValueError, match="deeper frame, thinner sheet"):
+        _laser(t=8.0, module_depth=30.0)
+
+
+def test_m7_without_a_top_plate_there_are_two_plates():
+    model = _laser(top_plate=False)
+    assert {m.name for m in model.members if m.kind == "plate"} == \
+        {"base", "back"}
+    assert len(model.joints) == 4
+
+
+def test_m7_the_ordered_frame_builds_laser_cut(tmp_path):
+    """The 46 mm, rounded-corner frame that was actually ordered, as a laser
+    frame instead: its front radii shorten the plates, its back radius stays
+    clear of a T-slot."""
+    spec = load_scene(Path(__file__).resolve().parents[1] / "scenes"
+                      / "frame-6-v2-46mm dpeth 68 hp -ordered.yaml").rack
+    spec = spec.model_copy(update={"style": "laser", "inserts_per_row": 0})
+    model = rack.build_spec(spec)
+    assert model.style == "laser"
+    assert _member(model, "base").origin[2] == pytest.approx(
+        spec.panel.r_bottom_front)
+
+
+def test_m7_exports_a_cut_list_without_a_u_channel():
+    files = dict(export.rack_sheet_files(_laser(), "svg", "lz",
+                                         stock=WIDE_STOCK))
+    cut = files["lz-cutlist.txt"]
+    assert "U-channel" not in cut
+    assert "M3 hex nut" in cut and "M5 screw" in cut
+    for name in ("base", "top", "back", "side-left", "side-right"):
+        assert name in cut
+    assert export.rack_to_json(_laser())["order"] is None
+    assert export.rack_to_json(_laser())["style"] == "laser"

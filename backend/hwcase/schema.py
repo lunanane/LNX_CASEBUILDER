@@ -786,6 +786,22 @@ class RackSpec(Strict):
     #: corners are cut.
     panel: PanelSpec = Field(default_factory=lambda: PanelSpec())
 
+    #: `u_channel`: aluminium rails, one folded aluminium body, two side
+    #: panels. `laser`: the same rails, and every other piece -- two cheeks,
+    #: a base, a back and a top -- cut from one sheet and jointed together.
+    style: Literal["u_channel", "laser"] = "u_channel"
+    #: laser style only: the sheet everything is cut from. Its thickness is
+    #: whatever the sheet on the bench measures (D-2); the joints follow it.
+    #: Unset, 5 mm plywood.
+    material: Optional[Material] = None
+    #: laser style only: captive-nut T-slots (strong, comes apart) or glued
+    #: finger joints
+    joint: Literal["tslot", "finger"] = "tslot"
+    #: laser style only: close the top with a plate, as the U-channel does
+    top_plate: bool = True
+    #: laser style only, T-slots: the bolt and nut size
+    fastener: str = "M3"
+
 
 class ViewSettings(Strict):
     """How the preview is lit. None of this reaches the geometry.
