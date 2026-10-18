@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { snapDelta, snapLines } from './snap.js';
 import { FINISHES, finishFor } from './finishes.js';
 import { createHistory } from './history.js';
@@ -214,9 +215,62 @@ function entryFor(id) {
   return e;
 }
 
+// ---------------------------------------------------------------------------
+// real models (M4): a part's vendor mesh in place of its boxes -- display only
+// ---------------------------------------------------------------------------
+//
+// The boxes are still what everything is computed from, so they stay: drawn
+// faint while a model stands in for them, and still the thing a click picks
+// and a drag moves. Models are fetched only once the toggle is on, once per
+// part, and placed with the frame matrix the engine sends -- the browser never
+// works out a part's pose for itself.
+
+const gltf = new GLTFLoader();
+const modelCache = new Map();            // part id -> Promise<THREE.Object3D>
+
+function realModelsOn() { return !!$('chk-models')?.checked; }
+
+function loadModel(partId) {
+  if (!modelCache.has(partId)) {
+    const p = new Promise((resolve, reject) => {
+      gltf.load(`/api/parts/${encodeURIComponent(partId)}/model.glb`,
+        (g) => resolve(g.scene), undefined, reject);
+    });
+    p.catch(() => modelCache.delete(partId));   // try again next time
+    modelCache.set(partId, p);
+  }
+  return modelCache.get(partId);
+}
+
+/** Part ids that have a model, when real models are on. */
+function modelledParts() {
+  if (!realModelsOn()) return new Set();
+  return new Set((state.parts || []).filter((p) => p.model).map((p) => p.id));
+}
+
+async function addModels(resolved) {
+  const modelled = modelledParts();
+  if (!modelled.size || !resolved) return;
+  for (const pl of resolved.placements || []) {
+    const frame = resolved.frames?.[pl.id];
+    if (!modelled.has(pl.part) || !frame?.matrix) continue;
+    let proto;
+    try { proto = await loadModel(pl.part); } catch { continue; }  // boxes stay
+    if (state.resolved !== resolved) return;    // a newer solve took over
+    const obj = proto.clone(true);
+    obj.applyMatrix4(new THREE.Matrix4().set(...frame.matrix));
+    obj.traverse((o) => {
+      o.userData = { ...o.userData, placement: pl.id, model: true };
+      if (o.isMesh) o.castShadow = o.receiveShadow = true;
+    });
+    entryFor(pl.id).group.add(obj);
+  }
+}
+
 function buildSolids(resolved) {
   solidsGroup.clear();
   groupsByPlacement.clear();
+  const modelled = modelledParts();
 
   for (const s of resolved.solids) {
     const [, , z0, , , z1] = s.bounds;
@@ -224,7 +278,10 @@ function buildSolids(resolved) {
     const geom = new THREE.ExtrudeGeometry(shapeFromOutline(s.outline), {
       depth, bevelEnabled: false, curveSegments: 8,
     });
-    const style = KIND_STYLE[s.kind] || KIND_STYLE.body;
+    const base = KIND_STYLE[s.kind] || KIND_STYLE.body;
+    // a real model stands in for this part: its boxes go faint, not away
+    const style = modelled.has(s.part)
+      ? { ...base, opacity: Math.min(base.opacity, 0.12) } : base;
     const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
       color: style.color, transparent: true, opacity: style.opacity,
       roughness: 0.55, metalness: 0.12,
@@ -247,6 +304,7 @@ function buildSolids(resolved) {
     }
   }
   applyAppearance();
+  addModels(resolved);
 }
 
 /** Solid when the part is fine, ghosted red when it is part of an error.
@@ -2840,6 +2898,8 @@ $('chk-supports').onchange = () => buildSupports(state.resolved);
 $('chk-grid').onchange = () => {
   grid.visible = axes.visible = $('chk-grid').checked && !$('chk-render').checked;
 };
+// fetching starts here, not on page load: a schematic session downloads none
+$('chk-models').onchange = () => { if (state.resolved) buildSolids(state.resolved); };
 $('scene-select').onchange = (ev) => loadScene(ev.target.value);
 
 

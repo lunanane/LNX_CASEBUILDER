@@ -10,7 +10,8 @@
   "imports": {
     "three": "./vendor/three.module.js",
     "three/addons/controls/OrbitControls.js": "./vendor/OrbitControls.js",
-    "three/addons/environments/RoomEnvironment.js": "./vendor/RoomEnvironment.js"
+    "three/addons/environments/RoomEnvironment.js": "./vendor/RoomEnvironment.js",
+    "three/addons/loaders/GLTFLoader.js": "./vendor/loaders/GLTFLoader.js"
   }
 }
 </script>
@@ -68,6 +69,7 @@
         <label><input type="checkbox" id="chk-openings" checked> open sides</label>
         <label><input type="checkbox" id="chk-supports" checked> screws</label>
         <label><input type="checkbox" id="chk-grid" checked> grid</label>
+        <label title="draw parts as their vendor models where they have one; checks and cuts still use the boxes"><input type="checkbox" id="chk-models"> real models</label>
         <hr>
         <label><input type="checkbox" id="chk-snap" checked>snap board edges</label>
         <hr>
