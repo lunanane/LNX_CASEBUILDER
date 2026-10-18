@@ -265,6 +265,10 @@ def _material_json(m) -> dict:
 
 
 def case_to_json(case: CaseModel) -> dict:
+    from .box import BoxModel, box_to_json
+
+    if isinstance(case, BoxModel):
+        return box_to_json(case)
     return {
         "z0": case.z0, "z1": case.z1,
         "bom": case.bill_of_materials(),
@@ -800,6 +804,15 @@ def sheet_files(source, fmt: str, basename: str = "case", stock=None
     """
     if fmt not in ("svg", "dxf"):
         raise ValueError(f"unknown sheet format {fmt!r}")
+    from .box import BoxModel, box_cutlist
+
+    if isinstance(source, BoxModel):
+        stock = stock if stock is not None else source.spec
+        sheets = pack_sheets(source, stock=stock)
+        files = _sheet_texts(sheets, fmt, basename)
+        files.append((f"{basename}-cutlist.txt",
+                      box_cutlist(source, sheets, stock)))
+        return files
     sheets = pack_sheets(source, stock=stock)
     files = _sheet_texts(sheets, fmt, basename)
     files.append((f"{basename}-cutlist.txt",

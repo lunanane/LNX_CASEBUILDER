@@ -557,9 +557,16 @@ class EurorackPanel(Strict):
 class CaseSpec(Strict):
     """How to wrap the scene in a box."""
 
-    style: Literal["layered", "solid"] = "layered"
+    #: `layered`: a stack of sheets. `box`: a deck, four walls and a floor,
+    #: jointed -- deep cases for the cost of six plates. See `hwcase.box`.
+    style: Literal["layered", "solid", "box"] = "layered"
     #: Set, and the case is one Eurorack module panel instead of a box.
     eurorack_panel: Optional[EurorackPanel] = None
+    #: `box` only: captive-nut T-slots or glued finger joints, and the
+    #: T-slots' bolt size. The sheet is `materials[0]`, at whatever thickness
+    #: it measures.
+    box_joint: Literal["tslot", "finger"] = "tslot"
+    box_fastener: str = "M3"
     interior: Interior = Interior.pocketed
     #: `ribs` only: width of each stiffener and how far apart they sit
     rib_width: float = 6.0

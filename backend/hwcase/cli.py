@@ -201,6 +201,9 @@ def cmd_build(args) -> int:
     issues = check(res, lib)
     model = case_mod.build(res)
     out = Path(args.out)
+    from .box import BoxModel
+    if isinstance(model, BoxModel):
+        return _build_box_files(scene, model, issues, out)
     written = export.write_all(res, model, lib, out, issues)
     print(f"case: {model.height:.1f} mm tall, {len(model.layers)} layers")
     for layer in model.layers:
@@ -210,6 +213,33 @@ def cmd_build(args) -> int:
     print("\nbill of materials:")
     for mat, n in model.bill_of_materials().items():
         print(f"  {n} x {mat}")
+    print("\nwrote:")
+    for p in written:
+        print(f"  {p}")
+    errors = sum(1 for i in issues if i.level == "error")
+    if errors:
+        print(f"\n{errors} errors -- run `check` before you cut anything")
+    return 0
+
+
+def _build_box_files(scene, model, issues, out: Path) -> int:
+    """A box case: its plates on sheets, in both formats, and the cut list."""
+    out.mkdir(parents=True, exist_ok=True)
+    base = scene.name or "case"
+    written = []
+    for fmt in ("svg", "dxf"):
+        for name, text in export.sheet_files(model, fmt, base):
+            path = out / name
+            if fmt == "dxf" and name.endswith(".txt"):
+                continue                      # one cut list is enough
+            path.write_text(text, encoding="utf-8")
+            written.append(path)
+    x0, y0, x1, y1 = model.outer.bounds
+    print(f"box: {x1 - x0:.1f} x {y1 - y0:.1f} x {model.height:.1f} mm, "
+          f"{len(model.plates)} plates, {model.joint} joints")
+    print("\nbill of materials:")
+    for item, n in model.bill_of_materials().items():
+        print(f"  {n:g} x {item}")
     print("\nwrote:")
     for p in written:
         print(f"  {p}")
