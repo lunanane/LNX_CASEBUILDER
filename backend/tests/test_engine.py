@@ -2846,7 +2846,11 @@ def test_a_draft_validates_as_a_part():
     entry = CatalogEntry(id="4741", name="Test OLED", cad="4741 OLED")
     part = Part.model_validate(draft_part(entry, cad=_stl("4741")).part)
     _check_names(part)
-    assert part.outline.size == pytest.approx((35.56, 46.99), abs=0.05)
+    # Since M2 the 4741 imports as the notched polygon it is, not a
+    # rectangle; its bounds are still the board's.
+    from hwcase.geom import outline_polygon
+    x0, y0, x1, y1 = outline_polygon(part.outline).bounds
+    assert (x1 - x0, y1 - y0) == pytest.approx((35.56, 46.99), abs=0.05)
     assert part.pcb_thickness == pytest.approx(1.57, abs=0.05)
 
 
