@@ -70,8 +70,15 @@ def _stable(text: str) -> str:
 
 
 def _layered_scenes() -> list[Path]:
-    return [p for p in sorted(SCENES.glob("*.yaml"))
-            if load_scene(p).kind == "parts"]
+    """Scenes built as a layer stack -- not frames, and not the box cases and
+    module panels that arrived later (M8-M10), which have their own tests."""
+    out = []
+    for p in sorted(SCENES.glob("*.yaml")):
+        scene = load_scene(p)
+        if (scene.kind == "parts" and scene.case.style == "layered"
+                and scene.case.eurorack_panel is None):
+            out.append(p)
+    return out
 
 
 def _library_for(scene) -> PartLibrary:
