@@ -833,6 +833,32 @@ class RackSpec(Strict):
     fastener: str = "M3"
 
 
+class RackBay(Strict):
+    """Eurorack rails set into a box case's deck, beside the other boards.
+
+    The module faces are the case's upper surface: modules rest on the
+    rails, so the rails sit `module_panel_t` below the deck top and the deck
+    is flush with the modules. See `hwcase.hybrid`.
+    """
+
+    id: str = "bay"
+    #: world XY of the bay's lower-left corner: where the rails start, at the
+    #: bottom rail's outer edge
+    at: Vec2 = (0.0, 0.0)
+    #: rail span, in HP
+    hp: float = Field(84.0, gt=0, le=240)
+    #: bottom to top, as on a frame
+    rows: list[RackRow] = Field(default_factory=lambda: [RackRow()])
+    #: clear room behind the module faces; the box's floor drops to it
+    module_depth: float = Field(40.0, gt=0)
+    #: how thick the modules' panels are -- the rails sit this far below the
+    #: deck top so the module faces end up flush with it (D-3)
+    module_panel_t: float = Field(2.0, gt=0)
+    #: the placements that are modules in this bay: they may enter its module
+    #: space, and nothing else may
+    modules: list[str] = Field(default_factory=list)
+
+
 class ViewSettings(Strict):
     """How the preview is lit. None of this reaches the geometry.
 
@@ -863,6 +889,9 @@ class Scene(Strict):
     kind: Literal["parts", "rack"] = "parts"
     #: `kind: rack` only.
     rack: RackSpec = Field(default_factory=RackSpec)
+    #: Eurorack bays set into a box case's deck: modules and boards in one
+    #: case. `kind: parts` with `case.style: box` only.
+    racks: list[RackBay] = Field(default_factory=list)
     anchor: Optional[str] = None       # placement id that defines the origin
     #: Parts carried by the scene itself, shadowing the shared library by id.
     #:

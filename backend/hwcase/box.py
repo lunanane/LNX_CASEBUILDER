@@ -109,6 +109,8 @@ class BoxModel:
     notes: list[str] = field(default_factory=list)
     #: M10: anything a rack bay adds (rails, module space), for the BOM
     extras: dict = field(default_factory=dict)
+    #: bought parts drawn in the 3D view but never cut: a bay's rails
+    members: list = field(default_factory=list)
 
     @property
     def height(self) -> float:
@@ -150,13 +152,15 @@ def panel_plane(res, spec) -> float:
 
 def build_box(res, spec, deck_top: Optional[float] = None,
               floor_top: Optional[float] = None, outer=None,
-              deck_cuts=(), extra=None) -> BoxModel:
+              deck_cuts=(), extra=None, inside=frozenset()) -> BoxModel:
     """The box around a resolved scene.
 
     `deck_top`, `floor_top`, `outer` and `deck_cuts` let a caller (M10's rack
     bays) fix the deck's height, the box's footprint and cut extra openings;
     `extra(box_parts)` is called before the joints are cut, to add plates and
-    joints of its own. Left alone, everything follows from the hardware.
+    joints of its own. `inside` names placements whose ports never open the
+    box's walls -- a bay's modules, which are patched from the front. Left
+    alone, everything follows from the hardware.
     """
     from .case import _layer_geometry, outer_shape
 
@@ -223,7 +227,7 @@ def build_box(res, spec, deck_top: Optional[float] = None,
     }
     openings: dict[str, list[Polygon]] = {w: [] for w in wall_frames}
     for wc in res.connectors:
-        if not wc.cuts_the_wall:
+        if not wc.cuts_the_wall or wc.placement in inside:
             continue
         key = (round(wc.face_normal[0]), round(wc.face_normal[1]))
         wall = _WALL_OF_NORMAL.get(key)
@@ -234,6 +238,8 @@ def build_box(res, spec, deck_top: Optional[float] = None,
             spec.part_clearance))
         notes.append(f"{wall} wall: opening for {wc.ref} ({wc.conn.type})")
     for so in res.side_openings:
+        if so.placement in inside:
+            continue
         wall = _WALL_OF_FACE.get(so.side.value)
         if wall is None:
             continue
@@ -422,6 +428,11 @@ def box_cutlist(model: BoxModel, sheets, stock) -> str:
     hardware = {k: v for k, v in model.bill_of_materials().items()
                 if k.endswith((" bolt", " nut", " screw", " mm"))
                 or k in ("rails",)}
+    for bay in model.extras.get("bays", []):
+        lines += ["", f"bay {bay['id']}: {bay['hp']:g} HP, rails "
+                  f"{bay['width']:.2f} mm long, module depth "
+                  f"{bay['module_depth']:g} mm, modules: "
+                  f"{', '.join(bay['modules']) or 'none listed'}"]
     if hardware:
         lines += ["", "fixings and bought parts:"]
         lines += [f"  {v:g} x {k}" if not k.endswith(" mm")
@@ -451,6 +462,11 @@ def box_to_json(model: BoxModel) -> dict:
             "color": p.material.color, "thickness": p.material.thickness,
             "matrix": p.matrix, "rings": rings(p.geom),
         } for p in model.plates],
+        "members": [{
+            "name": p.name, "role": p.role, "material": p.material.name,
+            "color": p.material.color, "thickness": p.material.thickness,
+            "matrix": p.matrix, "rings": rings(p.geom),
+        } for p in model.members],
         "standoffs": [{"placement": s.placement, "through": s.through,
                        "length": s.length, "screw": s.screw,
                        "at": list(s.at)} for s in model.standoffs],
