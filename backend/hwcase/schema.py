@@ -533,10 +533,33 @@ class Interior(str, Enum):
     grown = "grown"
 
 
+class EurorackPanel(Strict):
+    """Make the case a single Eurorack module panel. See `hwcase.panel`.
+
+    The outline, the rail holes and the depth limit come from the format;
+    everything else -- windows, knob holes, screws, engraving -- is the
+    layered case's faceplate, cut as usual.
+    """
+
+    #: width in HP; the panel's width is Doepfer's table value for it
+    hp: float = Field(10.0, gt=0, le=200)
+    #: row format; 3U only for now
+    format: str = "3U"
+    #: sheet thickness. 2 mm aluminium is the Doepfer panel; 3 mm stretches
+    #: a jack's thread (docs/eurorack.md section 4)
+    thickness: float = Field(2.0, gt=0, le=10)
+    material: str = "aluminium-2mm"
+    #: How far behind the panel's face anything may reach and still fit the
+    #: case: 25 for a skiff, 40 a shallow case, 50-60 a deep one.
+    module_depth: float = Field(40.0, gt=0)
+
+
 class CaseSpec(Strict):
     """How to wrap the scene in a box."""
 
     style: Literal["layered", "solid"] = "layered"
+    #: Set, and the case is one Eurorack module panel instead of a box.
+    eurorack_panel: Optional[EurorackPanel] = None
     interior: Interior = Interior.pocketed
     #: `ribs` only: width of each stiffener and how far apart they sit
     rib_width: float = 6.0

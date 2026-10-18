@@ -120,6 +120,10 @@ def outer_shape(res: Resolved, spec: CaseSpec) -> Polygon:
 
 def build(res: Resolved, spec: Optional[CaseSpec] = None) -> CaseModel:
     spec = spec or res.scene.case
+    if spec.eurorack_panel is not None:
+        # one sheet with the format's outline and rail holes, not a box
+        from .panel import build_panel
+        return build_panel(res, spec)
     outer = outer_shape(res, spec)
 
     _, _, zmin, _, _, zmax = res.bounds()

@@ -58,7 +58,7 @@ soldered on. Shaft length sets the panel gap and the knob height.
 
 ### 4. AMYboard, everything except the panel  `estimated`
 
-The 10 HP panel (50.5 × 128.5 mm, rail holes 123.5 mm apart) is a standard, so
+The 10 HP panel (50.5 × 128.5 mm, rail holes 122.5 mm apart) is a standard, so
 it is safe. Everything else is scaled off the vendor's annotated photos
 (`vendor/img/amyboard_*_annotated.jpg`) using the USB-C shell (8.94 mm) as the
 ruler, which puts the PCB at roughly **50.5 × 105 mm** and the jack pitch at
@@ -141,7 +141,7 @@ estimated at 1.5–3 mm.
 | OLED 4741 35.56 × 46.99 × 5.63 | vendor mesh |
 | Keypad 1611 60 × 60 × 11.5, 10 mm buttons on a 15 mm pitch | vendor |
 | HyperPixel 84 × 84 × 9.5, 72 × 72 active | vendor |
-| Eurorack 10 HP = 50.5 mm, 3U = 128.5 mm, rails 123.5 mm | Doepfer A-100 |
+| Eurorack 10 HP = 50.5 mm, 3U = 128.5 mm, rails 122.5 mm | Doepfer A-100 |
 
 ## Three vendor sources that were wrong or misleading
 

@@ -285,8 +285,38 @@ rack:
     back: 0.0
 """
 
-#: Which starter text a new project of each kind begins from.
-STARTERS = {"parts": STARTER, "rack": RACK_STARTER}
+PANEL_STARTER = """# A new Eurorack module panel.
+#
+# One sheet -- the panel -- with your boards hanging behind it. Its width is
+# Doepfer's table value for the HP, its height 128.5 mm, and the oval rail
+# holes sit 3.0 mm in from top and bottom, where a rail's screws find them.
+#
+# Put the controls on the panel plane (`on_panel: main`) and hold each board
+# with `support: from_lid`: the cut list then gives every board its standoff.
+# Anything reaching further behind the panel's face than `module_depth` is an
+# error -- it would not fit the case. Add a power header from the palette to
+# have its ribbon counted too.
+
+name: {name}
+panels:
+- name: main
+  z: 0.0
+placements: []
+case:
+  style: layered
+  materials:
+    - {{name: aluminium-2mm, thickness: 2.0, kerf: 0.15, color: "#c9ccd1"}}
+  eurorack_panel:
+    hp: 10
+    format: 3U
+    thickness: 2.0
+    material: aluminium-2mm
+    module_depth: 40.0
+"""
+
+#: Which starter text a new project of each kind begins from. A panel is a
+#: parts scene -- boards placed by hand -- whose case is one Eurorack panel.
+STARTERS = {"parts": STARTER, "rack": RACK_STARTER, "panel": PANEL_STARTER}
 
 
 def _starter_text(name: str, kind: str) -> str:
