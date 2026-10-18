@@ -124,6 +124,14 @@ def build(res: Resolved, spec: Optional[CaseSpec] = None) -> CaseModel:
         # one sheet with the format's outline and rail holes, not a box
         from .panel import build_panel
         return build_panel(res, spec)
+    if spec.style == "box":
+        # six jointed plates, not a stack -- and a rack bay or two, if the
+        # scene has any (M10)
+        from .box import build_box
+        if getattr(res.scene, "racks", None):
+            from .hybrid import build_hybrid
+            return build_hybrid(res, spec)
+        return build_box(res, spec)
     outer = outer_shape(res, spec)
 
     _, _, zmin, _, _, zmax = res.bounds()

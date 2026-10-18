@@ -285,10 +285,30 @@ def from_rack(model: "RackModel", kerf: float = RACK_PLATE_KERF
     return [from_member(m, i, kerf) for i, m in enumerate(plates)]
 
 
+def from_box(model) -> list[FlatPart]:
+    """Every plate of a box case, each from its own flat outline. The datum
+    is the plate's u axis: the deck's and floor's front edge, a wall's
+    bottom edge."""
+    out = []
+    for i, p in enumerate(model.plates):
+        _x0, _y0, x1, _y1 = p.geom.bounds
+        out.append(FlatPart(
+            name=p.name, material=p.material, outline=p.geom, role=p.role,
+            index=i, labels=Labels.plain(p.name, p.role, p.material),
+            notes=list(p.notes),
+            datum=Edge((0.0, 0.0), (x1, 0.0), f"{p.name}'s u edge"),
+        ))
+    return out
+
+
 def parts_of(source) -> list[FlatPart]:
-    """Flat parts from a layered case, or a list of flat parts as given."""
+    """Flat parts from a layered case or a box, or a list of flat parts as
+    given."""
+    from .box import BoxModel
     from .case import CaseModel
 
+    if isinstance(source, BoxModel):
+        return from_box(source)
     if isinstance(source, CaseModel):
         return from_case(source)
     parts = list(source)

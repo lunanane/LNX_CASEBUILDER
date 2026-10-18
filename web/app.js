@@ -426,12 +426,48 @@ function bakeContactShading(geom, depth, strength) {
   return true;
 }
 
+/** A box case: six (or more) plates, each drawn in its own frame and put in
+ *  the world by the matrix the engine sends. Extruding along the plate's w
+ *  and then applying the matrix is the whole job; the matrix is a rotation,
+ *  never a mirror, so nothing renders inside out. */
+function buildBox(model) {
+  caseGroup.clear();
+  if (!model || !$('chk-case').checked) return;
+  const solid = $('chk-render').checked;
+  for (const p of model.plates) {
+    const m4 = new THREE.Matrix4().set(...p.matrix);
+    const finish = finishFor({ name: p.material, color: p.color });
+    if (!solid) {
+      const mat = new THREE.LineBasicMaterial({
+        color: finish.color, transparent: true, opacity: 0.6 });
+      for (const ring of p.rings) {
+        const pts = ring.map(([u, v]) => new THREE.Vector3(u, v, 0).applyMatrix4(m4));
+        if (pts.length) pts.push(pts[0]);
+        caseGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
+      }
+      continue;
+    }
+    const shapes = shapesFromRings(p.rings);
+    if (!shapes.length) continue;
+    const geom = new THREE.ExtrudeGeometry(shapes, {
+      depth: p.thickness, bevelEnabled: false, curveSegments: 8 });
+    geom.applyMatrix4(m4);
+    const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
+      color: finish.color, roughness: finish.roughness ?? 0.7,
+      metalness: finish.metalness ?? 0, side: THREE.DoubleSide }));
+    mesh.castShadow = mesh.receiveShadow = true;
+    mesh.userData = { plate: p.name, role: p.role };
+    caseGroup.add(mesh);
+  }
+}
+
 function buildCase(caseModel) {
   // A frame has members, not layers. Every caller that just wants "draw
   // whatever this scene's case is" comes through here -- applyRenderMode
   // among them -- and reading .layers off a frame threw, which cleared the
   // preview and left it blank until the case box was toggled again.
   if (caseModel && caseModel.kind === 'rack') { buildRack(caseModel); return; }
+  if (caseModel && caseModel.kind === 'box') { buildBox(caseModel); return; }
 
   caseGroup.clear();
   if (!caseModel || !$('chk-case').checked) return;
@@ -1367,6 +1403,11 @@ function renderCaseScrews() {
   if (!c) return;
   const mode = c.case_screws || 'none';
   $('cs-mode').value = mode;
+  // construction: stacked layers, or a box of jointed plates
+  const box = c.style === 'box';
+  $('cs-style').value = box ? 'box' : 'layered';
+  $('cs-box-joint').value = c.box_joint === 'finger' ? 'finger' : 'tslot';
+  $('cs-box-joint').disabled = !box;
   $('cs-center').checked = !!c.case_screw_center;
   $('cs-wells').checked = c.screw_wells !== false;   // default on
   for (const [id, key] of Object.entries(SCREW_FIELDS)) {
@@ -1403,6 +1444,16 @@ function wireCaseScrews() {
   $('cs-mode').onchange = () => {
     edit();
     state.scene.case.case_screws = $('cs-mode').value;
+    push();
+  };
+  $('cs-style').onchange = () => {
+    edit();
+    state.scene.case.style = $('cs-style').value;
+    push();
+  };
+  $('cs-box-joint').onchange = () => {
+    edit();
+    state.scene.case.box_joint = $('cs-box-joint').value;
     push();
   };
   $('cs-center').onchange = () => {
@@ -3556,7 +3607,9 @@ function engraveWarning(e) {
 /** Draw the marks on the lid, so you can see them without exporting. */
 function buildEngravings(caseModel) {
   engraveGroup.clear();
-  if (!caseModel || caseModel.kind === 'rack' || !$('chk-case').checked) return;
+  // a frame has no lid, and a box's deck carries its engraving in its cut
+  if (!caseModel || caseModel.kind === 'rack' || caseModel.kind === 'box'
+      || !$('chk-case').checked) return;
   for (const layer of caseModel.layers) {
     if (!layer.engrave?.length) continue;
     const shapes = shapesFromRings(layer.engrave);
