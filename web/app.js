@@ -434,7 +434,8 @@ function buildBox(model) {
   caseGroup.clear();
   if (!model || !$('chk-case').checked) return;
   const solid = $('chk-render').checked;
-  for (const p of model.plates) {
+  // cut plates, then bought parts drawn but never cut: a bay's rails
+  for (const p of [...model.plates, ...(model.members || [])]) {
     const m4 = new THREE.Matrix4().set(...p.matrix);
     const finish = finishFor({ name: p.material, color: p.color });
     if (!solid) {
@@ -1398,9 +1399,75 @@ function wirePlates() {
   };
 }
 
+/** The case pane's rack bays: Eurorack rails set into a box's deck (M10).
+ *  Each bay is a row of fields; edits go straight back to the engine. */
+function renderBays() {
+  const list = $('bay-list');
+  if (!list || !state.scene) return;
+  const box = state.scene.case?.style === 'box' && state.scene.kind !== 'rack';
+  const bays = state.scene.racks || [];
+  $('btn-add-bay').disabled = !box;
+  list.innerHTML = '';
+  bays.forEach((bay, i) => {
+    const div = document.createElement('div');
+    div.className = 'bay';
+    const num = (label, value, step, set, title) => {
+      const f = document.createElement('div');
+      f.className = 'field';
+      f.innerHTML = '<label title="' + escapeHtml(title) + '">' + escapeHtml(label)
+        + '</label><input type="number" step="' + step + '">';
+      const inp = f.querySelector('input');
+      inp.value = value;
+      inp.disabled = !box;
+      inp.oninput = () => {
+        const v = parseFloat(inp.value);
+        if (!Number.isFinite(v)) return;
+        edit('bay-' + i + '-' + label);
+        set(v);
+        scheduleResolve(250);
+      };
+      div.appendChild(f);
+    };
+    const head = document.createElement('div');
+    head.className = 'field';
+    head.innerHTML = '<label>' + escapeHtml(bay.id || 'bay') + '</label>'
+      + '<span>' + (bay.rows || [{ format: '3U' }]).map((r) => r.format).join(' + ')
+      + '</span>';
+    const del = document.createElement('button');
+    del.textContent = 'x';
+    del.title = 'remove this bay';
+    del.disabled = !box;
+    del.onclick = () => { edit(); bays.splice(i, 1); renderBays(); push(); };
+    head.appendChild(del);
+    div.appendChild(head);
+    num('HP', bay.hp ?? 84, 1, (v) => { bay.hp = v; }, 'rail span in HP');
+    num('x', bay.at?.[0] ?? 0, 0.5, (v) => { bay.at = [v, bay.at?.[1] ?? 0]; },
+      'where the rails start, world x');
+    num('y', bay.at?.[1] ?? 0, 0.5, (v) => { bay.at = [bay.at?.[0] ?? 0, v]; },
+      'the bottom rail\'s outer edge, world y');
+    num('depth', bay.module_depth ?? 40, 1, (v) => { bay.module_depth = v; },
+      'clear room behind the module faces; the floor drops to it');
+    const mods = document.createElement('div');
+    mods.className = 'field';
+    mods.innerHTML = '<label title="placements that are modules in this bay, by id">modules</label>'
+      + '<input type="text" spellcheck="false">';
+    const mi = mods.querySelector('input');
+    mi.value = (bay.modules || []).join(', ');
+    mi.disabled = !box;
+    mi.onchange = () => {
+      edit();
+      bay.modules = mi.value.split(',').map((s) => s.trim()).filter(Boolean);
+      push();
+    };
+    div.appendChild(mods);
+    list.appendChild(div);
+  });
+}
+
 function renderCaseScrews() {
   const c = state.scene?.case;
   if (!c) return;
+  renderBays();
   const mode = c.case_screws || 'none';
   $('cs-mode').value = mode;
   // construction: stacked layers, or a box of jointed plates
@@ -1449,6 +1516,17 @@ function wireCaseScrews() {
   $('cs-style').onchange = () => {
     edit();
     state.scene.case.style = $('cs-style').value;
+    push();
+  };
+  $('btn-add-bay').onclick = () => {
+    edit();
+    const bays = state.scene.racks || (state.scene.racks = []);
+    const ids = new Set(bays.map((b) => b.id));
+    let n = bays.length + 1;
+    while (ids.has('bay' + n)) n++;
+    bays.push({ id: 'bay' + n, at: [0, 0], hp: 28, rows: [{ format: '3U' }],
+                module_depth: 40, module_panel_t: 2, modules: [] });
+    renderBays();
     push();
   };
   $('cs-box-joint').onchange = () => {
