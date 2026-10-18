@@ -179,8 +179,11 @@ parts:
       it out and let this case's own faceplate carry the jacks. That choice
       changes the front of the machine, so it should be a placement you can see
       and delete rather than something welded into the board model.
-      Panel size is a standard: 10 HP = 10*5.08 - 0.3 = 50.5 mm, 3U = 128.5 mm,
-      rail holes 123.5 mm apart. The board sits 11.75 mm up from the panel's
+      Panel size is a standard: 10 HP = 50.5 mm (Doepfer's table), 3U = 128.5
+      mm, rail holes 3.0 mm in from each edge and so 122.5 mm apart. Until
+      2026-10 the top pair sat at y = 126.5 (a millimetre too far apart, 2.0
+      mm from the top edge) -- a copying error, corrected; anything cut from
+      the old part has its top holes 1 mm high. The board sits 11.75 mm up from the panel's
       bottom edge, which is where the mate lands.
     src:
       confidence: datasheet
@@ -194,10 +197,10 @@ parts:
     pcb_thickness: 2.0
 
     holes:
-      - {name: rail_bl, at: [3.5, 3.0], diameter: 3.2, screw: M3, src: {confidence: datasheet, note: "Doepfer A-100, 123.5 mm apart"}}
-      - {name: rail_tl, at: [3.5, 126.5], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
+      - {name: rail_bl, at: [3.5, 3.0], diameter: 3.2, screw: M3, src: {confidence: datasheet, note: "Doepfer A-100: 3.0 mm from the edge, 122.5 mm apart"}}
+      - {name: rail_tl, at: [3.5, 125.5], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
       - {name: rail_br, at: [47.0, 3.0], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
-      - {name: rail_tr, at: [47.0, 126.5], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
+      - {name: rail_tr, at: [47.0, 125.5], diameter: 3.2, screw: M3, src: {confidence: datasheet}}
 
     volumes:
       - name: face
@@ -284,3 +287,59 @@ parts:
       - {name: i2c5, type: grove, face: +y, at: [72.0, 20.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
       - {name: i2c6, type: grove, face: +y, at: [80.6, 20.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
       - {name: i2c7, type: grove, face: +y, at: [89.2, 20.0, 1.6], plug_depth: 12.0, bend_radius: 15.0, external: false, src: {confidence: estimated}}
+
+  # --- Eurorack power headers -------------------------------------------
+  # The shrouded IDC box header every Eurorack module carries on its back,
+  # as a part so a module panel's depth check sees it -- and the ribbon,
+  # which needs 15-20 mm behind the header before it will turn and is the
+  # usual reason a module does not fit a skiff (docs/eurorack.md sections 5,
+  # 8). Length is the IDC rule (pairs - 1) x 2.54 + 10.16 mm. Place it on
+  # the back of the module's board, turned over (tilt 180) so it faces away
+  # from the panel. Measure the one you have: shroud heights vary.
+  - id: eurorack-power-header-10
+    name: Eurorack power header, 10-way (2 x 5, shrouded)
+    category: power
+    tags: [eurorack, power, idc, header]
+    notes: >-
+      10-way: -12 V, ground, +12 V, no +5 V and no bus. Red stripe = -12 V.
+      The ribbon volume is the bend room behind the header, not the cable run.
+    src: {confidence: community, note: "docs/eurorack.md section 8"}
+    outline: {type: rect, size: [20.32, 8.9], origin: min}
+    pcb_thickness: 0.0
+    volumes:
+      - name: shroud
+        kind: body
+        at: [10.16, 4.45]
+        size: [20.32, 8.9]
+        z: [0.0, 9.0]
+        src: {confidence: community, note: "~9 mm off the PCB; measure yours"}
+      - name: ribbon
+        kind: cable
+        at: [10.16, 4.45]
+        size: [14.0, 8.9]
+        z: [9.0, 27.0]
+        src: {confidence: community, note: "15-20 mm before a 10-way ribbon turns"}
+
+  - id: eurorack-power-header-16
+    name: Eurorack power header, 16-way (2 x 8, shrouded)
+    category: power
+    tags: [eurorack, power, idc, header]
+    notes: >-
+      16-way: the 10-way's pins plus +5 V, bus CV and bus gate. Red stripe =
+      -12 V. The ribbon volume is the bend room behind the header.
+    src: {confidence: community, note: "docs/eurorack.md section 8"}
+    outline: {type: rect, size: [27.94, 8.9], origin: min}
+    pcb_thickness: 0.0
+    volumes:
+      - name: shroud
+        kind: body
+        at: [13.97, 4.45]
+        size: [27.94, 8.9]
+        z: [0.0, 9.0]
+        src: {confidence: community, note: "~9 mm off the PCB; measure yours"}
+      - name: ribbon
+        kind: cable
+        at: [13.97, 4.45]
+        size: [21.6, 8.9]
+        z: [9.0, 27.0]
+        src: {confidence: community, note: "15-20 mm before a 16-way ribbon turns"}

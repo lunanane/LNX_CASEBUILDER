@@ -742,6 +742,12 @@ const PROJECT_KINDS = {
     blurb: 'Set a width in HP and a stack of rows; the frame follows -- rails, '
          + 'a folded aluminium body, and side panels that drill themselves.',
   },
+  panel: {
+    label: 'new Eurorack module panel',
+    blurb: 'One panel of any HP with your boards behind it: the outline and '
+         + 'the rail holes come from the format, and anything deeper than the '
+         + 'module depth is flagged before you cut.',
+  },
 };
 
 /** A frame has nothing to show but its case, so make sure the box is on.
@@ -795,7 +801,8 @@ async function freeSceneName(base) {
  *  dialog just did nothing.
  */
 async function startProject(kind) {
-  let suggested = await freeSceneName(kind === 'rack' ? 'frame' : 'case');
+  let suggested = await freeSceneName(
+    kind === 'rack' ? 'frame' : kind === 'panel' ? 'panel' : 'case');
   for (;;) {
     const name = askName('Name for the new project', suggested);
     if (!name) return null;

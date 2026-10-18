@@ -945,6 +945,12 @@ def check(res: Resolved, lib: PartLibrary) -> list[Issue]:
             f"{part_id} carries {conf.value} dimensions ({', '.join(refs)}) -- "
             f"measure before cutting",
             refs))
+
+    # 7. a Eurorack module panel: nothing may reach deeper than the case
+    if res.scene.case.eurorack_panel is not None:
+        from .panel import depth_issues
+        for code, message, refs in depth_issues(res, res.scene.case):
+            issues.append(Issue("error", code, message, refs))
     return issues
 
 

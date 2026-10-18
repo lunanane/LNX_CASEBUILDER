@@ -76,13 +76,11 @@ The holes are **oval on real panels** for a reason: rails are threaded strips or
 sliding nuts, and a round 3.2 mm hole gives no lateral adjustment at all. Cut
 round only if the panel is the only thing in its row.
 
-> ⚠️ **This repo currently says 123.5 mm in four places, and it is wrong.**
-> [research.md](research.md) states the formula `U × 44.45 − 10.85` and then
-> writes the answer as 123.5 (it is 122.5); [measurements.md](measurements.md)
-> repeats it twice; and [misc.yaml](../backend/parts/misc.yaml) puts the
-> AMYboard panel's rail holes at y = 3.0 and y = 126.5 — 123.5 apart, and
-> asymmetric: 3.0 mm from the bottom edge but 2.0 mm from the top. The correct
-> pair on a 128.5 mm panel is **y = 3.0 and y = 125.5**.
+> **Corrected 2026-10.** This repo used to give the spacing as a millimetre
+> too much in four places -- the formula `U × 44.45 − 10.85` written out with
+> the wrong answer, and the AMYboard panel's top rail holes at y = 126.5,
+> 2.0 mm from the top edge against 3.0 at the bottom. All four now read
+> 122.5, and the panel's holes are at **y = 3.0 and y = 125.5**.
 
 ## 4. Panel material
 

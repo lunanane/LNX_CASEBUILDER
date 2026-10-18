@@ -34,7 +34,7 @@ Ranked by trust:
 
 ## 4. Standards worth encoding once
 
-- **Eurorack** (AMYboard is a 10 HP module): panel width = `n * 5.08 - 0.3 mm` → 10 HP = **50.5 mm**; 3U panel height **128.5 mm**; rail hole spacing `U * 44.45 - 10.85` = **123.5 mm** for 3U. Source: Doepfer A-100 construction details.
+- **Eurorack** (AMYboard is a 10 HP module): panel width = `n * 5.08 - 0.3 mm` → 10 HP = **50.5 mm**; 3U panel height **128.5 mm**; rail hole spacing `U * 44.45 - 10.85` = **122.5 mm** for 3U. Source: Doepfer A-100 construction details.
 - **Raspberry Pi HAT/pHAT**: 40-pin 2.54 mm header, mount holes 58 x 49 mm, 3.5 mm in from the board edges, M2.5.
 - **STEMMA QT / Qwiic**: JST SH 4-pin, 1 mm pitch, cables in fixed lengths (50/100/200 mm) — cable length is a *layout constraint*, so the library stores connector positions and the checker measures run length.
 - **Grove**: 4-pin 2.0 mm pitch, 20 x 20 mm module grid on Seeed boards.
