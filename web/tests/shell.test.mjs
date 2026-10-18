@@ -207,3 +207,13 @@ test('the frame pane offers both constructions, and every control is wired', () 
       `${id} has no handler`);
   }
 });
+
+test('the case pane offers a box of plates, and its controls are wired', () => {
+  // M9: a parts scene is built as layers or as a jointed box
+  assert.match(html, /<select id="cs-style">[\s\S]*value="layered"[\s\S]*value="box"/);
+  for (const id of ['cs-style', 'cs-box-joint']) {
+    assert.ok(staticIds.has(id), `${id} is missing from index.html`);
+    assert.match(js, new RegExp(`\\$\\('${id}'\\)\\.onchange =`), `${id} has no handler`);
+  }
+  assert.match(js, /caseModel\.kind === 'box'\) \{ buildBox\(caseModel\)/);
+});
