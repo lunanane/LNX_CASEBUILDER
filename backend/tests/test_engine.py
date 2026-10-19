@@ -2830,10 +2830,16 @@ def test_a_draft_never_invents_connectors():
     from hwcase.catalog import CatalogEntry
     from hwcase.ingest import draft_part
 
+    # Since M3 a draft may PROPOSE connectors -- but only where a real body
+    # in the model has a connector's size and sits at an edge, and always as
+    # an estimate the issues pane keeps asking about. Nothing is made up.
     entry = CatalogEntry(id="4741", name="Test OLED", cad="4741 OLED")
     draft = draft_part(entry, cad=_stl("4741"))
-    assert draft.part["connectors"] == []
-    assert "no connectors" in draft.part["notes"]
+    for c in draft.part["connectors"]:
+        assert c["src"]["confidence"] == "estimated"
+        assert "PROPOSED" in c["src"]["note"]
+        assert c["body"]["size"]                 # backed by a measured body
+    assert "at best PROPOSED" in draft.part["notes"]
     assert "DRAFT" in draft.part["notes"]
 
 
