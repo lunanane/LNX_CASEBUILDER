@@ -113,10 +113,17 @@ def build_panel(res, spec):
     ep = spec.eurorack_panel
     outer = outline(ep.hp, ep.format)
     z1 = panel_plane(res, spec)
-    z0 = z1 - ep.thickness
+    t = ep.board_thickness
+    z0 = z1 - t
     kerf = spec.materials[0].kerf if spec.materials else 0.15
-    mat = Material(name=ep.material, thickness=ep.thickness, kerf=kerf,
-                   color="#c9ccd1")
+    if ep.fab == "pcb":
+        # the panel is the board: its colour is the soldermask's
+        from .pcbfab import colour
+        mat = Material(name=f"fr4-{t:g}mm", thickness=t, kerf=0.0,
+                       color=colour("mask", ep.pcb.mask))
+    else:
+        mat = Material(name=ep.material, thickness=t, kerf=kerf,
+                       color="#c9ccd1")
 
     geom, notes = _layer_geometry(res, spec, outer, (z0, z1), "lid",
                                   (z0, z1), [(z0, z1)])
@@ -130,7 +137,13 @@ def build_panel(res, spec):
 
     layer = Layer(0, z0, z1, "lid", mat, geom, notes)
     _apply_engravings(res, [layer])
-    return CaseModel(spec=spec, outer=outer, layers=[layer], z0=z0, z1=z1)
+    model = CaseModel(spec=spec, outer=outer, layers=[layer], z0=z0, z1=z1)
+    if ep.fab == "pcb":
+        from .pcb import compose, order_line
+        model.pcb = compose(res, spec, layer.geom,
+                            [shape for _x, _y, shape in holes])
+        notes.append(order_line(spec))
+    return model
 
 
 def standoff_notes(res, panel_back: float) -> list[str]:
@@ -185,7 +198,7 @@ def rail_issues(res, spec) -> list[tuple[str, str, list[str]]]:
     ep = spec.eurorack_panel
     height = _format(ep.format).panel
     band = rail_band(ep.format)
-    back = panel_plane(res, spec) - ep.thickness
+    back = panel_plane(res, spec) - ep.board_thickness
     hits: dict[str, list[float]] = {}
     for s in res.solids:
         if s.kind in (VolumeKind.display, VolumeKind.actuator):
@@ -202,3 +215,11 @@ def rail_issues(res, spec) -> list[tuple[str, str, list[str]]]:
              f"{ep.format} panel a board has about {PCB_HEIGHT_3U:g} mm "
              f"between them, {band:.2f} mm in from the top and the bottom",
              [pl]) for pl, over in sorted(hits.items())]
+
+
+def pcb_issues(res, spec) -> list[tuple[str, str, str, list[str]]]:
+    """(level, code, message, refs) for a panel made as a PCB: silk the fab
+    would clip, copper too near an edge, lines under the fab's minimum."""
+    if spec.eurorack_panel.fab != "pcb":
+        return []
+    return list(build_panel(res, spec).pcb.issues)

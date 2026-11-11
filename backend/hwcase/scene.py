@@ -957,6 +957,13 @@ def check(res: Resolved, lib: PartLibrary) -> list[Issue]:
         from .panel import depth_issues
         for code, message, refs in depth_issues(res, res.scene.case):
             issues.append(Issue("error", code, message, refs))
+        if res.scene.case.eurorack_panel.fab == "pcb":
+            from .panel import pcb_issues
+            try:
+                for level, code, message, refs in pcb_issues(res, res.scene.case):
+                    issues.append(Issue(level, code, message, refs))
+            except ValueError as exc:
+                issues.append(Issue("error", "pcb", str(exc), []))
 
     # 8. rack bays: modules fit their bay, nothing else enters it
     if res.scene.racks:

@@ -28,7 +28,7 @@ from shapely.ops import unary_union
 
 from .schema import Engraving, Pattern
 
-__all__ = ["build_engraving", "engraving_area"]
+__all__ = ["build_engraving", "engraving_area", "text_strokes"]
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +208,21 @@ def build_engraving(e: Engraving, clip: Optional[Polygon] = None):
     if clip is not None and not clip.is_empty:
         geom = geom.intersection(clip)
     return geom
+
+
+def text_strokes(e: Engraving) -> list[list[tuple[float, float]]]:
+    """A label's centre lines in world coordinates, for a writer that draws
+    with a round pen (a Gerber aperture) instead of filling outlines."""
+    from .hershey import text_polylines
+
+    if Pattern(e.pattern) is not Pattern.text or not e.text:
+        return []
+    strokes = text_polylines(e.text, size=e.text_size, font=e.font,
+                             tracking=e.tracking, line_spacing=e.line_spacing,
+                             align=e.text_align)
+    c, s = math.cos(math.radians(e.rotation)), math.sin(math.radians(e.rotation))
+    return [[(x * c - y * s + e.at[0], x * s + y * c + e.at[1]) for x, y in st]
+            for st in strokes if len(st) >= 2]
 
 
 def engraving_area(e: Engraving, clip: Optional[Polygon] = None) -> float:

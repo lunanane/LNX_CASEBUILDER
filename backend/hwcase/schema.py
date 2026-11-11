@@ -22,7 +22,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Literal, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Vec2 = tuple[float, float]
 Vec3 = tuple[float, float, float]
@@ -569,6 +569,73 @@ class EurorackPanel(Strict):
     #: How far behind the panel's face anything may reach and still fit the
     #: case: 25 for a skiff, 40 a shallow case, 50-60 a deep one.
     module_depth: float = Field(40.0, gt=0)
+    #: How it is made. `laser`: a cut sheet, as above. `pcb`: an FR4 board
+    #: from a PCB service -- soldermask, silkscreen and gold or silver where
+    #: the artwork opens the mask over copper. `pcb` then sets the thickness
+    #: (`pcb.thickness` replaces `thickness`) and exports Gerbers.
+    fab: Literal["laser", "pcb"] = "laser"
+    #: `fab: pcb` only: what to order. See `hwcase.pcb`.
+    pcb: "PcbFab" = Field(default_factory=lambda: PcbFab())
+
+    @property
+    def board_thickness(self) -> float:
+        """The panel's real thickness: the board's when it is a PCB."""
+        return self.pcb.thickness if self.fab == "pcb" else self.thickness
+
+
+def _pcb_key(kind: str, value: str) -> str:
+    from .pcbfab import palette
+
+    table = palette()[kind]
+    if value not in table:
+        raise ValueError(f"{value!r} is not a {kind} a PCB service offers; "
+                         f"pick one of {', '.join(table)}")
+    return value
+
+
+class PcbFab(Strict):
+    """A panel ordered as a PCB, limited to what the services offer.
+
+    The choices are the keys of the shared table, `web/pcb-fab.json`, which
+    the editor draws its swatches from too.
+    """
+
+    #: board thickness; 1.6 is every service's default and the stiff one
+    thickness: float = Field(1.6, gt=0, le=3.2)
+    #: soldermask colour -- the panel's colour
+    mask: str = "black"
+    #: silkscreen colour -- the lettering
+    silk: str = "white"
+    #: what exposed copper is plated with: `enig` gold, `hasl` silver
+    finish: str = "enig"
+    #: copper ring round every round panel hole, mm wide; 0 for none. The
+    #: mask opens over it, so a jack sits on a gold (or silver) rim.
+    ring: float = Field(0.0, ge=0, le=5)
+
+    @field_validator("thickness")
+    @classmethod
+    def _thickness(cls, v: float) -> float:
+        from .pcbfab import palette
+
+        if not any(abs(v - t) < 1e-6 for t in palette()["thickness"]):
+            raise ValueError(f"{v} mm is not a board thickness services offer; "
+                             f"pick one of {palette()['thickness']}")
+        return v
+
+    @field_validator("mask")
+    @classmethod
+    def _mask(cls, v: str) -> str:
+        return _pcb_key("mask", v)
+
+    @field_validator("silk")
+    @classmethod
+    def _silk(cls, v: str) -> str:
+        return _pcb_key("silk", v)
+
+    @field_validator("finish")
+    @classmethod
+    def _finish(cls, v: str) -> str:
+        return _pcb_key("finish", v)
 
 
 class CaseSpec(Strict):
@@ -756,11 +823,78 @@ class Engraving(Strict):
     #: extra space between characters, mm; negative tightens
     tracking: float = 0.0
 
+    #: A PCB panel only (`eurorack_panel.fab: pcb`): what the marks are made
+    #: of. `silk` is printed; `copper` is exposed metal -- copper under an
+    #: opening in the mask, gold or silver by the finish; `substrate` opens
+    #: the mask with no copper under it, showing bare FR4. A laser-cut panel
+    #: ignores it.
+    layer: Literal["silk", "copper", "substrate"] = "silk"
+
     @property
     def bounds(self) -> tuple[float, float, float, float]:
         w, h = self.size
         return (self.at[0] - w / 2, self.at[1] - h / 2,
                 self.at[0] + w / 2, self.at[1] + h / 2)
+
+
+#: Ceiling on an artwork's raster. The editor samples an upload down to this
+#: before it is stored, so a scene stays well inside the API's 1 MB limit.
+ART_MAX_PIXELS = 512 * 512
+
+#: What one brightness band of an artwork becomes. `mask` leaves the board
+#: as it is -- soldermask colour.
+ArtLayer = Literal["mask", "silk", "copper", "substrate"]
+
+
+class PanelArt(Strict):
+    """A raster graphic on a PCB panel, split by brightness into layers.
+
+    The scene stores the greyscale the editor sampled the upload down to
+    (`data`, zlib-compressed and base64-encoded, `pixels` = width, height),
+    not the original file and not the traced polygons: thresholds stay
+    editable, and the outlines are traced from it at build time
+    (`hwcase.artwork`).
+    """
+
+    name: str = "image"
+    #: centre, in panel coordinates
+    at: tuple[float, float] = (25.0, 64.0)
+    #: printed width, mm; the height follows the image's aspect
+    width: float = Field(30.0, gt=0, le=500)
+    #: raster size, width x height
+    pixels: tuple[int, int]
+    #: "z64:" + base64(zlib(8-bit greyscale, row by row, top row first))
+    data: str
+    #: brightness cut points, 0-255, ascending: one splits the image into two
+    #: bands, two into three
+    thresholds: list[float] = Field(default_factory=lambda: [128.0])
+    #: one per band, darkest first
+    layers: list[ArtLayer] = Field(default_factory=lambda: ["mask", "silk"])
+    invert: bool = False
+    #: smoothing radius before thresholding, mm -- a despeckle
+    blur: float = Field(0.0, ge=0, le=5)
+    #: features thinner than this are dropped, mm; match the fab's minimum
+    min_feature: float = Field(0.2, ge=0, le=5)
+
+    @model_validator(mode="after")
+    def _bands(self):
+        w, h = self.pixels
+        if w < 1 or h < 1 or w * h > ART_MAX_PIXELS:
+            raise ValueError(f"an artwork raster is 1 to {ART_MAX_PIXELS} "
+                             f"pixels; this one is {w} x {h}")
+        if not 1 <= len(self.thresholds) <= 3:
+            raise ValueError("an artwork takes one to three thresholds")
+        if list(self.thresholds) != sorted(self.thresholds) or                 not all(0 <= t <= 255 for t in self.thresholds):
+            raise ValueError("thresholds rise from dark to bright, within 0-255")
+        if len(self.layers) != len(self.thresholds) + 1:
+            raise ValueError(f"{len(self.thresholds)} threshold(s) make "
+                             f"{len(self.thresholds) + 1} bands, and each band "
+                             f"needs a layer; got {len(self.layers)}")
+        return self
+
+    @property
+    def height(self) -> float:
+        return self.width * self.pixels[1] / self.pixels[0]
 
 
 class RackRow(Strict):
@@ -958,3 +1092,6 @@ class Scene(Strict):
     #: front-panel decoration. Marks the surface; does not cut through unless
     #: an engraving says so explicitly. See hwcase.engrave.
     engravings: list["Engraving"] = Field(default_factory=list)
+    #: raster artwork for a PCB panel, split into silk / copper / bare board
+    #: by brightness. See hwcase.artwork.
+    artwork: list["PanelArt"] = Field(default_factory=list)
