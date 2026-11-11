@@ -206,8 +206,14 @@ deck top is the module face (D-3), so the rails sit `module_panel_t` under it.
 one side stack outwards in list order. Each section gets a deck cut as a
 layered lid is (so boards placed there get their windows, shaft holes and
 standoffs), every run of zones at one depth a floor, a full-height step wall
-where neighbouring depths differ, and an end wall at each end; every plate is
-jointed into both side panels, whose outline follows the stepped profile grown
+where neighbouring depths differ (a step under a sheet and a millimetre is one
+floor at the deeper depth, the divider standing on it), and an end wall at each
+end. Each divider has rounded cable openings just above the floor --
+`rack.cable_openings: {count, width, height}`, one per 90 mm of width, 30 x 15
+mm unless set -- kept clear of every joint feature. Every plate is jointed to
+the plates it meets, with the case's joint (dividers, which stand inside the
+side panels, are T-slotted there), and into both side panels, whose outline
+follows the stepped profile grown
 by the overhangs (bottom/top past the end walls, front past the deck, back past
 the floors). The rack keeps no modules: its space is kept clear, and a part
 outside its section, in the rack's space or deeper than its section's floor is

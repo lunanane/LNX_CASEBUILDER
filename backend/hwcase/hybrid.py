@@ -24,20 +24,20 @@ the rack, sections above -- each with its floor at its own depth:
   cutouts and screw clearances are the box's;
 * every run of zones at one depth has one **floor** plate; the rack's floor
   is its module depth behind the rails' front face, as on a frame;
-* a **step wall** stands where two neighbouring floors differ in depth, and
-  an **end wall** closes each end;
+* a **step wall** -- a full-height divider, deck to floor -- stands where
+  two neighbouring zones differ in depth, and an **end wall** closes each
+  end;
 * the **side panels** follow the whole stepped profile, grown by the
   overhangs (front past the deck, back past the floors, bottom and top past
   the end walls) and rounded at the four outer corners.
 
 Every plate is jointed into both side panels -- T-slots, whose slots need a
-sheet of panel outside the plate, or glued fingers, flush with its edge.
-Where two plates meet they butt, as a laser frame's plates do: the walls run
-the full height and the decks and floors stop at them; with T-slots a deck's
-or floor's joint stops a sheet short of the wall's, and the plate is notched
-there so it does not stand in the side panel. Between the rack and a section
-there is no wall above the shallower floor: the deck over the section runs on
-to the rails' outer edge, and the rack's space stays open only to the rails.
+sheet of panel outside the plate, or glued fingers, flush with its edge --
+and to every plate it meets, with the case's joint (`plates_of` says who owns
+which corner). A divider stands inside the side panel and on a floor that
+may run on beneath it, so its joints there are always T-slots. Each divider
+has rounded cable openings just above the floor (`cable_openings`), clear of
+every joint feature.
 
 The rack keeps no modules. Its space -- the rail span by the rail stack and
 the strips beside it, from the deck top down to its floor -- is kept clear for
@@ -52,7 +52,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from shapely.affinity import translate
-from shapely.geometry import MultiPolygon, Point, Polygon
+from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.geometry import box as rect
 from shapely.ops import unary_union
 
@@ -129,6 +129,12 @@ class Zone:
     yb: float                       # and of its upper one
     depth: float                    # deck top down to its floor's top
     section: object = None          # schema.HybridSection, None for the rack
+    #: the floor's actual depth: deeper than `depth` where a step too small
+    #: for two floors was merged into its neighbour's (`plates_of`)
+    floor: float = 0.0
+
+    def __post_init__(self):
+        self.floor = self.floor or self.depth
 
     @property
     def is_rack(self) -> bool:
@@ -153,6 +159,8 @@ class Layout:
     grow: tuple[float, float, float, float]
     radii: tuple[float, float, float, float]   # bf, bb, tb, tf
     notes: list[str] = field(default_factory=list)
+    flats: list = field(default_factory=list)
+    walls: list = field(default_factory=list)
 
     def wy(self, y_rack: float) -> float:
         return y_rack - self.lo
@@ -167,7 +175,7 @@ class Layout:
 
     def zf(self, zone: Zone) -> float:
         """World z of a zone's floor top."""
-        return self.z1 - zone.depth
+        return self.z1 - zone.floor
 
     @property
     def y_min(self) -> float:
@@ -184,20 +192,16 @@ class Layout:
         return rect(0.0, z.ya, self.width, z.yb)
 
     def inner(self, zone: Zone) -> Polygon:
-        """The room a zone holds in plan, wall faces and all excluded."""
+        """The room a zone holds in plan, its walls excluded."""
         ya, yb = zone.ya, zone.yb
-        i = self.zones.index(zone)
-        t = self.t
-        if i == 0:
-            ya += t
-        elif abs(self.zones[i - 1].depth - zone.depth) > 1e-6 and \
-                self.zones[i - 1].depth < zone.depth:
-            ya += t                 # its own step wall stands inside it
-        if i == len(self.zones) - 1:
-            yb -= t
-        elif abs(self.zones[i + 1].depth - zone.depth) > 1e-6 and \
-                self.zones[i + 1].depth < zone.depth:
-            yb -= t
+        mid = (ya + yb) / 2
+        for w in self.walls:
+            if w.y0 + self.t <= ya + 1e-6 or w.y0 >= yb - 1e-6:
+                continue
+            if w.y0 + self.t / 2 < mid:
+                ya = max(ya, w.y0 + self.t)
+            else:
+                yb = min(yb, w.y0)
         return rect(0.0, ya, self.width, yb)
 
 
@@ -217,9 +221,11 @@ def layout(scene, z1: float) -> Layout:
     hi = placed[-1].slots[1] + (rack.RAIL_H - rack.RAIL_SLOT_C)
     width = frame_width(spec.hp)
     # A wall beside the rails stands where a laser frame's base plate does:
-    # its inner face clear of the rail, its slots clear of the M5s.
+    # its inner face clear of the rail, its slots clear of the M5s. With
+    # T-slots the deck over it runs on to the rail, and its slots there need
+    # a sheet of deck beyond the wall.
     gap = (rack.laser_min_margin(t, joint, overhang, mat.joint_clearance)
-           - overhang - inset)
+           - overhang - inset) + (t if joint == "tslot" else 0.0)
     rack_depth = spec.module_panel_t + spec.module_depth
     rack_zone = Zone("rack", -gap, hi - lo + gap, rack_depth)
 
@@ -250,10 +256,12 @@ def layout(scene, z1: float) -> Layout:
         radii = (0.0, 0.0, 0.0, 0.0)
     else:
         grow = tuple(max(v, inset) for v in asked)
-    return Layout(t=t, joint=joint, inset=inset, width=width, z1=z1,
-                  zr=z1 - spec.module_panel_t, rows=rows, placed=placed,
-                  lo=lo, rail_hi=hi - lo, gap=gap, zones=zones, grow=grow,
-                  radii=radii, notes=notes)
+    L = Layout(t=t, joint=joint, inset=inset, width=width, z1=z1,
+               zr=z1 - spec.module_panel_t, rows=rows, placed=placed,
+               lo=lo, rail_hi=hi - lo, gap=gap, zones=zones, grow=grow,
+               radii=radii, notes=notes)
+    L.flats, L.walls = plates_of(L)
+    return L
 
 
 # --------------------------------------------------------------------------
@@ -329,7 +337,8 @@ def side_panel(L: Layout) -> tuple[Polygon, list[rack.Hole]]:
 @dataclass
 class Flat:
     """A deck or a floor: horizontal, from `y0` to `y1`, its underside at
-    `z`, jointed along its outer face (`top` for a deck)."""
+    `z`, jointed into the side panels along its outer face (`top` for a
+    deck) from `s0` to `s1`."""
 
     name: str
     role: str
@@ -337,109 +346,185 @@ class Flat:
     y1: float
     z: float
     top: bool
-    trim0: float = 0.0
-    trim1: float = 0.0
-    zone: Optional[Zone] = None
+    s0: float = 0.0
+    s1: float = 0.0
+    zones: list = field(default_factory=list)
 
 
 @dataclass
 class Wall:
-    """An end or step wall: its outer face at `y`, standing towards +y
-    (`up`) or -y from it, from `z0` to `z1`."""
+    """An end wall or a divider, `y0` to `y0 + t` thick, from its floor's
+    underside `z0` to the deck top `z1`."""
 
     name: str
     role: str
-    y: float
-    up: bool
+    y0: float
     z0: float
     z1: float
-
-
-def _wall_y(w: Wall, t: float) -> tuple[float, float]:
-    return (w.y, w.y + t) if w.up else (w.y - t, w.y)
+    #: the floor plate it stands on (a divider in a merged floor) or ends
+    floor: str = ""
+    #: the deck plate that covers its top, if any
+    deck: Optional[str] = None
+    #: a divider's shallower floor, which runs into it (a T-junction)
+    shallow: Optional[str] = None
+    #: a divider standing on a floor that runs on beneath it
+    merged: bool = False
+    divider: bool = False
+    #: where its side-panel joint runs, world z
+    s0: float = 0.0
+    s1: float = 0.0
 
 
 def plates_of(L: Layout) -> tuple[list[Flat], list[Wall]]:
-    """Every deck, floor and wall, placed."""
+    """Every deck, floor and wall, placed.
+
+    Decks and floors own the corners: they run past an end wall or a
+    divider -- by a sheet with T-slots, whose slots in them need material
+    outside the wall; to the outer corner with fingers -- and the walls
+    stand between them, drawn to the outer faces so the joints can cut
+    them. A divider's shallower floor runs into it (a T-junction); a step
+    too small for two floors (under a sheet and a millimetre) is a single
+    floor at the deeper depth, the divider standing on it.
+    """
     t = L.t
-    # A deck's or floor's joint stops a sheet short of the wall it meets:
-    # a T-slot's slots want a web of panel between them, and beside a step
-    # the panel reaches past the floor's outer face there.
-    trim = t
+    I = L.inset
     zones = L.zones
     n = len(zones)
-    walls = [Wall("end-bottom", "wall", zones[0].ya, True,
-                  L.zf(zones[0]) - t, L.z1),
-             Wall("end-top", "wall", zones[-1].yb, False,
-                  L.zf(zones[-1]) - t, L.z1)]
-    #: per boundary i (between zone i and i+1): which side its step wall
-    #: stands on, or None
-    step: list[Optional[str]] = []
-    for i in range(n - 1):
-        a, b = zones[i], zones[i + 1]
-        if abs(a.depth - b.depth) <= 1e-6:
-            step.append(None)
-            continue
-        # The step wall stands in the deeper zone and runs from its floor up
-        # to the deck: a step of a few millimetres is too short for any
-        # joint, and the full height carries the decks' ends besides.
-        yb = a.yb
-        if a.depth > b.depth:
-            walls.append(Wall(f"step-{a.name}-{b.name}", "wall", yb, False,
-                              L.zf(a) - t, L.z1))
-            step.append("below")
-        else:
-            walls.append(Wall(f"step-{a.name}-{b.name}", "wall", yb, True,
-                              L.zf(b) - t, L.z1))
-            step.append("above")
+    D = [z.depth for z in zones]
+    # boundaries: a divider wherever the depths differ; merged when the
+    # step is too small for one floor to pass under the other
+    div = [abs(D[k] - D[k + 1]) > 1e-6 for k in range(n - 1)]
+    merged = [div[k] and abs(D[k] - D[k + 1]) < t + 1.0 for k in range(n - 1)]
+    cont = [not div[k] or merged[k] for k in range(n - 1)]
+    deep = [k if D[k] > D[k + 1] else k + 1 for k in range(n - 1)]
 
-    flats: list[Flat] = []
-    # floors: one per run of zones at one depth
+    # floor runs, each at its deepest zone's depth
+    runs = []
     i = 0
     while i < n:
         j = i
-        while j + 1 < n and step[j] is None:
+        while j < n - 1 and cont[j]:
             j += 1
-        y0, y1 = zones[i].ya, zones[j].yb
-        if i == 0:
-            y0 += t
-        elif step[i - 1] == "above":
-            y0 += t                 # this run's own step wall stands in it
-        if j == n - 1:
-            y1 -= t
-        elif step[j] == "below":
-            y1 -= t
-        names = "-".join(z.name for z in zones[i:j + 1])
-        flats.append(Flat(f"floor-{names}", "floor", y0, y1,
-                          L.zf(zones[i]) - t, False, trim, trim, zones[i]))
+        runs.append((i, j))
         i = j + 1
-    # decks: one per section, stopping at a wall; beside the rack with no
-    # wall between, run on to the rails' outer edge
+    run_of = {}
+    for r, (i, j) in enumerate(runs):
+        for k in range(i, j + 1):
+            run_of[k] = r
+    floor_depth = {r: max(D[i:j + 1]) for r, (i, j) in enumerate(runs)}
+    for z_i, z in enumerate(zones):
+        z.floor = floor_depth[run_of[z_i]]
+    for k in range(n - 1):
+        if merged[k]:
+            a, b = zones[k], zones[k + 1]
+            sh = a if D[k] < D[k + 1] else b
+            L.notes.append(
+                f"{sh.name}'s floor drops to {sh.floor:g} mm, its neighbour's: "
+                f"a {abs(D[k] - D[k + 1]):g} mm step is too small for two "
+                f"floors; the divider stands on the one")
+
+    def zf(k):
+        return L.z1 - zones[k].floor
+
+    def run_name(r):
+        i, j = runs[r]
+        return "floor-" + "-".join(z.name for z in zones[i:j + 1])
+
+    walls: list[Wall] = []
+    walls.append(Wall("end-bottom", "wall", zones[0].ya + I, zf(0) - t, L.z1,
+                      floor=run_name(run_of[0])))
+    walls.append(Wall("end-top", "wall", zones[-1].yb - I - t, zf(n - 1) - t,
+                      L.z1, floor=run_name(run_of[n - 1])))
+    div_wall: dict[int, Wall] = {}
+    for k in range(n - 1):
+        if not div[k]:
+            continue
+        a, b = zones[k], zones[k + 1]
+        yb = a.yb
+        d = deep[k]
+        w = Wall(f"step-{a.name}-{b.name}", "wall",
+                 yb - t if d == k else yb, zf(d) - t, L.z1,
+                 floor=run_name(run_of[d]), merged=merged[k], divider=True)
+        if not merged[k]:
+            w.shallow = run_name(run_of[k + 1 if d == k else k])
+        walls.append(w)
+        div_wall[k] = w
+
+    flats: list[Flat] = []
+    for r, (i, j) in enumerate(runs):
+        y0, y1 = zones[i].ya, zones[j].yb
+        if i > 0:                               # a divider at its low end
+            w = div_wall[i - 1]
+            y0 = (w.y0 - I) if deep[i - 1] == i else w.y0
+        if j < n - 1:
+            w = div_wall[j]
+            y1 = (w.y0 + t + I) if deep[j] == j else w.y0 + t
+        flats.append(Flat(run_name(r), "floor", y0, y1, zf(i) - t, False,
+                          zones=zones[i:j + 1]))
     for k, z in enumerate(zones):
         if z.is_rack:
             continue
-        y0, y1, t0, t1 = z.ya, z.yb, 0.0, 0.0
-        if k == 0:
-            y0, t0 = y0 + t, trim
-        elif step[k - 1] is not None:
-            y0, t0 = y0 + (t if step[k - 1] == "above" else 0.0), trim
-        elif zones[k - 1].is_rack:
-            y0 = L.rail_hi
-        if k == n - 1:
-            y1, t1 = y1 - t, trim
-        elif step[k] is not None:
-            y1, t1 = y1 - (t if step[k] == "below" else 0.0), trim
-        elif zones[k + 1].is_rack:
-            y1 = 0.0
-        flats.append(Flat(f"deck-{z.name}", "deck", y0, y1, L.z1 - t, True,
-                          t0, t1, z))
+        y0, y1 = z.ya, z.yb
+        deck = f"deck-{z.name}"
+        if k > 0:
+            nb, w = zones[k - 1], div_wall.get(k - 1)
+            if w is None:
+                y0 = L.rail_hi if nb.is_rack else y0
+            elif nb.is_rack or deep[k - 1] == k:
+                w.deck = deck
+                y0 = (L.rail_hi if nb.is_rack else w.y0 - I) \
+                    if L.joint == "tslot" else w.y0
+            else:
+                y0 = w.y0 + t + I
+        if k < n - 1:
+            nb, w = zones[k + 1], div_wall.get(k)
+            if w is None:
+                y1 = 0.0 if nb.is_rack else y1
+            elif nb.is_rack or deep[k] == k:
+                w.deck = deck
+                y1 = (0.0 if nb.is_rack else w.y0 + t + I) \
+                    if L.joint == "tslot" else w.y0 + t
+            else:
+                y1 = w.y0 - I
+        flats.append(Flat(deck, "deck", y0, y1, L.z1 - t, True, zones=[z]))
+    for w in walls:
+        if w.divider:
+            continue
+        zone = zones[0] if w.name == "end-bottom" else zones[-1]
+        if not zone.is_rack:
+            w.deck = f"deck-{zone.name}"
+
+    # where each plate runs into the side panels: a plate's joint stops at
+    # the faces of the plates it meets, so no two lines of slots touch
+    for f in flats:
+        f.s0, f.s1 = f.y0, f.y1
+        mid = (f.y0 + f.y1) / 2
+        for w in walls:
+            if w.y0 + t <= f.y0 + 1e-6 or w.y0 >= f.y1 - 1e-6:
+                continue
+            if f.role == "floor" and w.merged and w.floor == f.name:
+                continue                        # stands on it, mid-floor
+            web = t if w.shallow == f.name else 0.0
+            if w.y0 + t / 2 < mid:
+                f.s0 = max(f.s0, w.y0 + t + web)
+            else:
+                f.s1 = min(f.s1, w.y0 - web)
+    for w in walls:
+        # on the floor's top face; a T-slot's first tab stands a web in from
+        # the end of its line, so the floor's slots and the wall's never meet
+        w.s0 = w.z0 + t
+        w.s1 = L.z1 - t if w.deck else L.z1
     return flats, walls
+
+
+def _y_span(w: Wall, t: float) -> tuple[float, float]:
+    return (w.y0, w.y0 + t)
 
 
 def build_hybrid(res, scene=None):
     """The hybrid case of a resolved `kind: hybrid` scene, as a box of
     plates (`box.BoxModel`) with the rails as bought members."""
-    from .box import BoxModel, BoxPlate, Standoff
+    from .box import BoxModel, BoxPlate, Standoff, _joint_band
     from .case import _layer_geometry
     from .fasteners import TAP_DRILL, fastener
 
@@ -450,9 +535,11 @@ def build_hybrid(res, scene=None):
     mat = sheet_of(scene.rack)
     t, W = L.t, L.width
     wt = W + 2 * t
+    flats, walls = L.flats, L.walls
     notes = list(L.notes)
     cheek_geom, holes = side_panel(L)
-    flats, walls = plates_of(L)
+    flat_by = {f.name: f for f in flats}
+    wall_by = {w.name: w for w in walls}
 
     # -- the decks: one layered lid over every section, cut into plates ----
     pad = spec.part_clearance
@@ -482,23 +569,26 @@ def build_hybrid(res, scene=None):
     if lid_holes:
         lid = lid.difference(unary_union(lid_holes))
 
+    def column_notches(g, length, s0, s1):
+        """Clear the plate out of the side panels' thickness wherever its
+        side-panel joint does not run."""
+        for u0 in (0.0, wt - t):
+            if s0 > 1e-9:
+                g = g.difference(rect(u0, -1.0, u0 + t, s0))
+            if s1 < length - 1e-9:
+                g = g.difference(rect(u0, s1, u0 + t, length + 1.0))
+        return g
+
     def flat_geom(f: Flat):
         L_ = f.y1 - f.y0
         g = rect(0.0, 0.0, wt, L_)
         if f.role == "deck":
             world = lid.intersection(rect(-t, f.y0, W + t, f.y1))
-            g = translate(world, t, -f.y0)
-            g = _largest(g)
-            # keep the joint edges whole: the lid's cuts stop short of them
+            g = _largest(translate(world, t, -f.y0))
         elif floor_holes.get(f.name):
             g = g.difference(translate(unary_union(floor_holes[f.name]),
                                        t, -f.y0))
-        for u0 in (0.0, wt - t):
-            if f.trim0:
-                g = g.difference(rect(u0, 0.0, u0 + t, f.trim0))
-            if f.trim1:
-                g = g.difference(rect(u0, L_ - f.trim1, u0 + t, L_))
-        return _largest(g)
+        return _largest(column_notches(g, L_, f.s0 - f.y0, f.s1 - f.y0))
 
     # -- port openings in the walls and the side panels ----------------------
     corridors = [(wc.corridor_poly, wc.corridor_z, pad, wc.ref)
@@ -508,8 +598,7 @@ def build_hybrid(res, scene=None):
     cheek_cuts: list = []
     for poly, zr, p, ref in corridors:
         for w in walls:
-            wy0, wy1 = _wall_y(w, t)
-            if (poly.intersects(rect(-t, wy0, W + t, wy1))
+            if (poly.intersects(rect(-t, w.y0, W + t, w.y0 + t))
                     and min(zr[1], w.z1) - max(zr[0], w.z0) > 0):
                 # wall frame: u = x + t, v = z up from the wall's bottom
                 bx0, _by0, bx1, _by1 = poly.bounds
@@ -525,9 +614,18 @@ def build_hybrid(res, scene=None):
                 notes.append(f"side panel: opening for {ref}")
                 break
 
+    def wall_geom(w: Wall):
+        H = w.z1 - w.z0
+        g = rect(0.0, 0.0, wt, H)
+        cuts = [c for c in wall_cuts[w.name] if not c.is_empty]
+        if cuts:
+            g = _largest(g.difference(unary_union(cuts)))
+        return _largest(column_notches(g, H, w.s0 - w.z0, w.s1 - w.z0))
+
     # -- joints: every plate into both side panels ---------------------------
+    fz = scene.rack.fastener or "M3"
     make = jn.tslot_joint if L.joint == "tslot" else jn.finger_joint
-    kw = {"fastener": scene.rack.fastener} if L.joint == "tslot" else {}
+    kw = {"fastener": fz} if L.joint == "tslot" else {}
     keep = rack.laser_keep_clear(t)
     m5 = tuple(Point(*h.at).buffer(h.diameter / 2, quad_segs=12)
                for h in holes)
@@ -539,16 +637,15 @@ def build_hybrid(res, scene=None):
     cheeks = {s: jn.Plate(cheek, mat, m5 + tuple(cheek_cuts), keep)
               for s in ("left", "right")}
     joints: list = []
-    out_plates: list = []
+    parts: dict[str, jn.Plate] = {}
 
-    def joint_both(name, plate, cheek_seg, length, t0=0.0, t1=0.0,
-                   interior=False):
+    def joint_both(name, plate, cheek_seg, v0, v1, interior=False):
         # an interior joint needs a slot: T-slots, whatever the case's joint
-        mk, kws = ((jn.tslot_joint, {"fastener": scene.rack.fastener})
+        mk, kws = ((jn.tslot_joint, {"fastener": fz})
                    if interior else (make, kw))
         for side, own in (
-                ("left", jn.Segment((0.0, t0), (0.0, length - t1), "right")),
-                ("right", jn.Segment((wt, t0), (wt, length - t1), "left"))):
+                ("left", jn.Segment((0.0, v0), (0.0, v1), "right")),
+                ("right", jn.Segment((wt, v0), (wt, v1), "left"))):
             try:
                 cheeks[side], plate, j = mk(jn.Edge(cheek_seg, own),
                                             cheeks[side], plate, **kws)
@@ -562,30 +659,113 @@ def build_hybrid(res, scene=None):
 
     for f in flats:
         g = flat_geom(f)
-        length = f.y1 - f.y0
         zline = f.z + t if f.top else f.z
-        seg = jn.Segment((f.y0 + f.trim0, zline), (f.y1 - f.trim1, zline),
+        seg = jn.Segment((f.s0, zline), (f.s1, zline),
                          "right" if f.top else "left")
         plate = jn.Plate(g, mat, tuple(Polygon(r) for r in g.interiors), keep)
-        plate = joint_both(f.name, plate, seg, length, f.trim0, f.trim1)
-        pnotes = []
-        if f.role == "deck":
-            pnotes = [n for n in lid_notes]
-        out_plates.append(BoxPlate(f.name, f.role, plate.geom,
-                                   (-t, f.y0, f.z), FLAT_AXES, mat, pnotes))
+        parts[f.name] = joint_both(f.name, plate, seg, f.s0 - f.y0,
+                                   f.s1 - f.y0)
+    for w in walls:
+        g = wall_geom(w)
+        if w.name == "end-top":     # its outer face is the panel's edge
+            seg = jn.Segment((w.y0 + t, w.s0), (w.y0 + t, w.s1), "left")
+        else:
+            seg = jn.Segment((w.y0, w.s0), (w.y0, w.s1), "right")
+        plate = jn.Plate(g, mat, tuple(Polygon(r) for r in g.interiors), keep)
+        parts[w.name] = joint_both(w.name, plate, seg, w.s0 - w.z0,
+                                   w.s1 - w.z0, interior=w.divider)
+
+    # -- joints: the plates to each other, between the side panels -----------
+    # Each edge runs across the width short of both side panels by a joint's
+    # reach, so its features never meet the side-panel joints' at a corner;
+    # beyond that the plate that owns the corner keeps it and the other is
+    # notched clear.
+    band = _joint_band(L.joint, t, fz, mat.joint_clearance)
+    u0, u1 = t + band, wt - t - band
+    if u1 - u0 < 4 * t:
+        raise ValueError(f"{scene.rack.hp:g} HP is too narrow to joint the "
+                         f"plates to each other")
+
+    def notch(name, v0, v1):
+        p = parts[name]
+        g = p.geom.difference(unary_union([rect(-1.0, v0, u0, v1),
+                                           rect(u1, v0, wt + 1.0, v1)]))
+        parts[name] = jn.Plate(_largest(g), p.material, p.holes, p.keep_clear)
+
+    def pp(a, b, a_seg, b_seg, kind):
+        mk, kws = ((jn.tslot_joint, {"fastener": fz}) if kind == "tslot"
+                   else (jn.finger_joint, {}))
+        try:
+            parts[a], parts[b], j = mk(jn.Edge(a_seg, b_seg), parts[a],
+                                       parts[b], **kws)
+        except jn.JointError as exc:
+            raise ValueError(f"the {b} plate cannot be jointed to the {a} "
+                             f"plate: {exc}") from None
+        joints.append((a, b, j))
+
+    def face_on(f: Flat, w: Wall):
+        """The wall's face a deck or floor meets it on, in the flat's frame,
+        and the side the wall stands on."""
+        if w.merged and w.floor == f.name:
+            return w.y0 - f.y0, "left"
+        if w.y0 + t / 2 > (f.y0 + f.y1) / 2:
+            return w.y0 + t - f.y0, "right"
+        return w.y0 - f.y0, "left"
+
     for w in walls:
         H = w.z1 - w.z0
-        g = rect(0.0, 0.0, wt, H)
-        cuts = [c for c in wall_cuts[w.name] if not c.is_empty]
-        if cuts:
-            g = _largest(g.difference(unary_union(cuts)))
-        seg = jn.Segment((w.y, w.z0), (w.y, w.z1), "right" if w.up else "left")
-        plate = jn.Plate(g, mat, tuple(Polygon(r) for r in g.interiors), keep)
-        plate = joint_both(w.name, plate, seg, H,
-                           interior=w.name.startswith("step-"))
-        y_origin = w.y + t if w.up else w.y
-        out_plates.append(BoxPlate(w.name, w.role, plate.geom,
-                                   (-t, y_origin, w.z0), WALL_AXES, mat))
+        fl = flat_by[w.floor]
+        v, side = face_on(fl, w)
+        notch(w.name, -1.0, t)
+        pp(fl.name, w.name, jn.Segment((u0, v), (u1, v), side),
+           jn.Segment((u0, 0.0), (u1, 0.0), "left"),
+           "tslot" if w.merged else L.joint)
+        if w.deck:
+            dk = flat_by[w.deck]
+            v, side = face_on(dk, w)
+            notch(w.name, H - t, H + 1.0)
+            pp(dk.name, w.name, jn.Segment((u0, v), (u1, v), side),
+               jn.Segment((u0, H), (u1, H), "right"), L.joint)
+        if w.shallow:
+            sh = flat_by[w.shallow]
+            Ls = sh.y1 - sh.y0
+            vb = sh.z - w.z0
+            if w.y0 + t / 2 < (sh.y0 + sh.y1) / 2:
+                notch(sh.name, -1.0, t)
+                b_seg = jn.Segment((u0, 0.0), (u1, 0.0), "left")
+            else:
+                notch(sh.name, Ls - t, Ls + 1.0)
+                b_seg = jn.Segment((u0, Ls), (u1, Ls), "right")
+            pp(w.name, sh.name, jn.Segment((u0, vb), (u1, vb), "left"),
+               b_seg, "tslot")
+
+    # -- cable openings in the dividers, clear of every joint ----------------
+    co = scene.rack.cable_openings
+    for w in walls:
+        if not w.divider:
+            continue
+        feats = [f.geom for _a, _b, j in joints
+                 for role, nm in (("a", _a), ("b", _b)) if nm == w.name
+                 for _i, f in j.of(role)]
+        cut, why = cable_openings(w, flat_by, co, wt, t, feats)
+        if cut:
+            p = parts[w.name]
+            parts[w.name] = jn.Plate(_largest(p.geom.difference(
+                unary_union(cut))), p.material, p.holes, p.keep_clear)
+            notes.append(f"{w.name}: {len(cut)} cable opening"
+                         f"{'s' if len(cut) != 1 else ''}, "
+                         f"{co.width:g} x {co.height:g} mm")
+        if why:
+            notes.append(f"{w.name}: {why}")
+
+    out_plates: list = []
+    for f in flats:
+        pnotes = list(lid_notes) if f.role == "deck" else []
+        out_plates.append(BoxPlate(f.name, f.role, parts[f.name].geom,
+                                   (-t, f.y0, f.z), FLAT_AXES, mat, pnotes))
+    for w in walls:
+        out_plates.append(BoxPlate(w.name, w.role, parts[w.name].geom,
+                                   (-t, w.y0 + t, w.z0), WALL_AXES, mat))
 
     # the side panels, drawn in world (y, z) -- the frame their joints and
     # M5s were cut in
@@ -614,7 +794,8 @@ def build_hybrid(res, scene=None):
         f"rails: {len(rails)} x {W:.2f} mm; tap both ends of every rail M5 "
         f"(the {rack.RAIL_END_BORE:g} mm end bore takes the tap as it is, a "
         f"solid end is drilled {TAP_DRILL['M5']:g} mm first); an "
-        f"M5x{m5_len:g} through each side panel into each rail end ({t:g} mm panel + {rack.M5_ENGAGEMENT:g} mm of thread)")
+        f"M5x{m5_len:g} through each side panel into each rail end "
+        f"({t:g} mm panel + {rack.M5_ENGAGEMENT:g} mm of thread)")
 
     zmin = min(L.zf(z) for z in L.zones) - t
     model = BoxModel(spec=spec, outer=rect(-t, L.y_min - L.grow[2],
@@ -624,8 +805,69 @@ def build_hybrid(res, scene=None):
                      members=members, kind="hybrid")
     model.extras["bom"] = bom
     model.extras["hybrid"] = summary(L, scene)
-    model.extras["sheet"] = {"name": mat.name, "thickness": t}
+    model.extras["sheet"] = mat.model_dump(mode="json")
     return model
+
+
+def cable_openings(w: Wall, flat_by, co, wt: float, t: float, feats):
+    """Rounded slots through a divider for the cables between its zones:
+    `co.count` of them (auto: one per 90 mm of width), `co.width` by
+    `co.height` with full radii, just above the higher of the floors it
+    meets so a cable lies on the floor through it. Each is slid along the
+    wall until it keeps half a sheet and a little clear of every joint
+    feature; never more than half the wall's width is opened, so it still
+    carries the deck. Returns the openings in the wall's frame, and a note
+    if any had to be left out."""
+    if co.count == 0:
+        return [], None
+    W = wt - 2 * t
+    width, height = co.width, co.height
+    want = co.count if co.count is not None else max(1, int(W // 90.0))
+    n = min(want, int(0.5 * W // width))
+    if n <= 0:
+        return [], "too narrow for a cable opening"
+    floors = [flat_by[w.floor]] + ([flat_by[w.shallow]] if w.shallow else [])
+    v_lo = max(f.z + t for f in floors) - w.z0 + 1.0
+    H = w.z1 - w.z0
+    r = min(width, height) / 2
+    clear = (unary_union(feats).buffer(t / 2 + 0.5) if feats else Polygon())
+    pitch = W / n
+    reach = max(0.0, pitch / 2 - width / 2 - 1.0)
+    out = []
+    for k in range(n):
+        c = t + pitch * (k + 0.5)
+        found = None
+        offsets = [0.0]
+        d = 1.0
+        while d <= reach + 1e-9:
+            offsets += [d, -d]
+            d += 1.0
+        for dv in (0.0, 3.0, 6.0, 10.0):
+            v = v_lo + dv
+            if v + height > H - t - 1.0:
+                break
+            for du in offsets:
+                cu = c + du
+                if width >= height:
+                    line = LineString([(cu - width / 2 + r, v + r),
+                                       (cu + width / 2 - r, v + r)])
+                else:
+                    line = LineString([(cu, v + r), (cu, v + height - r)])
+                hole = line.buffer(r, quad_segs=12)
+                if hole.bounds[0] < t + 1.0 or hole.bounds[2] > wt - t - 1.0:
+                    continue
+                if not hole.intersects(clear):
+                    found = hole
+                    break
+            if found is not None:
+                break
+        if found is not None:
+            out.append(found)
+    why = None
+    if len(out) < want:
+        why = (f"{want - len(out)} of {want} cable openings left out: "
+               f"no room clear of the joints")
+    return out, why
 
 
 def summary(L: Layout, scene) -> dict:
@@ -639,7 +881,7 @@ def summary(L: Layout, scene) -> dict:
         "aperture": [0.0, 0.0, L.width, L.rail_hi],
         "length": L.y_max - L.y_min + L.grow[2] + L.grow[3],
         "zones": [{"name": z.name, "rack": z.is_rack, "y0": z.ya, "y1": z.yb,
-                   "depth": z.depth, "z_floor": L.zf(z),
+                   "depth": z.depth, "floor": z.floor, "z_floor": L.zf(z),
                    "side": None if z.is_rack else z.section.side}
                   for z in L.zones],
         "joint": L.joint, "sheet_t": L.t,

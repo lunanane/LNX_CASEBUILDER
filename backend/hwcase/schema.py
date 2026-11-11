@@ -937,6 +937,17 @@ class PanelSpec(Strict):
     r_top_front: float = 0.0
 
 
+class CableOpenings(Strict):
+    """Rounded slots through a hybrid case's dividers, for the cables
+    between its zones. See `hwcase.hybrid.cable_openings`."""
+
+    #: how many per divider; unset, one per 90 mm of width; 0 for none
+    count: Optional[int] = Field(None, ge=0, le=20)
+    #: each slot's size, with full radii
+    width: float = Field(30.0, gt=0, le=200)
+    height: float = Field(15.0, gt=0, le=100)
+
+
 class RackSpec(Strict):
     """A Eurorack frame: a width in HP and a stack of rows.
 
@@ -986,6 +997,8 @@ class RackSpec(Strict):
     #: `kind: hybrid` only: how thick the modules' panels are. The rails sit
     #: this far below the deck top, so the module faces are flush with it.
     module_panel_t: float = Field(2.0, gt=0, le=10)
+    #: `kind: hybrid` only: the cable openings in its dividers
+    cable_openings: CableOpenings = Field(default_factory=CableOpenings)
 
 
 class HybridSection(Strict):

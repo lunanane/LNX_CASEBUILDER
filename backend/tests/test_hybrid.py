@@ -82,8 +82,8 @@ def test_the_example_builds_with_no_errors(res, model):
     assert model.kind == "hybrid"
     assert [i for i in check(res, LIB) if i.level == "error"] == []
     assert {p.name for p in model.plates} == {
-        "side-left", "side-right", "deck-below1", "floor-below1",
-        "floor-rack", "end-bottom", "end-top", "step-below1-rack"}
+        "side-left", "side-right", "deck-below1", "floor-below1-rack",
+        "end-bottom", "end-top", "step-below1-rack"}
 
 
 def test_the_rail_span_is_the_width_of_the_case(model):
@@ -113,29 +113,46 @@ def test_the_deck_top_is_the_module_face(res, model):
         assert top - rail.origin[2] == pytest.approx(2.0)
 
 
-def test_the_side_panel_follows_the_stepped_profile(model):
-    """The rack's floor is 42 mm under the deck, the section's 40: the side
-    panel steps between them, and reaches past every plate by the overhang
-    (a sheet with T-slots; 10.5 past the end walls)."""
+def test_a_step_too_small_for_two_floors_is_one_floor(model):
+    """The rack's floor is 42 mm under the deck, the section's 40: a 2 mm
+    step cannot pass one 5 mm floor under the other, so the section's floor
+    drops to 42 and the divider stands on the one floor."""
     hy = model.extras["hybrid"]
     zones = {z["name"]: z for z in hy["zones"]}
     assert zones["rack"]["depth"] == pytest.approx(42.0)
     assert zones["below1"]["depth"] == pytest.approx(40.0)
-    cheek = model.plate("side-left").geom
+    assert zones["below1"]["floor"] == pytest.approx(42.0)
+    assert any("floor drops to 42" in n for n in model.notes)
+    jn_ = {(a, b): j for a, b, j in model.joints}
+    assert jn_[("floor-below1-rack", "step-below1-rack")].kind == "tslot"
+
+
+def test_the_side_panel_follows_the_stepped_profile():
+    """A real step -- 60 mm beside 42 -- steps the side panel, which reaches
+    past every plate by the overhang (a sheet with T-slots; 10.5 past the
+    plates at the ends)."""
+    deep = HybridSection(id="below1", side="below", length=300.0, depth=60.0)
+    m = case_mod.build(resolve(_scene(sections=[deep]), LIB))
+    zones = {z["name"]: z for z in m.extras["hybrid"]["zones"]}
+    cheek = m.plate("side-left").geom
     t = 5.0
     y0, z0, y1, z1 = cheek.bounds
     assert y0 == pytest.approx(zones["below1"]["y0"] - 10.5, abs=0.01)
     assert y1 == pytest.approx(zones["rack"]["y1"] + 10.5, abs=0.01)
     assert z1 == pytest.approx(t, abs=0.01)                 # front: a sheet
-    assert z0 == pytest.approx(-42.0 - t - t, abs=0.01)     # rack floor + back
-    # under the section the panel stops a sheet past the shallower floor
-    mid = zones["below1"]["y0"] + 150.0
+    assert z0 == pytest.approx(-60.0 - t - t, abs=0.01)     # floor + back
+    # under the rack the panel stops a sheet past its shallower floor
+    mid = zones["rack"]["y0"] + 100.0
     column = cheek.intersection(Polygon([(mid - 0.1, -200), (mid + 0.1, -200),
                                          (mid + 0.1, 200), (mid - 0.1, 200)]))
-    assert column.bounds[1] == pytest.approx(-40.0 - t - t, abs=0.01)
+    assert column.bounds[1] == pytest.approx(-42.0 - t - t, abs=0.01)
     # and the front corners are rounded, the back ones square
     assert not cheek.buffer(1e-6).covers(Point(y0 + 0.5, z1 - 0.5))
-    assert cheek.buffer(1e-6).covers(Point(y0 + 0.5, -40.0 - 2 * t + 0.5))
+    assert cheek.buffer(1e-6).covers(Point(y0 + 0.5, z0 + 0.5))
+    # the rack's floor runs into the divider: a T-junction, T-slotted
+    jn_ = {(a, b): j for a, b, j in m.joints}
+    assert jn_[("step-below1-rack", "floor-rack")].kind == "tslot"
+    _validate(m)
 
 
 def test_the_m5s_meet_the_rail_ends(model):
@@ -177,7 +194,7 @@ def test_the_parts_cut_the_deck_and_get_standoffs(res, model):
                and any(p.contains(Polygon(r).centroid) for p in pads)]
     assert len(buttons) == 32
     through = {s.through for s in model.standoffs}
-    assert through == {"deck", "floor-below1"}
+    assert through == {"deck", "floor-below1-rack"}
 
 
 def test_exports_svg_dxf_and_the_cut_list(model):
@@ -186,7 +203,7 @@ def test_exports_svg_dxf_and_the_cut_list(model):
         assert any(n.endswith("." + fmt) for n in files)
         cut = files["h-cutlist.txt"]
     assert "hybrid -- 60 HP of 3U + 3U" in cut
-    for word in ("side-left", "side-right", "deck-below1", "floor-rack",
+    for word in ("side-left", "side-right", "deck-below1", "floor-below1-rack",
                  "end-bottom", "end-top", "step-below1-rack", "standoffs:"):
         assert word in cut
     assert "4 x Eurorack rail, 304.80 mm (60 HP)" in cut
@@ -198,7 +215,7 @@ def test_exports_svg_dxf_and_the_cut_list(model):
 def test_the_editor_gets_plates_rails_and_the_zones(model):
     data = box_to_json(model)
     assert data["kind"] == "hybrid"
-    assert len(data["plates"]) == 8 and len(data["members"]) == 4
+    assert len(data["plates"]) == 7 and len(data["members"]) == 4
     assert [z["name"] for z in data["extras"]["hybrid"]["zones"]] == [
         "below1", "rack"]
     for p in data["plates"] + data["members"]:
@@ -239,14 +256,22 @@ def test_a_part_deeper_than_its_section_is_an_error():
     assert {"trellis_a", "trellis_b"} <= hits
 
 
+ABOVE_BELOW = [HybridSection(id="below1", side="below", length=300.0,
+                             depth=40.0),
+               HybridSection(id="top", side="above", length=120.0,
+                             depth=55.0),
+               HybridSection(id="below2", side="below", length=80.0,
+                             depth=60.0)]
+BIG_STOCK = [(1000.0, 600.0)]
+
+
+def _joint(scene, joint):
+    spec = scene.rack.model_copy(update={"joint": joint})
+    return scene.model_copy(update={"rack": spec})
+
+
 def test_sections_above_and_below_build():
-    sections = [HybridSection(id="below1", side="below", length=300.0,
-                              depth=40.0),
-                HybridSection(id="top", side="above", length=120.0,
-                              depth=30.0),
-                HybridSection(id="below2", side="below", length=80.0,
-                              depth=60.0)]
-    scene = _scene(sections=sections)
+    scene = _scene(sections=ABOVE_BELOW)
     res = resolve(scene, LIB)
     assert [i for i in check(res, LIB) if i.level == "error"] == []
     m = case_mod.build(res)
@@ -274,16 +299,109 @@ def test_equal_depths_share_a_floor_and_need_no_step():
     _validate(m)
 
 
+@pytest.mark.parametrize("sections", ["example", "above+below"])
 @pytest.mark.parametrize("joint", ["tslot", "finger"])
-def test_both_joint_types_build(joint):
-    scene = _scene()
-    spec = scene.rack.model_copy(update={"joint": joint})
-    m = case_mod.build(resolve(scene.model_copy(update={"rack": spec}), LIB))
+def test_every_joint_validates_and_every_plate_fits(joint, sections):
+    """Both joint types, the user's example and a case with sections above
+    and below: every plate is jointed into both side panels and to every
+    plate it meets, every joint validates, and the plates pack."""
+    scene = _joint(_scene(), joint)
+    if sections != "example":
+        scene = scene.model_copy(update={
+            "sections": ABOVE_BELOW,
+            "case": scene.case.model_copy(update={"plates": BIG_STOCK})})
+    m = case_mod.build(resolve(scene, LIB))
     _validate(m)
-    # a step wall stands inside the side panel above the shallower floor:
-    # an interior joint needs a slot, so it is T-slotted either way
-    kinds = {(b.startswith("step-"), j.kind) for _a, b, j in m.joints}
-    assert kinds == {(False, joint), (True, "tslot")}
+    walls = [p for p in m.plates if p.role == "wall"]
+    pairs = {(a, b): j for a, b, j in m.joints}
+    for w in walls:
+        # every wall: both side panels, its floor and (beside a section) its
+        # deck -- with the case's joint at an outer corner
+        assert ("side-left", w.name) in pairs and ("side-right", w.name) in pairs
+        mates = [a for a, b in pairs if b == w.name and not a.startswith("side")]
+        assert any(a.startswith("floor-") for a in mates), w.name
+    for (a, b), j in pairs.items():
+        if a.startswith("side"):
+            # a divider stands inside the side panel: always T-slotted
+            assert j.kind == ("tslot" if b.startswith("step-") else joint)
+        elif a.startswith("deck-") or b.startswith("end-"):
+            assert j.kind == joint, (a, b)
+    sheets = export.pack_sheets(flat.from_box(m), stock=m.spec)
+    assert {pl.part.name for s in sheets for pl in s.placements} == {
+        p.name for p in m.plates}
+
+
+def test_plate_joints_add_their_bolts_to_the_bill():
+    """T-slots between the plates take bolts and nuts too: more than the
+    side-panel joints alone."""
+    m = case_mod.build(resolve(_scene(), LIB))
+    side = sum(n for a, _b, j in m.joints if a.startswith("side")
+               for k, n in j.bom().items() if k.endswith(" bolt"))
+    bom = m.bill_of_materials()
+    bolts = sum(n for k, n in bom.items() if k.endswith(" bolt"))
+    assert bolts > side > 0
+    assert bom["M3 hex nut"] == bolts
+    cut = dict(export.sheet_files(m, "svg", "h"))["h-cutlist.txt"]
+    assert f"{bolts:g} x M3x12 bolt" in cut
+
+
+# --------------------------------------------------------------------------
+# cable openings through the dividers
+# --------------------------------------------------------------------------
+
+
+def _openings(plate):
+    """A wall's cable openings: its round-ended interior rings."""
+    out = []
+    for ring in plate.geom.interiors:
+        hole = Polygon(ring)
+        x0, y0, x1, y1 = hole.bounds
+        if 10.0 < x1 - x0 < 60.0 and 5.0 < y1 - y0 < 40.0 and \
+                hole.area < 0.99 * (x1 - x0) * (y1 - y0):
+            out.append(hole)
+    return out
+
+
+@pytest.mark.parametrize("joint", ["tslot", "finger"])
+def test_dividers_have_cable_openings_clear_of_every_joint(joint):
+    scene = _joint(_scene(), joint).model_copy(update={
+        "sections": ABOVE_BELOW,
+        "case": _scene().case.model_copy(update={"plates": BIG_STOCK})})
+    m = case_mod.build(resolve(scene, LIB))
+    for w in [p for p in m.plates if p.name.startswith("step-")]:
+        holes = _openings(w)
+        assert len(holes) == 3, w.name             # 304.8 mm: one per 90
+        for h in holes:
+            x0, y0, x1, y1 = h.bounds
+            assert x1 - x0 == pytest.approx(30.0, abs=0.1)
+            assert y1 - y0 == pytest.approx(15.0, abs=0.1)
+        feats = [f.geom for a, b, j in m.joints
+                 for role, name in (("a", a), ("b", b)) if name == w.name
+                 for _i, f in j.of(role)]
+        assert feats
+        for h in holes:
+            for f in feats:
+                assert h.distance(f) >= 5.0 / 2 - 1e-6, w.name
+        # never more than half the width open: the wall carries the deck
+        assert sum(h.bounds[2] - h.bounds[0] for h in holes) <= 304.8 / 2
+    _validate(m)
+    # end walls get none
+    assert not _openings(m.plate("end-bottom"))
+
+
+def test_cable_openings_follow_their_settings():
+    scene = _scene()
+    co = scene.rack.cable_openings.model_copy(
+        update={"count": 2, "width": 40.0, "height": 12.0})
+    m = case_mod.build(resolve(scene.model_copy(update={
+        "rack": scene.rack.model_copy(update={"cable_openings": co})}), LIB))
+    holes = _openings(m.plate("step-below1-rack"))
+    assert len(holes) == 2
+    assert holes[0].bounds[2] - holes[0].bounds[0] == pytest.approx(40.0, abs=0.1)
+    none = scene.rack.cable_openings.model_copy(update={"count": 0})
+    m = case_mod.build(resolve(scene.model_copy(update={
+        "rack": scene.rack.model_copy(update={"cable_openings": none})}), LIB))
+    assert not _openings(m.plate("step-below1-rack"))
 
 
 def test_a_radius_that_eats_the_joints_is_refused():
