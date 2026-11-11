@@ -556,3 +556,73 @@ def test_the_box_starters_sample_bay_builds_when_uncommented():
     assert [i for i in check(res, LIB) if i.level == "error"] == []
     model = case_mod.build(res)
     assert {"bay1-cheek-left", "bay1-cheek-right"} <= {p.name for p in model.plates}
+
+
+# --------------------------------------------------------------------------
+# the plan's own acceptance case: 84 HP of 3U beside a Pi and a HyperPixel
+# --------------------------------------------------------------------------
+
+PI_SCENE = SCENE.parent / "hybrid-84hp-pi-hyperpixel.yaml"
+
+
+@pytest.fixture(scope="module")
+def pi_res():
+    return resolve(load_scene(PI_SCENE), LIB)
+
+
+@pytest.fixture(scope="module")
+def pi_model(pi_res) -> BoxModel:
+    return case_mod.build(pi_res)
+
+
+def test_plan_row1_the_84hp_bay_beside_a_pi_and_hyperpixel_builds(
+        pi_res, pi_model):
+    assert [i for i in check(pi_res, LIB) if i.level == "error"] == []
+    assert {"bay-cheek-left", "bay-cheek-right"} <= {
+        p.name for p in pi_model.plates}
+    bay = pi_model.extras["bays"][0]
+    assert bay["hp"] == 84 and bay["width"] == pytest.approx(426.72)
+
+
+def test_plan_row2_the_deck_top_is_the_rail_face_plus_2mm(pi_res, pi_model):
+    deck = pi_model.plate("deck")
+    deck_top = deck.origin[2] + deck.material.thickness
+    assert deck_top == pytest.approx(pi_res.panels["main"], abs=0.01)
+    for rail in pi_model.members:
+        assert deck_top - rail.origin[2] == pytest.approx(2.0, abs=0.01)
+
+
+def test_plan_row3_a_pi_in_the_module_space_is_an_error():
+    scene = load_scene(PI_SCENE)
+    moved = [p.model_copy(update={"pos": (200.0, 66.0, 0.0)})
+             if p.id == "pi" else p for p in scene.placements]
+    errors = _errors(scene.model_copy(update={"placements": moved}))
+    assert any(e.code == "rack_bay" and "pi" in e.refs for e in errors)
+
+
+def test_plan_row4_cheek_m5s_meet_the_84hp_rail_ends(pi_model):
+    for rail in pi_model.members:
+        y = rail.origin[1] + rack.RAIL_H / 2
+        z = rail.origin[2] - rack.rail_bore_depth()
+        for side in ("left", "right"):
+            cheek = pi_model.plate(f"bay-cheek-{side}")
+            holes = [cheek.to_world(u, v)
+                     for u, v in _round_holes(cheek.geom, rack.M5_CLEAR)]
+            assert any(abs(hy - y) < 0.01 and abs(hz - z) < 0.01
+                       for _x, hy, hz in holes)
+
+
+def test_plan_row5_and_6_joints_validate_plates_fit_and_the_cut_list(
+        pi_model):
+    for a, b, j in pi_model.joints:
+        pa, pb = pi_model.plate(a), pi_model.plate(b)
+        assert [v for v in jn.validate_joint(
+            j, jn.Plate(pa.geom, pa.material), jn.Plate(pb.geom, pb.material))
+            if v.rule != "keep_clear"] == [], (a, b)
+    sheets = export.pack_sheets(flat.from_box(pi_model), stock=pi_model.spec)
+    assert {pl.part.name for s in sheets for pl in s.placements} == {
+        p.name for p in pi_model.plates}
+    cut = dict(export.sheet_files(pi_model, "svg", "pi"))["pi-cutlist.txt"]
+    for word in ("deck", "bay-cheek-left", "bay-cheek-right",
+                 "2 x Eurorack rail, 426.72 mm (84 HP)"):
+        assert word in cut
