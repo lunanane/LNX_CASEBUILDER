@@ -199,3 +199,63 @@ def test_the_build_names_the_frames_sheet_for_the_editor():
     assert u["sheet"]["name"] == rack.U_PANEL_MATERIAL.name
     assert u["laser_sheet"]["name"] == rack.LASER_MATERIAL.name
     assert u["laser_sheet"]["thickness"] == rack.LASER_MATERIAL.thickness
+
+# --------------------------------------------------------------------------
+# a frame's issues
+# --------------------------------------------------------------------------
+
+from fastapi.testclient import TestClient                  # noqa: E402
+
+from hwcase import api                                     # noqa: E402
+from hwcase.schema import RackSpec                         # noqa: E402
+
+
+def _codes(spec: RackSpec, stock=WIDE) -> dict[str, object]:
+    model = rack.build_spec(spec)
+    return {i.code: i for i in rack.frame_issues(spec, model, stock)}
+
+
+def test_a_sensible_frame_has_no_issues():
+    assert _codes(RackSpec(hp=42)) == {}
+
+
+def test_a_raised_margin_is_a_warning():
+    got = _codes(RackSpec(hp=42, panel={"bottom": 0.0}))
+    assert got["margin_raised"].level == "warning"
+    assert "bottom margin raised from 0.00" in got["margin_raised"].message
+
+
+def test_a_laser_sheet_thinner_than_its_t_slot_needs_is_a_warning():
+    thin = Material(name="ply-2mm", thickness=2.0)
+    got = _codes(RackSpec(hp=42, style="laser", material=thin, module_depth=40))
+    assert got["sheet_thin"].level == "warning"
+    assert "2.75 mm" in got["sheet_thin"].message
+    ok = _codes(RackSpec(hp=42, style="laser", joint="finger", material=thin,
+                         module_depth=40))
+    assert "sheet_thin" not in ok
+
+
+def test_a_module_depth_under_a_skiff_is_a_warning():
+    got = _codes(RackSpec(hp=42, module_depth=20.0))
+    assert got["module_depth_shallow"].level == "warning"
+
+
+def test_a_plate_bigger_than_the_stock_is_an_error():
+    spec = RackSpec(hp=84)
+    got = [i for i in rack.frame_issues(spec, rack.build_spec(spec),
+                                        CaseSpec(plates=[(150.0, 150.0)]))
+           if i.code == "plate_too_big"]
+    assert [i.level for i in got] == ["error", "error"]
+    assert "side-left" in got[0].message and "side-right" in got[1].message
+
+
+def test_the_build_route_carries_a_frames_issues():
+    scene = Scene.model_validate({
+        "name": "f", "kind": "rack",
+        "rack": {"hp": 42, "panel": {"bottom": 0.0}},
+        "case": {"plates": [[150.0, 150.0]]}})
+    r = TestClient(api.app).post("/api/build",
+                                 json=scene.model_dump(mode="json"))
+    assert r.status_code == 200, r.text
+    codes = {i["code"]: i["level"] for i in r.json()["issues"]}
+    assert codes == {"margin_raised": "warning", "plate_too_big": "error"}

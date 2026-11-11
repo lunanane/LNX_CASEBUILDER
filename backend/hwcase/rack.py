@@ -1079,3 +1079,79 @@ def build_spec(spec) -> RackModel:
                  joint=getattr(spec, "joint", "tslot"),
                  top_plate=getattr(spec, "top_plate", True),
                  fastener=getattr(spec, "fastener", "M3"))
+
+
+# --------------------------------------------------------------------------
+# what is wrong with a frame, as issues the editor lists
+# --------------------------------------------------------------------------
+
+#: Below this, a module and its power cable do not fit even a skiff
+#: (docs/eurorack.md section 5: "skiff friendly" is 25 mm, cable included).
+MIN_MODULE_DEPTH = 25.0
+
+
+def laser_min_sheet(joint: str, fastener: str = "M3") -> float:
+    """The thinnest sheet a laser frame's joints hold in.
+
+    A T-slot's nut stands in the edge of the plate with its flats against the
+    trap's two walls, and those walls are as deep as the sheet is thick. Less
+    than half the nut's width across flats in the sheet and the nut tilts out
+    of its trap the first time the bolt is driven. A glued finger joint has
+    no such floor.
+    """
+    from .fasteners import fastener as _fastener
+    return _fastener(fastener).nut_af / 2 if joint == "tslot" else 0.0
+
+
+def frame_issues(spec, model: RackModel, stock=None) -> list:
+    """Everything about a built frame the maker should hear before cutting.
+
+    `spec` is the scene's `RackSpec`, `stock` its `case` spec (the plates
+    the frame's parts are packed onto). No refs: an issue's refs name
+    placements, and a frame has none to select.
+    """
+    from .scene import Issue
+
+    out: list = []
+    panel = getattr(spec, "panel", None)
+    for edge in ("bottom", "top"):
+        asked = getattr(panel, edge, PANEL_MARGIN) if panel is not None \
+            else PANEL_MARGIN
+        got = getattr(model.plan, edge)
+        if got > asked + 1e-6:
+            why = ("to fit the base and top plates under and over the rails"
+                   if model.style == "laser"
+                   else "to keep the M5 holes on the panel")
+            out.append(Issue(
+                "warning", "margin_raised",
+                f"{edge} margin raised from {asked:.2f} to {got:.2f} mm {why}",
+                []))
+
+    if model.style == "laser":
+        t = model.panel_t
+        fz = getattr(spec, "fastener", "M3") or "M3"
+        need = laser_min_sheet(model.joint, fz)
+        if t < need - 1e-6:
+            out.append(Issue(
+                "warning", "sheet_thin",
+                f"{t:g} mm sheet is thinner than the {need:g} mm a {fz} "
+                f"T-slot needs: under half the nut stands in the sheet, and "
+                f"it tilts out of its trap. Use {need:g} mm or more, or "
+                f"finger joints", []))
+
+    if model.module_depth < MIN_MODULE_DEPTH - 1e-6:
+        out.append(Issue(
+            "warning", "module_depth_shallow",
+            f"module depth {model.module_depth:g} mm is under "
+            f"{MIN_MODULE_DEPTH:g} mm: not even a skiff-friendly module and "
+            f"its power cable fit behind the panel", []))
+
+    if stock is not None:
+        from .export import pack_sheets
+        from .flat import from_rack
+        for part in from_rack(model):
+            try:
+                pack_sheets([part], stock=stock)
+            except ValueError as exc:
+                out.append(Issue("error", "plate_too_big", str(exc), []))
+    return out

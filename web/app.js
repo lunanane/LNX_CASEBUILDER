@@ -1251,6 +1251,8 @@ async function refreshCase() {
     if (state.caseModel && state.caseModel.kind === 'rack') {
       buildRack(state.caseModel);
       renderFramePanel();
+      // a frame has no resolve step: its issues come back with the build
+      renderIssues(state.caseModel.issues || []);
       return;
     }
     buildCase(state.caseModel);
@@ -1262,7 +1264,10 @@ async function refreshCase() {
     // added, the rebuild failed, and nothing on screen moved.
     console.warn('case build failed', err);
     status('build failed: ' + err.message, 'err');
-    if (state.scene && state.scene.kind === 'rack') renderFramePanel();
+    if (state.scene && state.scene.kind === 'rack') {
+      renderFramePanel();
+      renderIssues([{ level: 'error', code: 'build', message: err.message }]);
+    }
   }
 }
 

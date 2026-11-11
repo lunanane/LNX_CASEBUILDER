@@ -567,9 +567,16 @@ def post_build(scene: Scene = Body(...)):
     # format, not from the hardware -- so it takes the other builder entirely.
     if scene.kind == "rack":
         try:
-            return JSONResponse(export.rack_to_json(rack_mod.build_spec(scene.rack)))
+            frame = rack_mod.build_spec(scene.rack)
         except (KeyError, ValueError) as exc:
             raise HTTPException(400, str(exc))
+        payload = export.rack_to_json(frame)
+        # a frame has no resolve step, so its issues ride on the build
+        payload["issues"] = [
+            {"level": i.level, "code": i.code, "message": i.message,
+             "refs": i.refs}
+            for i in rack_mod.frame_issues(scene.rack, frame, scene.case)]
+        return JSONResponse(payload)
     lib = _lib_for(scene)
     try:
         res = resolve(scene, lib)
