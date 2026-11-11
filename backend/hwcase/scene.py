@@ -959,11 +959,14 @@ def check(res: Resolved, lib: PartLibrary) -> list[Issue]:
             except ValueError as exc:
                 issues.append(Issue("error", "pcb", str(exc), []))
 
-    # 8. rack bays: where they are, and nothing enters one
-    if res.scene.racks:
-        from .hybrid import bay_issues
-        for level, code, message, refs in bay_issues(res, res.scene.case):
-            issues.append(Issue(level, code, message, refs))
+    # 8. a hybrid case: every part inside a section, clear of the rack --
+    # and an old scene's rack bays, which moved there
+    from .hybrid import hybrid_issues, old_bays_issue
+    found = old_bays_issue(res.scene)
+    if res.scene.kind == "hybrid":
+        found += hybrid_issues(res)
+    for level, code, message, refs in found:
+        issues.append(Issue(level, code, message, refs))
     return issues
 
 

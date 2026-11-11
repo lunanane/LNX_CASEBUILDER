@@ -107,13 +107,15 @@ class BoxModel:
     z0: float                         # underside of the floor
     z1: float                         # top of the deck: the panel plane
     joint: str = "tslot"
+    #: `box`, or `hybrid` for a hybrid case's plates (`hwcase.hybrid`)
+    kind: str = "box"
     #: a box has no layers; kept so code that walks a case's layers -- the
     #: renderer, the orphan-support report -- sees an empty stack, not a crash
     layers: list = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
-    #: M10: anything a rack bay adds (rails, module space), for the BOM
+    #: what a hybrid case adds: its rails and M5s for the BOM, its zones
     extras: dict = field(default_factory=dict)
-    #: bought parts drawn in the 3D view but never cut: a bay's rails
+    #: bought parts drawn in the 3D view but never cut: a hybrid's rails
     members: list = field(default_factory=list)
 
     @property
@@ -159,12 +161,11 @@ def build_box(res, spec, deck_top: Optional[float] = None,
               deck_cuts=(), extra=None, deck_fill=()) -> BoxModel:
     """The box around a resolved scene.
 
-    `deck_top`, `floor_top`, `outer` and `deck_cuts` let a caller (M10's rack
-    bays) fix the deck's height, the box's footprint and cut extra openings;
-    `deck_fill` is deck restored before those cuts -- a bay's footprint,
-    so no other cutout bites into the strip of deck its cheeks join;
-    `extra(box_parts)` is called before the joints are cut, to add plates and
-    joints of its own. Left alone, everything follows from the hardware.
+    `deck_top`, `floor_top`, `outer` and `deck_cuts` let a caller fix the
+    deck's height, the box's footprint and cut extra openings; `deck_fill`
+    is deck restored before those cuts; `extra(box_parts)` is called before
+    the joints are cut, to add plates and joints of its own. Left alone,
+    everything follows from the hardware.
     """
     from .case import _layer_geometry, outer_shape
 
@@ -179,7 +180,7 @@ def build_box(res, spec, deck_top: Optional[float] = None,
     if not res.solids and outer is None and spec.outline is None:
         # Nothing placed yet -- a new project. A box sized from no hardware
         # is a sliver no joint fits, so it gets a placeholder to look at
-        # until the first board (or bay) gives it a size.
+        # until the first board gives it a size.
         w, d, h = EMPTY_BOX
         outer = rect(-w / 2, -d / 2, w / 2, d / 2)
         if floor_top is None:
@@ -422,9 +423,15 @@ def box_cutlist(model: BoxModel, sheets, stock) -> str:
 
     x0, y0, x1, y1 = model.outer.bounds
     t = model.plates[0].material.thickness
+    what = "box"
+    hy = model.extras.get("hybrid")
+    if hy:
+        what = (f"hybrid -- {hy['hp']:g} HP of {' + '.join(hy['rows'])}, "
+                f"module depth {hy['module_depth']:g} mm, with "
+                f"{len(hy['zones']) - 1} parts section(s);")
     lines = [
         sheet_manifest(sheets, stock),
-        f"box -- {x1 - x0:.1f} x {y1 - y0:.1f} x {model.height:.1f} mm, "
+        f"{what} {x1 - x0:.1f} x {y1 - y0:.1f} x {model.height:.1f} mm, "
         f"{t:g} mm {model.plates[0].material.name}, {model.joint} joints",
         "",
         f"plates (cut) -- {len(model.plates)}:",
@@ -438,14 +445,16 @@ def box_cutlist(model: BoxModel, sheets, stock) -> str:
             lines.append(f"  {s.placement:<16} {s.length:5.1f} mm "
                          f"{s.screw or 'screw'} through the {s.through} "
                          f"at ({s.at[0]:.1f}, {s.at[1]:.1f})")
-    bought = model.extras.get("bom", {})       # a bay's rails and screws
+    bought = model.extras.get("bom", {})       # a hybrid's rails and M5s
     hardware = {k: v for k, v in model.bill_of_materials().items()
                 if k.endswith((" bolt", " nut", " screw", " mm"))
                 or k in bought}
-    for bay in model.extras.get("bays", []):
-        lines += ["", f"bay {bay['id']}: {bay['hp']:g} HP, rails "
-                  f"{bay['width']:.2f} mm long, module depth "
-                  f"{bay['module_depth']:g} mm"]
+    if hy:
+        lines += ["", "zones, bottom to top (y from the bottom rail's outer "
+                      "edge; depth from the deck top to the floor):"]
+        for z in hy["zones"]:
+            lines.append(f"  {z['name']:<12} y {z['y0']:8.1f} .. "
+                         f"{z['y1']:8.1f}  depth {z['depth']:6.1f} mm")
     if hardware:
         lines += ["", "fixings and bought parts:"]
         lines += [f"  {v:g} x {k}" if not k.endswith(" mm")
@@ -466,7 +475,7 @@ def box_to_json(model: BoxModel) -> dict:
         return [[list(c) for c in ring] for p in polys for ring in _rings(p)]
 
     return {
-        "kind": "box",
+        "kind": model.kind,
         "z0": model.z0, "z1": model.z1,
         "outline": [list(c) for c in model.outer.exterior.coords],
         "joint": model.joint,

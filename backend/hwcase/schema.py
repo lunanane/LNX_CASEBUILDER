@@ -958,8 +958,8 @@ class RackSpec(Strict):
     insert_hp: float = 4.0
 
     #: How deep a module may be: clear space from the rails' front face (the
-    #: back of a module's panel) to the inside of the body's web. A rack bay's
-    #: `module_depth` is the same measure. Sets the case's depth outright -- the folded
+    #: back of a module's panel) to the inside of the body's web. A hybrid's rack
+    #: measures it the same way. Sets the case's depth outright -- the folded
     #: flange and the side panels follow from it. Skiffs run 25-40; the built
     #: case is 51, deep enough to put a PSU behind the modules.
     module_depth: float = 51.0
@@ -983,38 +983,27 @@ class RackSpec(Strict):
     top_plate: bool = True
     #: laser style only, T-slots: the bolt and nut size
     fastener: str = "M3"
+    #: `kind: hybrid` only: how thick the modules' panels are. The rails sit
+    #: this far below the deck top, so the module faces are flush with it.
+    module_panel_t: float = Field(2.0, gt=0, le=10)
 
 
-class RackBay(Strict):
-    """Eurorack rails set into a box case's deck, beside the other boards.
-
-    The bay is rails, an opening and clear room behind it, kept for whatever
-    modules are screwed in later; the modules themselves are not modelled.
-    Their faces are the case's upper surface: they rest on the rails, so the
-    rails sit `module_panel_t` below the deck top and the deck is flush with
-    them. See `hwcase.hybrid`.
+class HybridSection(Strict):
+    """A parts section of a hybrid case: a stretch of deck above or below
+    the rack, as wide as the rack's rail span, with room under it for the
+    user's own boards. See `hwcase.hybrid`.
     """
 
-    id: str = "bay"
-    #: world XY of the bay's lower-left corner: where the rails start, at the
-    #: bottom rail's outer edge
-    at: Vec2 = (0.0, 0.0)
-    #: rail span, in HP -- 28 unless set, as the editor's new bay is
-    hp: float = Field(28.0, gt=0, le=240)
-    #: bottom to top, as on a frame
-    rows: list[RackRow] = Field(default_factory=lambda: [RackRow()])
-    #: Clear room behind the module panels: from the rails' front face -- the
-    #: back of a module's panel -- down to the top of the floor. The same
-    #: measure as a frame's `module_depth` (rail face to the inside of the
-    #: body's web), so a module that fits a 40 mm frame fits a 40 mm bay.
-    module_depth: float = Field(40.0, gt=0)
-    #: how thick the modules' panels are -- the rails sit this far below the
-    #: deck top so the module faces end up flush with it (D-3)
-    module_panel_t: float = Field(2.0, gt=0)
-    #: Retired: a bay once listed the placements that were its modules. The
-    #: key still loads, so an old scene file opens, but the list is ignored
-    #: -- the check says so -- and nothing may enter a bay's space.
-    modules: Optional[list[Any]] = Field(None, exclude_if=lambda v: v is None)
+    id: Optional[str] = None
+    #: which end of the rack it is fixed to: `below` (lower y, nearer the
+    #: player) or `above`. Several on one side stack outwards from the rack
+    #: in the order they are listed.
+    side: Literal["above", "below"] = "below"
+    #: how far it reaches from its inner end, along the rows' axis
+    length: float = Field(100.0, gt=0, le=2000)
+    #: clear room under the deck: from the deck's top face down to the top
+    #: of this section's floor
+    depth: float = Field(40.0, gt=0, le=500)
 
 
 class ViewSettings(Strict):
@@ -1043,14 +1032,19 @@ class Scene(Strict):
     #: `parts` wraps a case around measured boards -- the original pipeline,
     #: and the default so that every existing scene file keeps working
     #: untouched. `rack` generates a Eurorack frame from the format instead,
-    #: and ignores placements entirely.
-    kind: Literal["parts", "rack"] = "parts"
-    #: `kind: rack` only.
+    #: and ignores placements entirely. `hybrid` is both: the laser-cut frame
+    #: of `rack`, with `sections` of deck above and below it that hold placed
+    #: boards as a parts case does (`hwcase.hybrid`).
+    kind: Literal["parts", "rack", "hybrid"] = "parts"
+    #: `kind: rack` and `kind: hybrid`. A hybrid is always cut from sheet:
+    #: `style` and the inserts do not apply to it.
     rack: RackSpec = Field(default_factory=RackSpec)
-    #: Eurorack bays set into a box case's deck: rails and room for modules
-    #: beside the boards, in one case. `kind: parts` with `case.style: box`
-    #: only.
-    racks: list[RackBay] = Field(default_factory=list)
+    #: `kind: hybrid` only: the parts sections, above and below the rack
+    sections: list[HybridSection] = Field(default_factory=list)
+    #: Retired: rack bays set into a box case's deck. A bay is now the rack
+    #: of a hybrid case. The key still loads, so an old scene file opens; the
+    #: list is ignored and the check says where the bay went.
+    racks: Optional[list[Any]] = Field(None, exclude_if=lambda v: v is None)
     anchor: Optional[str] = None       # placement id that defines the origin
     #: Parts carried by the scene itself, shadowing the shared library by id.
     #:

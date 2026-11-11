@@ -1,39 +1,38 @@
-# A Eurorack hybrid: a rack bay and Adafruit boards in one laser-cut box.
+# A small hybrid: one 3U row of 28 HP, with 4 x 8 buttons below it.
 #
-# The left of the deck is a 28 HP, 3U Eurorack bay: rails, the opening and
-# the room behind it, kept clear for whatever modules are screwed in later.
-# The module faces are the case's upper surface (decision D-3), so the deck
-# around the bay is flush with them.
+# The rack is a laser-cut Eurorack frame lying flat; its 28 HP rail span is
+# the width of the whole case. Below it, a 90 mm parts section holds two
+# NeoTrellis boards side by side, each with its elastomer 4x4 pad: 32
+# buttons whose tops are flush with the deck -- and with the faces of the
+# modules screwed into the rack later (decision D-3).
 #
-# The right of the deck is two NeoTrellis boards side by side, each with its
-# elastomer 4x4 pad: 32 buttons whose tops are flush with the same surface,
-# the boards screwed up under the deck on standoffs.
-#
-# The box is 3 mm plywood with captive-nut T-slots. Its floor drops to the
-# bay's 40 mm module depth behind the rails' front face, so a module has 40 mm
-# of clear room behind its panel, as it would in a 40 mm frame.
+# 3 mm plywood with captive-nut T-slots; the section's floor is 30 mm under
+# the deck, the rack's 40 mm module depth behind the rails' front face.
 
 name: hybrid-trellis-28hp
+kind: hybrid
 
 panels:
 - name: main
   z: 0.0
   note: "The button tops and the module faces -- the case's upper surface."
 
-racks:
-- id: bay
-  at: [0.0, 0.0]
+rack:
   hp: 28
   rows:
   - {format: 3U}
   module_depth: 40.0
   module_panel_t: 2.0
+  joint: tslot
+  material: {name: plywood-3mm, thickness: 3.0, kerf: 0.15, color: "#c8a165"}
+
+sections:
+- {id: buttons, side: below, length: 90.0, depth: 30.0}
 
 placements:
-# --- 4 x 8 buttons: two NeoTrellis with elastomer pads ---------------------
 - id: trellis_a
   part: adafruit-3954-neotrellis
-  pos: [160.0, 36.0, 0.0]
+  pos: [11.0, -78.0, 0.0]
   on_panel: main
   panel_ref: buttons         # the pad's button tops, not the PCB's
   support: from_lid
@@ -44,7 +43,7 @@ placements:
   mate: pcb
 - id: trellis_b
   part: adafruit-3954-neotrellis
-  pos: [220.0, 36.0, 0.0]    # 60 mm on: the button pitch runs on across the seam
+  pos: [71.0, -78.0, 0.0]    # 60 mm on: the button pitch runs on across the seam
   on_panel: main
   panel_ref: buttons
   support: from_lid
@@ -55,13 +54,6 @@ placements:
   mate: pcb
 
 case:
-  style: box
-  box_joint: tslot
-  materials:
-  - {name: plywood-3mm, thickness: 3.0, kerf: 0.15, color: "#c8a165"}
-  wall: 6.0
-  floor_gap: 3.0
-  ceiling_gap: 1.0
   part_clearance: 0.6
   plates:
   - [600.0, 400.0]

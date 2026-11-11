@@ -1,7 +1,7 @@
-"""M10: a Eurorack hybrid -- a rack bay and Adafruit boards in one box.
+"""The hybrid case: a laser-cut Eurorack frame with parts sections.
 
-The fixture is an empty 28 HP bay -- rails and room for modules bought later
--- beside two NeoTrellis boards with their elastomer button pads.
+The fixture is the user's own: 2 x 3U rows, 60 HP, and a 300 mm parts
+section below the rack holding NeoTrellis buttons, encoders and an OLED.
 """
 
 from __future__ import annotations
@@ -10,18 +10,22 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from shapely.affinity import translate
-from shapely.geometry import Point, Polygon, box
+import yaml
+from shapely.geometry import Point, Polygon
 
 from hwcase import case as case_mod
 from hwcase import export, flat, rack
 from hwcase import joinery as jn
+from hwcase import hybrid
 from hwcase.box import BoxModel, box_to_json
 from hwcase.library import PartLibrary, load_scene
 from hwcase.scene import check, resolve
+from hwcase.schema import HybridSection, Scene
 
 LIB = PartLibrary.load()
-SCENE = Path(__file__).resolve().parents[1] / "scenes" / "hybrid-trellis-28hp.yaml"
+SCENES = Path(__file__).resolve().parents[1] / "scenes"
+SCENE = SCENES / "hybrid-6u-60hp.yaml"
+HP = 5.08
 
 
 def _scene(**changes):
@@ -40,12 +44,16 @@ def model(res) -> BoxModel:
 
 
 def _errors(scene):
-    res = resolve(scene, LIB)
-    return [i for i in check(res, LIB) if i.level == "error"]
+    return [i for i in check(resolve(scene, LIB), LIB) if i.level == "error"]
+
+
+def _moved(scene, pid, pos):
+    return scene.model_copy(update={"placements": [
+        p.model_copy(update={"pos": pos}) if p.id == pid else p
+        for p in scene.placements]})
 
 
 def _round_holes(geom, diameter, tol=0.05):
-    """Centres of the round holes of one diameter in a plate's outline."""
     out = []
     for ring in geom.interiors:
         hole = Polygon(ring)
@@ -56,510 +64,293 @@ def _round_holes(geom, diameter, tol=0.05):
     return out
 
 
-# --------------------------------------------------------------------------
-# the plan's acceptance rows
-# --------------------------------------------------------------------------
-
-
-def test_row1_the_hybrid_builds_with_no_errors(res, model):
-    assert isinstance(model, BoxModel)
-    assert {p.name for p in model.plates} == {
-        "deck", "floor", "front", "back", "left", "right",
-        "bay-cheek-left", "bay-cheek-right"}
-    assert [i for i in check(res, LIB) if i.level == "error"] == []
-    assert not [n for n in model.notes if "not jointed" in n]
-
-
-def test_row2_the_module_faces_are_the_upper_surface(res, model):
-    """D-3: the rails sit one module-panel thickness under the deck top, so
-    a module screwed in later has its face flush with the deck -- and with
-    the buttons' tops."""
-    deck = model.plate("deck")
-    deck_top = deck.origin[2] + deck.material.thickness
-    for rail in model.members:
-        assert deck_top - rail.origin[2] == pytest.approx(2.0, abs=0.01)
-    assert deck_top == pytest.approx(res.panels["main"], abs=0.01)
-
-
-def test_row3_a_board_dropped_into_the_module_space_is_an_error():
-    scene = _scene()
-    moved = [p.model_copy(update={"pos": (60.0, 36.0, 0.0)})
-             if p.id == "trellis_b" else p for p in scene.placements]
-    errors = _errors(scene.model_copy(update={"placements": moved}))
-    hits = [e for e in errors if e.code == "rack_bay"]
-    assert hits and "trellis_b" in hits[0].refs
-    assert "module space" in hits[0].message
-
-
-def test_row4_cheek_m5s_line_up_with_the_rail_ends(model):
-    """Every rail end has an M5 hole through a cheek, at the rail's mid
-    height and the bore's depth, to a hundredth."""
-    ends = []
-    for rail in model.members:
-        y = rail.origin[1] + rack.RAIL_H / 2
-        z = rail.origin[2] - rack.rail_bore_depth()
-        ends.append((round(y, 6), round(z, 6)))
-    for side in ("left", "right"):
-        cheek = model.plate(f"bay-cheek-{side}")
-        holes = _round_holes(cheek.geom, rack.M5_CLEAR)
-        world = sorted((cheek.to_world(u, v)[1], cheek.to_world(u, v)[2])
-                       for u, v in holes)
-        assert len(world) == len(ends) == 2
-        for (y1, z1), (y2, z2) in zip(world, sorted(ends)):
-            assert y1 == pytest.approx(y2, abs=0.01)
-            assert z1 == pytest.approx(z2, abs=0.01)
-
-
-def test_row5_every_joint_validates_and_every_plate_fits_the_stock(model):
-    for a, b, j in model.joints:
-        pa, pb = model.plate(a), model.plate(b)
+def _validate(m):
+    for a, b, j in m.joints:
+        pa, pb = m.plate(a), m.plate(b)
         problems = [v for v in jn.validate_joint(
             j, jn.Plate(pa.geom, pa.material), jn.Plate(pb.geom, pb.material))
             if v.rule != "keep_clear"]
         assert problems == [], (a, b, problems)
-    cheek_joints = [(a, b) for a, b, _j in model.joints if "cheek" in b]
-    assert cheek_joints == [("floor", "bay-cheek-left"),
-                            ("deck", "bay-cheek-left"),
-                            ("floor", "bay-cheek-right"),
-                            ("deck", "bay-cheek-right")]
+
+
+# --------------------------------------------------------------------------
+# the user's example
+# --------------------------------------------------------------------------
+
+
+def test_the_example_builds_with_no_errors(res, model):
+    assert model.kind == "hybrid"
+    assert [i for i in check(res, LIB) if i.level == "error"] == []
+    assert {p.name for p in model.plates} == {
+        "side-left", "side-right", "deck-below1", "floor-below1",
+        "floor-rack", "end-bottom", "end-top", "step-below1-rack"}
+
+
+def test_the_rail_span_is_the_width_of_the_case(model):
+    """No left or right walls: the side panels stand on the rails' ends,
+    and every plate runs from one side panel's outer face to the other's."""
+    width = 60 * HP
+    t = 5.0
+    assert [m.role for m in model.members] == ["rail"] * 4
+    for m in model.members:
+        assert m.material.thickness == pytest.approx(width)
+    assert model.plate("side-left").origin[0] == pytest.approx(-t)
+    assert model.plate("side-right").origin[0] == pytest.approx(width)
+    for p in model.plates:
+        if p.role != "side_panel":
+            x0, _y0, x1, _y1 = p.geom.bounds
+            assert x1 - x0 == pytest.approx(width + 2 * t, abs=0.01), p.name
+    assert not [p for p in model.plates if p.name in ("left", "right")]
+
+
+def test_the_deck_top_is_the_module_face(res, model):
+    """D-3: the rails' front face sits module_panel_t under the deck top,
+    which is the panel plane the parts are flush with."""
+    deck = model.plate("deck-below1")
+    top = deck.origin[2] + deck.material.thickness
+    assert top == pytest.approx(res.panels["main"])
+    for rail in model.members:
+        assert top - rail.origin[2] == pytest.approx(2.0)
+
+
+def test_the_side_panel_follows_the_stepped_profile(model):
+    """The rack's floor is 42 mm under the deck, the section's 40: the side
+    panel steps between them, and reaches past every plate by the overhang
+    (a sheet with T-slots; 10.5 past the end walls)."""
+    hy = model.extras["hybrid"]
+    zones = {z["name"]: z for z in hy["zones"]}
+    assert zones["rack"]["depth"] == pytest.approx(42.0)
+    assert zones["below1"]["depth"] == pytest.approx(40.0)
+    cheek = model.plate("side-left").geom
+    t = 5.0
+    y0, z0, y1, z1 = cheek.bounds
+    assert y0 == pytest.approx(zones["below1"]["y0"] - 10.5, abs=0.01)
+    assert y1 == pytest.approx(zones["rack"]["y1"] + 10.5, abs=0.01)
+    assert z1 == pytest.approx(t, abs=0.01)                 # front: a sheet
+    assert z0 == pytest.approx(-42.0 - t - t, abs=0.01)     # rack floor + back
+    # under the section the panel stops a sheet past the shallower floor
+    mid = zones["below1"]["y0"] + 150.0
+    column = cheek.intersection(Polygon([(mid - 0.1, -200), (mid + 0.1, -200),
+                                         (mid + 0.1, 200), (mid - 0.1, 200)]))
+    assert column.bounds[1] == pytest.approx(-40.0 - t - t, abs=0.01)
+    # and the front corners are rounded, the back ones square
+    assert not cheek.buffer(1e-6).covers(Point(y0 + 0.5, z1 - 0.5))
+    assert cheek.buffer(1e-6).covers(Point(y0 + 0.5, -40.0 - 2 * t + 0.5))
+
+
+def test_the_m5s_meet_the_rail_ends(model):
+    """Every rail end has an M5 hole through both side panels, at the rail's
+    mid height and the bore's depth."""
+    ends = sorted((round(m.origin[1] + rack.RAIL_H / 2, 6),
+                   round(m.origin[2] - rack.rail_bore_depth(), 6))
+                  for m in model.members)
+    for side in ("left", "right"):
+        p = model.plate(f"side-{side}")
+        holes = sorted(p.to_world(u, v)[1:]
+                       for u, v in _round_holes(p.geom, rack.M5_CLEAR))
+        assert len(holes) == len(ends) == 4
+        for (y1, z1), (y2, z2) in zip(holes, ends):
+            assert y1 == pytest.approx(y2, abs=0.01)
+            assert z1 == pytest.approx(z2, abs=0.01)
+
+
+def test_joints_validate_and_plates_fit_the_stock(model):
+    _validate(model)
+    jointed = {(a, b) for a, b, _j in model.joints}
+    for p in model.plates:
+        if p.role != "side_panel":
+            assert {("side-left", p.name), ("side-right", p.name)} <= jointed
     sheets = export.pack_sheets(flat.from_box(model), stock=model.spec)
     placed = {pl.part.name for s in sheets for pl in s.placements}
     assert placed == {p.name for p in model.plates}
 
 
-def test_row6_the_cut_list_has_the_rails_cheeks_and_deck(model):
-    files = dict(export.sheet_files(model, "svg", "hybrid"))
-    cut = files["hybrid-cutlist.txt"]
-    for word in ("deck", "bay-cheek-left", "bay-cheek-right", "floor"):
-        assert word in cut
-    assert "2 x Eurorack rail, 142.24 mm (28 HP)" in cut
-    assert "rail mm" not in cut
-    assert "4 x M5x12 screw" in cut
-    assert "tapped" in cut or "tap each rail" in cut
-    assert "M5 tap drill 4.2 mm" in cut
-    # what goes on the rails is bought later: no module fixings
-    assert "module screw" not in cut and "sliding nut" not in cut
-    assert "bay bay: 28 HP" in cut and "modules:" not in cut
-    assert cut.count(" through the deck ") == 16      # 8 per NeoTrellis
+def test_the_parts_cut_the_deck_and_get_standoffs(res, model):
+    from shapely.affinity import translate
 
-
-# --------------------------------------------------------------------------
-# what the builder asked for: buttons, a bay, one surface
-# --------------------------------------------------------------------------
-
-
-def test_the_deck_opens_for_all_32_buttons(res, model):
-    x0, y0, _x1, _y1 = model.outer.bounds
-    deck = translate(model.plate("deck").geom, x0, y0)
+    deck = model.plate("deck-below1")
+    world = translate(deck.geom, deck.origin[0], deck.origin[1])
     pads = [s.poly for s in res.solids
             if s.placement in ("trellis_a", "trellis_b") and s.name == "pcb"]
-    buttons = [Polygon(r) for r in deck.interiors
+    buttons = [Polygon(r) for r in world.interiors
                if Polygon(r).area > 80.0
                and any(p.contains(Polygon(r).centroid) for p in pads)]
     assert len(buttons) == 32
+    through = {s.through for s in model.standoffs}
+    assert through == {"deck", "floor-below1"}
 
 
-def test_the_deck_is_open_over_the_rails(model):
-    """The aperture is the rail span by the rail stack: 28 HP of 3U."""
-    x0, y0, _x1, _y1 = model.outer.bounds
-    deck = translate(model.plate("deck").geom, x0, y0)
-    (bay,) = model.extras["bays"]
-    ap = Polygon(bay["aperture"])
-    assert deck.intersection(ap.buffer(-0.5)).area < 0.01
-    ax0, ay0, ax1, ay1 = ap.bounds
-    assert ax1 - ax0 == pytest.approx(28 * 5.08, abs=0.01)
+def test_exports_svg_dxf_and_the_cut_list(model):
+    for fmt in ("svg", "dxf"):
+        files = dict(export.sheet_files(model, fmt, "h"))
+        assert any(n.endswith("." + fmt) for n in files)
+        cut = files["h-cutlist.txt"]
+    assert "hybrid -- 60 HP of 3U + 3U" in cut
+    for word in ("side-left", "side-right", "deck-below1", "floor-rack",
+                 "end-bottom", "end-top", "step-below1-rack", "standoffs:"):
+        assert word in cut
+    assert "4 x Eurorack rail, 304.80 mm (60 HP)" in cut
+    assert "8 x M5x16 screw" in cut
+    assert "tap both ends of every rail M5" in cut
+    assert " bolt" in cut and " nut" in cut
 
 
-def test_the_floor_gives_the_module_its_depth(model):
-    """Module depth is clear room behind the module panel -- from the rails'
-    front face, as on a frame -- so the deck top is the depth plus the
-    panel's 2 mm above the floor."""
-    floor = model.plate("floor")
-    deck = model.plate("deck")
-    floor_top = floor.origin[2] + floor.material.thickness
-    deck_top = deck.origin[2] + deck.material.thickness
-    rail_face = max(m.origin[2] for m in model.members)
-    assert rail_face - floor_top == pytest.approx(40.0, abs=0.01)
-    assert deck_top - floor_top == pytest.approx(42.0, abs=0.01)
-
-
-def test_module_depth_means_the_same_on_a_bay_and_a_frame():
-    """A frame's case depth is its module depth behind the rail face plus
-    the web; a bay's floor is its module depth behind the rail face."""
-    assert rack.case_depth(40.0) - rack.BODY_T == pytest.approx(40.0)
-
-
-def test_a_bay_needs_a_box():
-    scene = _scene()
-    layered = scene.case.model_copy(update={"style": "layered"})
-    errors = _errors(scene.model_copy(update={"case": layered}))
-    assert any(e.code == "rack_bay" and "box" in e.message for e in errors)
-
-
-@pytest.mark.parametrize("joint", ["tslot", "finger"])
-def test_both_joint_types_build_the_hybrid(joint):
-    scene = _scene()
-    case = scene.case.model_copy(update={"box_joint": joint})
-    model = case_mod.build(resolve(scene.model_copy(update={"case": case}), LIB))
-    assert len(model.plates) == 8
-    # interior joints need slots: a finger box still bolts its cheeks to
-    # the floor; the deck meets them at the aperture's edge, a box corner
-    kinds = {(a, j.kind) for a, b, j in model.joints if "cheek" in b}
-    assert kinds == {("floor", "tslot"), ("deck", "finger")}
-
-
-def test_the_editor_gets_plates_rails_and_the_bay(model):
+def test_the_editor_gets_plates_rails_and_the_zones(model):
     data = box_to_json(model)
-    assert len(data["plates"]) == 8
-    assert [m["role"] for m in data["members"]] == ["rail", "rail"]
-    assert "modules" not in data["extras"]["bays"][0]
+    assert data["kind"] == "hybrid"
+    assert len(data["plates"]) == 8 and len(data["members"]) == 4
+    assert [z["name"] for z in data["extras"]["hybrid"]["zones"]] == [
+        "below1", "rack"]
     for p in data["plates"] + data["members"]:
         m = np.array(p["matrix"], float).reshape(4, 4)[:3, :3]
         assert np.linalg.det(m) == pytest.approx(1.0)
 
 
-def test_the_command_line_builds_the_hybrid(tmp_path, capsys):
+def test_the_command_line_builds_it(tmp_path, capsys):
     from hwcase import cli
 
     assert cli.main(["build", str(SCENE), "-o", str(tmp_path)]) == 0
-    names = [p.name for p in tmp_path.iterdir()]
-    assert any(n.endswith(".svg") for n in names)
+    names = [p.name for p in tmp_path.rglob("*")]
+    assert "hybrid-6u-60hp-cutlist.txt" in names
     assert any(n.endswith(".dxf") for n in names)
-    assert "hybrid-trellis-28hp-cutlist.txt" in names
-    out = capsys.readouterr().out
-    assert "8 plates" in out
 
 
 # --------------------------------------------------------------------------
-# the cheeks hold the deck, not just the rails
+# every part held to its section
 # --------------------------------------------------------------------------
 
 
-def _cheek_world_z(cheek):
-    """World z of a cheek's top and bottom edges."""
-    _u0, _v0, u1, _v1 = cheek.geom.bounds
-    return cheek.to_world(0.0, 0.0)[2], cheek.to_world(u1, 0.0)[2]
+def test_a_part_in_the_racks_space_is_an_error():
+    errors = _errors(_moved(_scene(), "oled", (60.0, 50.0, 0.0)))
+    assert any(e.code == "in_rack" and e.refs == ["oled"] for e in errors)
 
 
-def test_the_cheeks_are_jointed_into_the_deck_along_the_aperture(model):
-    """Each cheek stands up to the deck's top face beside the rails, where
-    its fingers and the deck's interlock; the deck's fingers are cut into
-    the aperture's edge."""
-    deck = model.plate("deck")
-    deck_top = deck.origin[2] + deck.material.thickness
-    for side in ("left", "right"):
-        cheek = model.plate(f"bay-cheek-{side}")
-        top, bottom = _cheek_world_z(cheek)
-        assert top == pytest.approx(deck_top, abs=0.01)
-        assert bottom == pytest.approx(model.z0, abs=0.01)
-        j = next(j for a, b, j in model.joints
-                 if a == "deck" and b == cheek.name)
-        assert j.kind == "finger" and j.edge.length > 120.0
+def test_a_part_outside_every_section_is_an_error():
+    errors = _errors(_moved(_scene(), "oled", (60.0, -400.0, 0.0)))
+    assert any(e.code == "outside_section" and e.refs == ["oled"]
+               for e in errors)
 
 
-def test_panels_thicker_than_the_deck_never_leave_it_floating():
-    """4 mm panels put the rails a millimetre under a 3 mm deck: the cheeks
-    are carried up to meet it, and the scene says so."""
-    scene = _scene()
-    bay = scene.racks[0].model_copy(update={"module_panel_t": 4.0})
-    scene = scene.model_copy(update={"racks": [bay]})
-    res = resolve(scene, LIB)
-    issues = [i for i in check(res, LIB) if i.code == "rack_bay"]
-    assert any(i.level == "warning" and "thicker than the 3 mm deck"
-               in i.message for i in issues)
-    model = case_mod.build(res)
-    deck = model.plate("deck")
-    under = deck.origin[2]
-    cheek = model.plate("bay-cheek-left")
-    # under the solid deck -- the margin below the rails -- the cheek's top
-    # edge is the deck's underside
-    probe = cheek.geom.intersection(box(-1.0, 0.0, 10.0, 3.0))
-    assert cheek.to_world(probe.bounds[0], 0.0)[2] == pytest.approx(
-        under, abs=0.01)
-    rail_face = max(m.origin[2] for m in model.members)
-    assert deck.origin[2] + 3.0 - rail_face == pytest.approx(4.0, abs=0.01)
+def test_a_part_deeper_than_its_section_is_an_error():
+    shallow = HybridSection(id="below1", side="below", length=300.0,
+                            depth=15.0)
+    errors = _errors(_scene(sections=[shallow]))
+    hits = {r for e in errors if e.code == "too_deep" for r in e.refs}
+    assert {"trellis_a", "trellis_b"} <= hits
 
 
-# --------------------------------------------------------------------------
-# where a bay may go: issues, never exceptions
-# --------------------------------------------------------------------------
-
-
-def _with_bays(*bays):
-    scene = _scene()
-    return scene.model_copy(update={"racks": list(bays)})
-
-
-def test_two_bays_side_by_side_are_an_issue_not_a_crash():
-    """Rails end to end: the second bay's left cheek stands where the first
-    bay's right cheek is."""
-    scene = _scene()
-    a = scene.racks[0]
-    b = a.model_copy(update={"id": "bay2",
-                             "at": (a.at[0] + 28 * 5.08, a.at[1])})
-    issues = check(resolve(_with_bays(a, b), LIB), LIB)
-    hits = [i for i in issues if i.code == "rack_bay" and i.level == "error"
-            and "overlap" in i.message]
-    assert hits and set(hits[0].refs) == {"bay", "bay2"}
-
-
-def test_two_bays_too_close_for_their_floor_slots_are_named():
-    scene = _scene()
-    a = scene.racks[0]
-    b = a.model_copy(update={"id": "bay2",
-                             "at": (a.at[0] + 28 * 5.08 + 3.0 + 3.0 + 1.0,
-                                    a.at[1])})
-    issues = check(resolve(_with_bays(a, b), LIB), LIB)
-    assert any(i.code == "rack_bay" and "mm apart" in i.message
-               for i in issues)
-
-
-def test_two_bays_far_enough_apart_build():
-    scene = _scene()
-    a = scene.racks[0]
-    b = a.model_copy(update={"id": "bay2", "hp": 8,
-                             "at": (a.at[0], a.at[1] - 200.0)})
-    scene = _with_bays(a, b)
-    res = resolve(scene, LIB)
-    assert not [i for i in check(res, LIB)
-                if i.code == "rack_bay" and i.level == "error"]
-
-
-def test_an_unknown_row_format_is_an_issue():
-    scene = _scene()
-    bay = scene.racks[0].model_copy(update={
-        "rows": [scene.racks[0].rows[0].model_copy(update={"format": "5U"})]})
-    issues = check(resolve(_with_bays(bay), LIB), LIB)
-    assert any(i.code == "rack_bay" and "5U" in i.message for i in issues)
-
-
-def test_two_bays_with_one_id_are_named():
-    scene = _scene()
-    a = scene.racks[0]
-    b = a.model_copy(update={"at": (a.at[0], -250.0)})
-    issues = check(resolve(_with_bays(a, b), LIB), LIB)
-    assert any("two bays are called bay" in i.message for i in issues)
-
-
-
-# --------------------------------------------------------------------------
-# the bay is kept clear: no modules, no exceptions
-# --------------------------------------------------------------------------
-
-
-def test_any_placement_inside_a_bays_space_is_an_error():
-    """A board set down in the aperture, under the deck: there are no
-    modules to excuse it, so it is an error whatever it is."""
-    scene = _scene()
-    trellis = next(p for p in scene.placements if p.id == "trellis_a")
-    ghost = trellis.model_copy(update={"id": "intruder",
-                                       "pos": (30.0, 40.0, 0.0)})
-    pad = next(p for p in scene.placements if p.id == "pad_a")
-    errors = _errors(scene.model_copy(update={
-        "placements": scene.placements
-        + [ghost, pad.model_copy(update={"id": "pad_x",
-                                         "parent": "intruder"})]}))
-    hits = [e for e in errors if e.code == "rack_bay" and "intruder" in e.refs]
-    assert hits and "bay" in hits[0].refs
-    assert "module space" in hits[0].message
-
-
-def test_an_old_scene_with_modules_still_loads_with_a_note(tmp_path):
-    """Bays once listed their modules. The key still loads, is ignored, and
-    each bay that has it says so, once."""
-    import yaml
-
-    data = yaml.safe_load(SCENE.read_text(encoding="utf-8"))
-    data["racks"][0]["modules"] = [{"id": "amy", "hp_slot": 0, "row": 0},
-                                   "amy_panel"]
-    path = tmp_path / "old.yaml"
-    path.write_text(yaml.safe_dump(data), encoding="utf-8")
-    scene = load_scene(path)
-    res = resolve(scene, LIB)
-    issues = check(res, LIB)
-    notes = [i for i in issues if "no longer tracked" in i.message]
-    assert len(notes) == 1 and notes[0].level == "info"
-    assert notes[0].refs == ["bay"]
-    assert [i for i in issues if i.level == "error"] == []
-    # a scene without the key says nothing, and never writes it back
-    assert not [i for i in check(resolve(_scene(), LIB), LIB)
-                if "no longer tracked" in i.message]
-    assert "modules" not in _scene().model_dump(mode="json")["racks"][0]
-
-
-def test_the_m5_reaches_through_the_cheek_into_the_rail():
-    from hwcase.hybrid import m5_length
-
-    assert m5_length(3.0) == 12.0          # 3 + 8 of thread
-    assert m5_length(5.0) == 16.0
-
-
-def test_the_bay_bom_is_rails_and_their_m5s():
-    from hwcase.hybrid import bay_bom
-
-    assert bay_bom([], 3.0) == {}
-
-
-def test_a_build_with_errors_writes_its_files_and_exits_1(tmp_path, capsys):
-    """A board in the module space: the files are still written, to look
-    at, but the command does not report success."""
-    import yaml
-
-    from hwcase import cli
-
-    text = SCENE.read_text(encoding="utf-8").replace(
-        "pos: [220.0, 36.0, 0.0]", "pos: [60.0, 36.0, 0.0]")
-    assert "pos: [60.0, 36.0, 0.0]" in text
-    scene = tmp_path / "bad.yaml"
-    scene.write_text(text, encoding="utf-8")
-    assert yaml.safe_load(text)["name"]
-    assert cli.main(["build", str(scene), "-o", str(tmp_path / "o")]) == 1
-    assert any((tmp_path / "o").iterdir())
-    assert "errors -- run `check`" in capsys.readouterr().out
-
-
-def test_a_build_the_builder_refuses_exits_1_not_a_traceback(tmp_path, capsys):
-    """Two bays on top of each other: the builder cannot joint the cheeks,
-    and the command says why instead of raising."""
-    import yaml
-
-    from hwcase import cli
-
-    data = yaml.safe_load(SCENE.read_text(encoding="utf-8"))
-    second = dict(data["racks"][0], id="bay2", at=[28 * 5.08, 0.0])
-    data["racks"].append(second)
-    scene = tmp_path / "two.yaml"
-    scene.write_text(yaml.safe_dump(data), encoding="utf-8")
-    assert cli.main(["build", str(scene), "-o", str(tmp_path / "o")]) == 1
-    out = capsys.readouterr().out
-    assert "overlap" in out and "[X] build" in out
-
-
-# --------------------------------------------------------------------------
-# the box starter
-# --------------------------------------------------------------------------
-
-
-def _starter_scene(uncomment_bay: bool):
-    import yaml
-
-    from hwcase.api import _starter_text
-    from hwcase.schema import Scene
-
-    text = _starter_text("new-box", "box")
-    if uncomment_bay:
-        lines = text.splitlines()
-        i = lines.index("# racks:")
-        j = i
-        while j < len(lines) and lines[j].startswith("#"):
-            j += 1
-        lines[i:j] = [ln[2:] for ln in lines[i:j]]
-        text = "\n".join(lines)
-    return Scene.model_validate(yaml.safe_load(text))
-
-
-def test_the_box_starter_builds_with_nothing_placed():
-    model = case_mod.build(resolve(_starter_scene(False), LIB))
-    assert len(model.plates) == 6 and model.height > 20.0
-
-
-def test_the_box_starters_sample_bay_builds_when_uncommented():
-    scene = _starter_scene(True)
-    assert scene.racks[0].hp == 28 and scene.placements == []
+def test_sections_above_and_below_build():
+    sections = [HybridSection(id="below1", side="below", length=300.0,
+                              depth=40.0),
+                HybridSection(id="top", side="above", length=120.0,
+                              depth=30.0),
+                HybridSection(id="below2", side="below", length=80.0,
+                              depth=60.0)]
+    scene = _scene(sections=sections)
     res = resolve(scene, LIB)
     assert [i for i in check(res, LIB) if i.level == "error"] == []
-    model = case_mod.build(res)
-    assert {"bay1-cheek-left", "bay1-cheek-right"} <= {p.name for p in model.plates}
+    m = case_mod.build(res)
+    names = {p.name for p in m.plates}
+    assert {"deck-top", "floor-top", "deck-below2", "floor-below2",
+            "step-below2-below1", "step-rack-top"} <= names
+    zones = [z["name"] for z in m.extras["hybrid"]["zones"]]
+    assert zones == ["below2", "below1", "rack", "top"]
+    _validate(m)
+    # the side panel runs the whole stack, one piece
+    cheek = m.plate("side-left").geom
+    assert cheek.geom_type == "Polygon"
+    hy = m.extras["hybrid"]["zones"]
+    assert cheek.bounds[2] - cheek.bounds[0] == pytest.approx(
+        hy[-1]["y1"] - hy[0]["y0"] + 2 * 10.5, abs=0.01)
+
+
+def test_equal_depths_share_a_floor_and_need_no_step():
+    sections = [HybridSection(id="below1", side="below", length=300.0,
+                              depth=42.0)]
+    m = case_mod.build(resolve(_scene(sections=sections), LIB))
+    names = {p.name for p in m.plates}
+    assert "floor-below1-rack" in names
+    assert not [n for n in names if n.startswith("step-")]
+    _validate(m)
+
+
+@pytest.mark.parametrize("joint", ["tslot", "finger"])
+def test_both_joint_types_build(joint):
+    scene = _scene()
+    spec = scene.rack.model_copy(update={"joint": joint})
+    m = case_mod.build(resolve(scene.model_copy(update={"rack": spec}), LIB))
+    _validate(m)
+    # a step wall stands inside the side panel above the shallower floor:
+    # an interior joint needs a slot, so it is T-slotted either way
+    kinds = {(b.startswith("step-"), j.kind) for _a, b, j in m.joints}
+    assert kinds == {(False, joint), (True, "tslot")}
+
+
+def test_a_radius_that_eats_the_joints_is_refused():
+    scene = _scene()
+    panel = scene.rack.panel.model_copy(update={"r_bottom_back": 30.0})
+    spec = scene.rack.model_copy(update={"panel": panel})
+    with pytest.raises(ValueError, match="corner radius"):
+        case_mod.build(resolve(scene.model_copy(update={"rack": spec}), LIB))
 
 
 # --------------------------------------------------------------------------
-# the plan's own acceptance case: 84 HP of 3U beside a Pi and a HyperPixel
+# the starter, and what moved
 # --------------------------------------------------------------------------
 
-PI_SCENE = SCENE.parent / "hybrid-84hp-pi-hyperpixel.yaml"
+
+def test_the_starter_builds_with_nothing_placed():
+    from hwcase.api import _starter_text
+
+    scene = Scene.model_validate(yaml.safe_load(
+        _starter_text("new-hybrid", "hybrid")))
+    assert scene.kind == "hybrid" and scene.placements == []
+    assert scene.rack.hp == 60 and len(scene.rack.rows) == 2
+    assert [(s.side, s.length) for s in scene.sections] == [("below", 300.0)]
+    res = resolve(scene, LIB)
+    assert [i for i in check(res, LIB) if i.level == "error"] == []
+    m = case_mod.build(res)
+    assert {"side-left", "side-right", "deck-below1"} <= {
+        p.name for p in m.plates}
+    files = dict(export.sheet_files(m, "svg", "s"))
+    assert "s-cutlist.txt" in files
 
 
-@pytest.fixture(scope="module")
-def pi_res():
-    return resolve(load_scene(PI_SCENE), LIB)
+def test_an_old_box_with_rack_bays_loads_and_says_where_they_went():
+    data = yaml.safe_load((SCENES / "hybrid-trellis-28hp.yaml").read_text(
+        encoding="utf-8"))
+    data.update(kind="parts", case={"style": "box"},
+                racks=[{"id": "bay", "at": [0.0, 0.0], "hp": 28,
+                        "modules": [{"id": "amy", "hp_slot": 0}]}])
+    data.pop("sections")
+    scene = Scene.model_validate(data)
+    issues = check(resolve(scene, LIB), LIB)
+    notes = [i for i in issues if i.code == "rack_bay"]
+    assert len(notes) == 1 and notes[0].level == "warning"
+    assert "hybrid case" in notes[0].message
+    model = case_mod.build(resolve(scene, LIB))
+    assert model.kind == "box" and not model.members
+    assert "racks" not in Scene().model_dump(mode="json")
 
 
-@pytest.fixture(scope="module")
-def pi_model(pi_res) -> BoxModel:
-    return case_mod.build(pi_res)
+def test_the_trellis_scene_builds():
+    res = resolve(load_scene(SCENES / "hybrid-trellis-28hp.yaml"), LIB)
+    assert [i for i in check(res, LIB) if i.level == "error"] == []
+    m = case_mod.build(res)
+    _validate(m)
+    assert len(m.members) == 2
 
 
-def test_plan_row1_the_84hp_bay_beside_a_pi_and_hyperpixel_builds(
-        pi_res, pi_model):
-    assert [i for i in check(pi_res, LIB) if i.level == "error"] == []
-    assert {"bay-cheek-left", "bay-cheek-right"} <= {
-        p.name for p in pi_model.plates}
-    bay = pi_model.extras["bays"][0]
-    assert bay["hp"] == 84 and bay["width"] == pytest.approx(426.72)
-
-
-def test_plan_row2_the_deck_top_is_the_rail_face_plus_2mm(pi_res, pi_model):
-    deck = pi_model.plate("deck")
-    deck_top = deck.origin[2] + deck.material.thickness
-    assert deck_top == pytest.approx(pi_res.panels["main"], abs=0.01)
-    for rail in pi_model.members:
-        assert deck_top - rail.origin[2] == pytest.approx(2.0, abs=0.01)
-
-
-def test_plan_row3_a_pi_in_the_module_space_is_an_error():
-    scene = load_scene(PI_SCENE)
-    moved = [p.model_copy(update={"pos": (200.0, 66.0, 0.0)})
-             if p.id == "pi" else p for p in scene.placements]
-    errors = _errors(scene.model_copy(update={"placements": moved}))
-    assert any(e.code == "rack_bay" and "pi" in e.refs for e in errors)
-
-
-def test_plan_row4_cheek_m5s_meet_the_84hp_rail_ends(pi_model):
-    for rail in pi_model.members:
-        y = rail.origin[1] + rack.RAIL_H / 2
-        z = rail.origin[2] - rack.rail_bore_depth()
-        for side in ("left", "right"):
-            cheek = pi_model.plate(f"bay-cheek-{side}")
-            holes = [cheek.to_world(u, v)
-                     for u, v in _round_holes(cheek.geom, rack.M5_CLEAR)]
-            assert any(abs(hy - y) < 0.01 and abs(hz - z) < 0.01
-                       for _x, hy, hz in holes)
-
-
-def test_plan_row5_and_6_joints_validate_plates_fit_and_the_cut_list(
-        pi_model):
-    for a, b, j in pi_model.joints:
-        pa, pb = pi_model.plate(a), pi_model.plate(b)
-        assert [v for v in jn.validate_joint(
-            j, jn.Plate(pa.geom, pa.material), jn.Plate(pb.geom, pb.material))
-            if v.rule != "keep_clear"] == [], (a, b)
-    sheets = export.pack_sheets(flat.from_box(pi_model), stock=pi_model.spec)
-    assert {pl.part.name for s in sheets for pl in s.placements} == {
-        p.name for p in pi_model.plates}
-    cut = dict(export.sheet_files(pi_model, "svg", "pi"))["pi-cutlist.txt"]
-    for word in ("deck", "bay-cheek-left", "bay-cheek-right",
-                 "2 x Eurorack rail, 426.72 mm (84 HP)"):
-        assert word in cut
-
-
-def test_the_editor_gets_each_bay_to_draw_and_drag_before_a_build(res):
-    from hwcase.hybrid import bays_json
-
-    (bay,) = bays_json(res)
-    assert bay["hp"] == 28 and bay["x0"] == 0.0
-    assert bay["z_top"] - bay["z_rail"] == pytest.approx(2.0)
-    assert bay["z_rail"] - bay["z_floor"] == pytest.approx(40.0)
-    assert len(bay["cheeks"]) == 2 and len(bay["rows"]) == 1
-    assert "modules" not in bay
-    assert bay["rows"][0]["y_mid"] == pytest.approx(66.25)
-
-
-def test_the_resolve_route_carries_the_bays():
+def test_the_build_route_returns_the_hybrid():
     from fastapi.testclient import TestClient
 
     from hwcase.api import app
 
     body = _scene().model_dump(mode="json")
-    r = TestClient(app).post("/api/resolve", json=body)
-    assert r.status_code == 200
-    assert r.json()["bays"][0]["id"] == "bay"
+    client = TestClient(app)
+    r = client.post("/api/build", json=body)
+    assert r.status_code == 200 and r.json()["kind"] == "hybrid"
+    r = client.post("/api/export/sheets/svg?as_json=true", json=body)
+    assert r.status_code == 200 and r.json()["count"] >= 1
+    r = client.get("/api/scene/starter?kind=hybrid")
+    assert r.status_code == 200 and "kind: hybrid" in r.text

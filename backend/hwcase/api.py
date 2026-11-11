@@ -286,24 +286,10 @@ BOX_STARTER = """# A new box case.
 #
 # Boards placed as in a layered case, but the case is a deck, four walls and
 # a floor, jointed -- depth for the cost of six plates. The sheet is the first
-# material, at whatever thickness it measures.
+# material, at whatever thickness it measures. Until something is placed,
+# the box is a 120 x 80 x 30 mm placeholder.
 #
-# Eurorack rails can be set into the deck as rack bays (the case pane): the
-# faces of the modules screwed in later become the case's surface, and no
-# placement may enter a bay's space -- it is kept clear for them. Until
-# something is placed, the box is a 120 x 80 x 30 mm placeholder.
-#
-# A bay, to uncomment: 28 HP of 3U rails whose bottom-left corner is at the
-# origin, 40 mm of room behind the module panels:
-#
-# racks:
-#   - id: bay1
-#     at: [0.0, 0.0]
-#     hp: 28
-#     rows:
-#       - {{format: 3U}}
-#     module_depth: 40.0
-#     module_panel_t: 2.0
+# Eurorack rows beside your boards are a hybrid case: start one of those.
 
 name: {name}
 placements: []
@@ -356,6 +342,55 @@ rack:
     back: 0.0
 """
 
+HYBRID_STARTER = """# A new hybrid case: Eurorack rows with your own parts above and below.
+#
+# The rack is a laser-cut Eurorack frame lying flat: rails spanning the whole
+# width, an M5 into each rail end through a side panel. Its width in HP is the
+# width of the whole case. The faces of the modules you screw in later are the
+# deck top -- the panel plane -- so the rails sit `module_panel_t` under it.
+#
+# Sections are stretches of deck fixed to the rack's lower (`below`) or upper
+# (`above`) end, as wide as the rails, each with its own length and its own
+# depth under the deck. Place boards in them exactly as in a layered case;
+# the deck is cut for them, the end and step walls open for their ports, and
+# a part outside its section, in the rack's space or deeper than its floor is
+# an error. Several sections on one side stack outwards in list order.
+#
+# Everything is cut from `rack.material` (5 mm plywood unless set) and
+# jointed into the two side panels; `rack.panel` sets the side panels'
+# overhangs (bottom/top past the end walls, front past the deck, back past
+# the floors) and corner radii.
+
+name: {name}
+kind: hybrid
+panels:
+- name: main
+  z: 0.0
+  note: "The deck top: the module faces and the parts' flush surface."
+rack:
+  hp: 60
+  rows:
+    - {{format: 3U}}
+    - {{format: 3U}}
+  module_depth: 40.0
+  module_panel_t: 2.0
+  joint: tslot
+  panel:
+    top: 10.5
+    bottom: 10.5
+    front: 0.0
+    back: 0.0
+sections:
+  - {{id: below1, side: below, length: 300.0, depth: 40.0}}
+placements: []
+case:
+  part_clearance: 0.6
+  cable_clearance: 5.0
+  # the side panels run the case's whole length: 600 mm and more
+  plates:
+    - [800.0, 450.0]
+"""
+
 PANEL_STARTER = """# A new Eurorack module panel.
 #
 # One sheet -- the panel -- with your boards hanging behind it. Its width is
@@ -396,7 +431,7 @@ case:
 #: Which starter text a new project of each kind begins from. A panel is a
 #: parts scene -- boards placed by hand -- whose case is one Eurorack panel.
 STARTERS = {"parts": STARTER, "box": BOX_STARTER, "rack": RACK_STARTER,
-            "panel": PANEL_STARTER}
+            "panel": PANEL_STARTER, "hybrid": HYBRID_STARTER}
 
 
 def _starter_text(name: str, kind: str) -> str:
@@ -579,9 +614,6 @@ def post_resolve(scene: Scene = Body(...)):
     payload = export.scene_to_json(res, lib, issues)
     x0, y0, z0, x1, y1, z1 = res.bounds()
     payload["extent"] = {"min": [x0, y0, z0], "max": [x1, y1, z1]}
-    if scene.racks:
-        from .hybrid import bays_json
-        payload["bays"] = bays_json(res)        # the editor's bay overlay
     return JSONResponse(payload)
 
 
@@ -729,6 +761,10 @@ def export_coupon(fmt: str, scene: Scene = Body(...), as_json: bool = False):
             frame = rack_mod.build_spec(scene.rack)
             materials = [p.material for p in from_rack(frame)]
             bolt = getattr(scene.rack, "fastener", "M3") or "M3"
+        elif scene.kind == "hybrid":
+            from .hybrid import sheet_of
+            materials = [sheet_of(scene.rack)]
+            bolt = scene.rack.fastener or "M3"
         else:
             materials = list(scene.case.materials)
             bolt = scene.case.box_fastener if scene.case.style == "box" else "M3"
