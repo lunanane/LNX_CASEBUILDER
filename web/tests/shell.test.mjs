@@ -224,8 +224,26 @@ test('rack bays can be added to a box, and the box draws its rails', () => {
   // M10: bays live in the case pane; the 3D view draws plates and members
   assert.ok(staticIds.has('bay-list') && staticIds.has('btn-add-bay'));
   assert.match(js, /\$\('btn-add-bay'\)\.onclick =/);
-  assert.match(js, /module_depth: 40, module_panel_t: 2, modules: \[\]/);
+  assert.match(js, /at: newBayAt\(boxes\), hp: BAY_DEFAULTS\.hp/);
   assert.match(js, /\[\.\.\.model\.plates, \.\.\.\(model\.members \|\| \[\]\)\]/);
+});
+
+test('a bay is drawn while editing, and its modules move by HP slot', () => {
+  // the overlay comes from /api/resolve's bays, built after every resolve
+  assert.match(js, /buildSupports\(resolved\);\s+buildBays\(resolved\);/);
+  assert.match(js, /for \(const b of resolved\.bays \|\| \[\]\)/);
+  // one HP fallback, the engine's; rows and panel thickness are fields
+  assert.doesNotMatch(js, /bay\.hp \?\? 84/);
+  assert.match(js, /bay\.hp \?\? BAY_DEFAULTS\.hp/);
+  assert.match(js, /bay\.module_panel_t \?\? BAY_DEFAULTS\.module_panel_t/);
+  assert.match(js, /BAY_ROW_FORMATS\.map/);
+  // modules picked from the scene's placements, each on a slot
+  assert.match(js, /add a module\.\.\./);
+  assert.match(js, /setModuleSlot\(bay, m\.id, s, r\)/);
+  // a drag of a bay's module snaps to slots, not to other boards' edges
+  assert.match(js, /d = drag\.bay \? applyBaySnap\(d\) : applySnap\(d\)/);
+  // the rack bay controls still belong to the box use case only
+  assert.match(html, /<div data-uses="box">\s*<h2>rack bays<\/h2>/);
 });
 
 test('real models are vendored, mapped, toggled and placed by the engine', () => {

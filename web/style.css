@@ -353,3 +353,8 @@ body:not(.rendering) .sunctl { opacity: .35; }
 }
 .plate-row .pl-del:hover { color: var(--err); border-color: var(--err); }
 #btn-add-plate { margin: 2px 0 8px 62px; }
+
+/* rack bays (case pane): one block per bay, slot and row fields side by side */
+#bay-list .bay { border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 4px; margin-bottom: 6px; }
+#bay-list .bay input.slot, #bay-list .bay input.row { width: 4.5em; }
+#bay-list .bay > button { margin: 2px 0 4px; }
