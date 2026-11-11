@@ -251,3 +251,9 @@ test('a material row edits its kerf and joint clearance, and a coupon can be cut
   assert.match(js, /exportSheets\('svg', 'coupon'\)/);
   assert.match(js, /\/api\/export\/\$\{route\}\/\$\{fmt\}/);
 });
+
+test('the frame keeps no copy of the default laser sheet of its own', () => {
+  // the server cuts it; the editor reads it off the build
+  assert.doesNotMatch(js, /LASER_SHEET\s*=/);
+  assert.match(js, /laser_sheet/);
+});

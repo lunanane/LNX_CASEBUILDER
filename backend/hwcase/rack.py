@@ -200,6 +200,13 @@ def resolve_margin(margin: float | None = None,
 #: the panel's inner face is where the rail stops.
 SIDE_PANEL_T = 5.0
 
+#: The sheet a U-channel frame's side panels are cut from. Every cut plate of
+#: a frame carries its sheet (`Member.stock`), so the side-panel SVG, the
+#: packed sheets and the test coupon all cut it at the same kerf.
+U_PANEL_MATERIAL = Material(name=f"acrylic-{SIDE_PANEL_T:g}mm",
+                            thickness=SIDE_PANEL_T, kerf=0.15,
+                            color="#d8dde3")
+
 #: How far the sheet slot reaches forward from the rail's back face -- and so
 #: how far the body's flange enters the rail.
 #:
@@ -792,6 +799,7 @@ def build(rows: list[RowFormat], hp: float, inserts_per_row: int = 0,
             axis="x",
             material="acrylic",
             holes=list(holes),
+            stock=U_PANEL_MATERIAL,
             notes=[f"{len(holes)} x M5 into rail ends"],
         ))
 

@@ -154,3 +154,48 @@ def test_module_fixings_are_sized_by_hp_and_called_an_estimate():
     cut = export.rack_sheet_files(model, "svg", "f", WIDE)[-1][1]
     assert "module fixings (an ESTIMATE" in cut
     assert "row 2 (3U, 84 HP): ~22 x M3x6 screw + ~22 x M3 sliding nut" in cut
+
+
+# --------------------------------------------------------------------------
+# one sheet, one kerf, whichever way a frame is exported
+# --------------------------------------------------------------------------
+
+import re                                                  # noqa: E402
+
+
+def _svg_sizes(svg: str) -> list[tuple[float, float]]:
+    return sorted(tuple(sorted((float(a), float(b)))) for a, b in re.findall(
+        r"<title>[^<]*?, ([\d.]+) x ([\d.]+) mm -- outer edge", svg))
+
+
+def _cut_sizes(cut: str) -> list[tuple[float, float]]:
+    """The packed sizes -- the sheets' part of the cut list, not the plates
+    measured nominal further down."""
+    cut = cut.split("\nframe --")[0]
+    return sorted(tuple(sorted((float(a), float(b)))) for a, b in re.findall(
+        r"^  \S+\s+\S+\s+([\d.]+) x\s+([\d.]+) mm", cut, re.M))
+
+
+@pytest.mark.parametrize("style", ["u_channel", "laser"])
+def test_the_plate_svg_and_the_sheets_cut_the_same_sheet_at_the_same_kerf(style):
+    mat = Material(name="ply-5mm", thickness=5.0, kerf=0.4)
+    model = rack.build(SIX_U, 42.0, style=style,
+                       material=mat if style == "laser" else None)
+    svg = export.rack_panels_svg(model)
+    files = export.rack_sheet_files(model, "svg", "f", WIDE)
+    sheets = "".join(c for _n, c in files[:-1])
+    want = mat if style == "laser" else rack.U_PANEL_MATERIAL
+    assert f'data-material="{want.name}"' in svg
+    assert f'data-material="{want.name}"' in sheets
+    got = _svg_sizes(svg)
+    packed = _cut_sizes(files[-1][1])
+    assert got and len(got) == len(packed)
+    for a, b in zip(got, packed):          # both printed to 0.1 mm
+        assert a == pytest.approx(b, abs=0.11)
+
+
+def test_the_build_names_the_frames_sheet_for_the_editor():
+    u = export.rack_to_json(rack.build(SIX_U, 42.0))
+    assert u["sheet"]["name"] == rack.U_PANEL_MATERIAL.name
+    assert u["laser_sheet"]["name"] == rack.LASER_MATERIAL.name
+    assert u["laser_sheet"]["thickness"] == rack.LASER_MATERIAL.thickness

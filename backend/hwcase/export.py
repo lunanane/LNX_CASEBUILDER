@@ -306,6 +306,8 @@ def rack_to_json(model) -> dict:
     are a rotation. Send depth to +Z instead and the basis becomes a
     reflection -- every member renders inside out.
     """
+    from .rack import LASER_MATERIAL
+
     def rings(geom):
         return [[list(c) for c in ring]
                 for poly in _polys(geom) for ring in _rings(poly)]
@@ -334,6 +336,12 @@ def rack_to_json(model) -> dict:
         "style": model.style,
         "joint": model.joint,
         "panel_t": model.panel_t,
+        # the sheet the plates are cut from, and the one a laser frame uses
+        # when the scene names none: the editor reads both from here rather
+        # than keeping its own copy
+        "sheet": _material_json(model.plates[0].stock) if model.plates
+        and model.plates[0].stock is not None else None,
+        "laser_sheet": _material_json(LASER_MATERIAL),
         "panel": {
             "top": model.plan.top, "bottom": model.plan.bottom,
             "front": model.plan.front, "back": model.plan.back,
@@ -362,7 +370,7 @@ def rack_to_json(model) -> dict:
     }
 
 
-def rack_panels_svg(model, apply_kerf: bool = True, kerf: float = 0.15) -> str:
+def rack_panels_svg(model, apply_kerf: bool = True) -> str:
     """The frame's cut plates, as one SVG ready for a laser.
 
     Only what is cut: the rails and the U-channel are bought as extrusion and
@@ -375,8 +383,13 @@ def rack_panels_svg(model, apply_kerf: bool = True, kerf: float = 0.15) -> str:
     document order, and an outline run early drops the part out of the sheet
     while its holes are still to come), and the y axis is flipped so the file
     reads the same way up as the 3D view.
+
+    The plates are the flat parts `rack_sheet_files` packs, so the two
+    exports cut the same sheet at the same kerf: each plate's own stock.
     """
-    panels = list(model.plates)
+    from .flat import from_rack
+
+    panels = from_rack(model)
     if not panels:
         raise ValueError("this frame has no side panels")
 
@@ -385,24 +398,24 @@ def rack_panels_svg(model, apply_kerf: bool = True, kerf: float = 0.15) -> str:
     max_x = max_y = 0.0
     dx = SHEET_MARGIN
     for i, panel in enumerate(panels):
-        geom = panel.cut if panel.cut is not None else panel.section
+        geom = panel.outline
         if apply_kerf:
-            geom = kerf_compensated(
-                geom, panel.stock.kerf if panel.stock is not None else kerf)
+            geom = kerf_compensated(geom, panel.material.kerf)
         geom = translate(geom, dx, SHEET_MARGIN)
         x0, y0, x1, y1 = geom.bounds
         max_x, max_y = max(max_x, x1), max(max_y, y1)
         holes, outlines = _holes_then_outlines(geom)
-        label = (f"{panel.name} -- {panel.material}, "
+        mat = panel.material.name
+        label = (f"{panel.name} -- {mat}, "
                  f"{x1 - x0:.1f} x {y1 - y0:.1f} mm")
         heads.append(
             f'<g id="{panel.name}-holes" data-pass="holes" '
-            f'data-material="{panel.material}">\n'
+            f'data-material="{mat}">\n'
             f'  <title>{label} -- inner cuts first</title>\n  '
             + "\n  ".join(_ring_path(r) for r in holes) + "\n</g>")
         tails.append(
             f'<g id="{panel.name}-outline" data-pass="outline" '
-            f'data-material="{panel.material}">\n'
+            f'data-material="{mat}">\n'
             f'  <title>{label} -- outer edge, cut last</title>\n  '
             + "\n  ".join(_ring_path(r) for r in outlines) + "\n</g>")
         dx = max_x + SHEET_MARGIN

@@ -586,8 +586,12 @@ const MEMBER_STYLE = {
   plate:      { color: 0xc8a165, roughness: 0.78, metalness: 0.0, opacity: 1 },
 };
 
-/** The sheet a laser frame is cut from, unless the scene names one. */
-const LASER_SHEET = { name: 'plywood-5mm', thickness: 5, kerf: 0.15 };
+/** The sheet a laser frame is cut from, unless the scene names one: the
+ *  server's default, off the last build, so there is one copy of it. */
+function laserSheet() {
+  const m = state.caseModel?.kind === 'rack' ? state.caseModel : null;
+  return m?.laser_sheet || { name: 'plywood' };
+}
 
 function buildRack(model) {
   caseGroup.clear();
@@ -717,7 +721,7 @@ function renderFramePanel() {
   const laser = spec.style === 'laser';
   $('fr-style').value = laser ? 'laser' : 'u_channel';
   if (document.activeElement !== $('fr-sheet-t')) {
-    $('fr-sheet-t').value = spec.material?.thickness ?? LASER_SHEET.thickness;
+    $('fr-sheet-t').value = spec.material?.thickness ?? laserSheet().thickness ?? '';
   }
   $('fr-joint').value = spec.joint === 'finger' ? 'finger' : 'tslot';
   $('fr-top-plate').checked = spec.top_plate !== false;
@@ -977,7 +981,7 @@ function wireFramePanel() {
     spec.style = $('fr-style').value;
     if (spec.style === 'laser') {
       spec.inserts_per_row = 0;       // a back plate closes the insert slots
-      if (!spec.material) spec.material = { ...LASER_SHEET };
+      // no material written: the server cuts its default laser sheet
     }
     renderFramePanel();
     doResolve();
@@ -987,7 +991,7 @@ function wireFramePanel() {
     if (!Number.isFinite(v) || v < 1) return;
     edit('fr-sheet-t');
     const spec = rackSpec();
-    const was = spec.material || LASER_SHEET;
+    const was = spec.material || laserSheet();
     // the name carries the thickness, as the case's materials do
     const stem = (was.name || 'plywood').replace(/-[\d.]+mm$/, '');
     spec.material = { ...was, name: stem + '-' + v + 'mm', thickness: v };
