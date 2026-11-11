@@ -102,6 +102,14 @@ collide. Treat this whole section as `community`.
 | shallow case | ~40 mm usable |
 | standard / deep case | 50–60 mm usable |
 
+**How this repo measures it.** `module_depth` -- on a frame (`rack.module_depth`)
+and on a rack bay in a box case (`racks[].module_depth`) alike -- is the clear
+room *behind the module panel*: from the rails' front face, which is the back of
+the panel, to the inside of the frame's body web or the top of the box's floor.
+The panel's own 2 mm is not counted. A module that fits a 40 mm frame fits a
+40 mm bay. (The module panel designer's `eurorack_panel.module_depth` is still
+measured from the panel's face.)
+
 The power ribbon is the usual offender: a 16-way IDC plugged into a header
 standing ~9 mm off the PCB needs 15–20 mm behind the board before the cable will
 turn. Budget for the *cable*, not the connector.
@@ -185,6 +193,18 @@ Not encoded anywhere yet: the HP table (§2), the row pitch (§6) and the compon
 drill sizes (§9). If the engine should *enforce* these rather than have them sit
 in prose, the natural home is a `standards` block the checker reads — say the
 word and this lifts into YAML.
+
+**Rack bays in a box case** (`racks:`, `backend/hwcase/hybrid.py`). A bay's
+modules are listed by slot — `{id, hp_slot, row}`, both counted from 0, the slot
+in HP from the rails' left end, the row from the bottom — and the engine moves
+each module (and whatever is mated to it) so its panel's left edge lands on the
+slot and the panel is centred on the row's rails. A module's HP is its panel's
+width on the grid (a part of category `panel` in its mate tree; failing that,
+its widest board). A bare id with a hand-typed `pos` still loads, and is checked
+against the same grid to 0.05 mm. The bill of materials counts an M3 screw and a
+sliding nut per rail hole of each listed module by Doepfer's hole rule (§3, an
+estimate), and one M5 per rail end, its length the cheek plus 8 mm of thread;
+the rail's 4.4 mm end bore is tapped M5 (tap drill 4.2).
 
 ## Sources
 

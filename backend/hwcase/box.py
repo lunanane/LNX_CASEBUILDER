@@ -58,6 +58,10 @@ _WALL_OF_NORMAL = {(0, -1): "front", (0, 1): "back", (-1, 0): "left",
 _WALL_OF_FACE = {"-y": "front", "+y": "back", "-x": "left", "+x": "right"}
 
 
+#: an empty scene's box, inside (x, y, height): a placeholder, not a design
+EMPTY_BOX = (120.0, 80.0, 30.0)
+
+
 @dataclass
 class BoxPlate:
     """One cut plate of the box."""
@@ -152,11 +156,15 @@ def panel_plane(res, spec) -> float:
 
 def build_box(res, spec, deck_top: Optional[float] = None,
               floor_top: Optional[float] = None, outer=None,
-              deck_cuts=(), extra=None, inside=frozenset()) -> BoxModel:
+              deck_cuts=(), extra=None, inside=frozenset(),
+              deck_fill=()) -> BoxModel:
     """The box around a resolved scene.
 
     `deck_top`, `floor_top`, `outer` and `deck_cuts` let a caller (M10's rack
     bays) fix the deck's height, the box's footprint and cut extra openings;
+    `deck_fill` is deck restored before those cuts -- a bay's footprint,
+    where its modules' own panel cutouts would otherwise bite into the
+    strip of deck its cheeks join;
     `extra(box_parts)` is called before the joints are cut, to add plates and
     joints of its own. `inside` names placements whose ports never open the
     box's walls -- a bay's modules, which are patched from the front. Left
@@ -172,6 +180,15 @@ def build_box(res, spec, deck_top: Optional[float] = None,
     i = t if joint == "tslot" else 0.0          # walls stand this far in
     trim = t if joint == "tslot" else 0.0       # side-wall joints stop short
 
+    if not res.solids and outer is None and spec.outline is None:
+        # Nothing placed yet -- a new project. A box sized from no hardware
+        # is a sliver no joint fits, so it gets a placeholder to look at
+        # until the first board (or bay) gives it a size.
+        w, d, h = EMPTY_BOX
+        outer = rect(-w / 2, -d / 2, w / 2, d / 2)
+        if floor_top is None:
+            floor_top = (panel_plane(res, spec) if deck_top is None
+                         else deck_top) - h
     if outer is None:
         outer = outer_shape(res, spec)
     x0, y0, x1, y1 = outer.bounds
@@ -191,6 +208,8 @@ def build_box(res, spec, deck_top: Optional[float] = None,
     # -- the deck: the faceplate, cut as a layered lid is ------------------
     deck_world, deck_notes = _layer_geometry(
         res, spec, footprint, (z1 - t, z1), "lid", (z0, z1), [(z1 - t, z1)])
+    for f in deck_fill:
+        deck_world = deck_world.union(f.intersection(footprint))
     for c in deck_cuts:
         deck_world = deck_world.difference(c)
     standoffs: list[Standoff] = []
@@ -425,9 +444,10 @@ def box_cutlist(model: BoxModel, sheets, stock) -> str:
             lines.append(f"  {s.placement:<16} {s.length:5.1f} mm "
                          f"{s.screw or 'screw'} through the {s.through} "
                          f"at ({s.at[0]:.1f}, {s.at[1]:.1f})")
+    bought = model.extras.get("bom", {})       # a bay's rails and screws
     hardware = {k: v for k, v in model.bill_of_materials().items()
                 if k.endswith((" bolt", " nut", " screw", " mm"))
-                or k in ("rails",)}
+                or k in bought}
     for bay in model.extras.get("bays", []):
         lines += ["", f"bay {bay['id']}: {bay['hp']:g} HP, rails "
                   f"{bay['width']:.2f} mm long, module depth "

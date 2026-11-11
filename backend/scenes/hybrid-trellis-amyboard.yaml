@@ -10,8 +10,8 @@
 # the boards screwed up under the deck on standoffs.
 #
 # The box is 3 mm plywood with captive-nut T-slots. Its floor drops to the
-# bay's 40 mm module depth, so a module has 40 mm of clear room behind its
-# face, as it would in a 40 mm frame.
+# bay's 40 mm module depth behind the rails' front face, so a module has 40 mm
+# of clear room behind its panel, as it would in a 40 mm frame.
 
 name: hybrid-trellis-amyboard
 
@@ -28,13 +28,16 @@ racks:
   - {format: 3U}
   module_depth: 40.0
   module_panel_t: 2.0
-  modules: [amy, amy_panel]
+  # placed by slot: the AMYboard (and the panel mated to it) goes on the
+  # rails at 0 HP from the left end, row 0 -- no hand-computed position
+  modules:
+  - {id: amy, hp_slot: 0, row: 0}
 
 placements:
 # --- the module: AMYboard behind its own 10 HP panel ----------------------
 - id: amy
   part: shorepine-amyboard
-  pos: [1.15, 13.35, 0.0]
+  pos: [0.0, 0.0, 0.0]       # the bay puts it on its slot
   on_panel: main
   panel_ref: face            # its panel's face is the module face
   support: none              # a module hangs from the rails, not the box

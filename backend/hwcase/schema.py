@@ -823,8 +823,9 @@ class RackSpec(Strict):
     inserts_per_row: int = 0
     insert_hp: float = 4.0
 
-    #: How deep a module may be: clear space from the module face back to the
-    #: inside of the body's web. Sets the case's depth outright -- the folded
+    #: How deep a module may be: clear space from the rails' front face (the
+    #: back of a module's panel) to the inside of the body's web. A rack bay's
+    #: `module_depth` is the same measure. Sets the case's depth outright -- the folded
     #: flange and the side panels follow from it. Skiffs run 25-40; the built
     #: case is 51, deep enough to put a PSU behind the modules.
     module_depth: float = 51.0
@@ -850,6 +851,23 @@ class RackSpec(Strict):
     fastener: str = "M3"
 
 
+class BayModule(Strict):
+    """A module in a rack bay, placed by its slot rather than by coordinates.
+
+    The engine moves the placement -- and whatever is mated to it -- so that
+    its panel's left edge lands `hp_slot` HP from the rails' left end and the
+    panel is centred on row `row`'s rails: the grid a module's screws find on
+    a real rail, so nothing is computed by hand and nothing drifts off it.
+    """
+
+    #: the placement that is the module; whatever is mated to it comes along
+    id: str
+    #: 0-based, in HP, from the rails' left end
+    hp_slot: int = Field(0, ge=0)
+    #: 0-based, bottom to top, into the bay's `rows`
+    row: int = Field(0, ge=0)
+
+
 class RackBay(Strict):
     """Eurorack rails set into a box case's deck, beside the other boards.
 
@@ -862,18 +880,26 @@ class RackBay(Strict):
     #: world XY of the bay's lower-left corner: where the rails start, at the
     #: bottom rail's outer edge
     at: Vec2 = (0.0, 0.0)
-    #: rail span, in HP
-    hp: float = Field(84.0, gt=0, le=240)
+    #: rail span, in HP -- 28 unless set, as the editor's new bay is
+    hp: float = Field(28.0, gt=0, le=240)
     #: bottom to top, as on a frame
     rows: list[RackRow] = Field(default_factory=lambda: [RackRow()])
-    #: clear room behind the module faces; the box's floor drops to it
+    #: Clear room behind the module panels: from the rails' front face -- the
+    #: back of a module's panel -- down to the top of the floor. The same
+    #: measure as a frame's `module_depth` (rail face to the inside of the
+    #: body's web), so a module that fits a 40 mm frame fits a 40 mm bay.
     module_depth: float = Field(40.0, gt=0)
     #: how thick the modules' panels are -- the rails sit this far below the
     #: deck top so the module faces end up flush with it (D-3)
     module_panel_t: float = Field(2.0, gt=0)
-    #: the placements that are modules in this bay: they may enter its module
-    #: space, and nothing else may
-    modules: list[str] = Field(default_factory=list)
+    #: The modules in this bay: they may enter its module space, and nothing
+    #: else may. `{id, hp_slot, row}` places a module by its slot; a bare id
+    #: is a module placed by hand with `pos`, which is still checked against
+    #: the bay's grid. Either way whatever is mated to it belongs to it too.
+    modules: list[Union[str, BayModule]] = Field(default_factory=list)
+
+    def module_ids(self) -> list[str]:
+        return [m if isinstance(m, str) else m.id for m in self.modules]
 
 
 class ViewSettings(Strict):

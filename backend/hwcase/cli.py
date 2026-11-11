@@ -199,7 +199,15 @@ def cmd_build(args) -> int:
         return build_frame(scene, args)
     lib, scene, res = _load(args, scene)
     issues = check(res, lib)
-    model = case_mod.build(res)
+    try:
+        model = case_mod.build(res)
+    except ValueError as exc:
+        # whatever check() found is usually why the builder could not go on
+        for i in issues:
+            if i.level == "error":
+                print(f"  [{LEVEL_MARK['error']}] {i.code:<18} {i.message}")
+        print(f"\n  [X] {'build':<18} {exc}")
+        return 1
     out = Path(args.out)
     from .box import BoxModel
     if isinstance(model, BoxModel):
@@ -216,9 +224,17 @@ def cmd_build(args) -> int:
     print("\nwrote:")
     for p in written:
         print(f"  {p}")
+    return _errors_exit(issues)
+
+
+def _errors_exit(issues) -> int:
+    """A build with errors still writes its files -- they are worth looking
+    at -- but it is not a success: it exits 1, so a script never takes it
+    for one."""
     errors = sum(1 for i in issues if i.level == "error")
     if errors:
         print(f"\n{errors} errors -- run `check` before you cut anything")
+        return 1
     return 0
 
 
@@ -243,10 +259,7 @@ def _build_box_files(scene, model, issues, out: Path) -> int:
     print("\nwrote:")
     for p in written:
         print(f"  {p}")
-    errors = sum(1 for i in issues if i.level == "error")
-    if errors:
-        print(f"\n{errors} errors -- run `check` before you cut anything")
-    return 0
+    return _errors_exit(issues)
 
 
 def cmd_audit(args) -> int:
