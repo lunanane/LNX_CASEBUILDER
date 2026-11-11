@@ -823,8 +823,9 @@ class RackSpec(Strict):
     inserts_per_row: int = 0
     insert_hp: float = 4.0
 
-    #: How deep a module may be: clear space from the module face back to the
-    #: inside of the body's web. Sets the case's depth outright -- the folded
+    #: How deep a module may be: clear space from the rails' front face (the
+    #: back of a module's panel) to the inside of the body's web. A rack bay's
+    #: `module_depth` is the same measure. Sets the case's depth outright -- the folded
     #: flange and the side panels follow from it. Skiffs run 25-40; the built
     #: case is 51, deep enough to put a PSU behind the modules.
     module_depth: float = 51.0
@@ -866,7 +867,10 @@ class RackBay(Strict):
     hp: float = Field(84.0, gt=0, le=240)
     #: bottom to top, as on a frame
     rows: list[RackRow] = Field(default_factory=lambda: [RackRow()])
-    #: clear room behind the module faces; the box's floor drops to it
+    #: Clear room behind the module panels: from the rails' front face -- the
+    #: back of a module's panel -- down to the top of the floor. The same
+    #: measure as a frame's `module_depth` (rail face to the inside of the
+    #: body's web), so a module that fits a 40 mm frame fits a 40 mm bay.
     module_depth: float = Field(40.0, gt=0)
     #: how thick the modules' panels are -- the rails sit this far below the
     #: deck top so the module faces end up flush with it (D-3)

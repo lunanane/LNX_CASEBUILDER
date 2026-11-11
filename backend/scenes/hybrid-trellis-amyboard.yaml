@@ -10,8 +10,8 @@
 # the boards screwed up under the deck on standoffs.
 #
 # The box is 3 mm plywood with captive-nut T-slots. Its floor drops to the
-# bay's 40 mm module depth, so a module has 40 mm of clear room behind its
-# face, as it would in a 40 mm frame.
+# bay's 40 mm module depth behind the rails' front face, so a module has 40 mm
+# of clear room behind its panel, as it would in a 40 mm frame.
 
 name: hybrid-trellis-amyboard
 

@@ -82,6 +82,11 @@ BODY_T = 1.0
 #: inside of the body's web. This is *the* depth parameter -- the flange, the
 #: case depth and the side panels all follow from it.
 #:
+#: "Module face" in this file is the rails' front face, z = 0: the plane a
+#: module's panel rests on, so the depth is clear room behind the panel, not
+#: counting the panel's own 2 mm. A rack bay in a box case
+#: (`hwcase.hybrid`) measures its `module_depth` from the same plane.
+#:
 #: 51 is the built case: a 40 mm flange starting 12 mm behind the module face,
 #: less the 1 mm web. Skiffs run 25-40; deeper cases leave room for a PSU
 #: behind the modules.

@@ -165,11 +165,22 @@ def test_a_modules_ports_never_open_the_box(model):
 
 
 def test_the_floor_gives_the_module_its_depth(model):
+    """Module depth is clear room behind the module panel -- from the rails'
+    front face, as on a frame -- so the deck top is the depth plus the
+    panel's 2 mm above the floor."""
     floor = model.plate("floor")
     deck = model.plate("deck")
     floor_top = floor.origin[2] + floor.material.thickness
     deck_top = deck.origin[2] + deck.material.thickness
-    assert deck_top - floor_top == pytest.approx(40.0, abs=0.01)
+    rail_face = max(m.origin[2] for m in model.members)
+    assert rail_face - floor_top == pytest.approx(40.0, abs=0.01)
+    assert deck_top - floor_top == pytest.approx(42.0, abs=0.01)
+
+
+def test_module_depth_means_the_same_on_a_bay_and_a_frame():
+    """A frame's case depth is its module depth behind the rail face plus
+    the web; a bay's floor is its module depth behind the rail face."""
+    assert rack.case_depth(40.0) - rack.BODY_T == pytest.approx(40.0)
 
 
 def test_a_module_deeper_than_the_bay_is_an_error():

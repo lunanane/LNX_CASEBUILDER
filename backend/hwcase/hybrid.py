@@ -17,11 +17,15 @@ What a bay adds to the box:
   bolts its cheeks too) and its top is trimmed to sit just under the deck,
   which rests on it;
 * the **rails**, bought by length, in the cut list;
-* a **module space**, the rail span by the rail stack by the module depth,
-  that nothing but the bay's own modules may enter.
+* a **module space**, the rail span by the rail stack, from the deck top
+  down to the module depth behind the rails, that nothing but the bay's own
+  modules may enter.
 
-The floor drops to the deepest bay's module depth below the deck, so module
-depth means what it means on a frame: clear room behind the module face.
+Module depth means what it means on a frame: clear room behind the module
+panel, measured from the rails' front face -- the back of the panel -- to the
+floor (a frame measures it to the inside of its body's web, `rack.case_depth`).
+So the floor's top sits the deepest bay's module depth below its rail face,
+and a module that fits a 40 mm frame fits a 40 mm bay.
 
 Frames: a bay's rack frame (x along the rails, y up the rows, z back from
 the rail face) is laid flat in the box's world -- rack x is world x, rack y
@@ -134,11 +138,11 @@ def build_hybrid(res, spec):
     bays = [place_bay(b, z1) for b in res.scene.racks]
 
     # the floor: under the hardware as a box puts it, and no higher than the
-    # deepest bay's module depth below the module faces
+    # deepest bay's module depth below its rails' front face
     zmin = res.bounds()[2]
     pcbs = [s.z[0] for s in res.solids if s.name == "pcb"]
     floor_top = min(zmin, (min(pcbs) if pcbs else zmin) - spec.floor_gap,
-                    min(z1 - b.spec.module_depth for b in bays))
+                    min(b.zr - b.spec.module_depth for b in bays))
 
     # the footprint: the hardware's, grown to hold every bay with its cheeks
     # inside the walls
@@ -248,7 +252,7 @@ def bay_issues(res, spec) -> list[tuple[str, str, str, list[str]]]:
             out.append(("error", "rack_bay",
                         f"bay {spec_bay.id} lists module {m!r}, which is not "
                         f"a placement", [spec_bay.id]))
-        zlo = z1 - spec_bay.module_depth
+        zlo = b.zr - spec_bay.module_depth
         space = b.aperture
         cheeks = b.cheek_footprints(t)
         reported: set[tuple[str, str]] = set()

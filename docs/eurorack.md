@@ -102,6 +102,14 @@ collide. Treat this whole section as `community`.
 | shallow case | ~40 mm usable |
 | standard / deep case | 50–60 mm usable |
 
+**How this repo measures it.** `module_depth` -- on a frame (`rack.module_depth`)
+and on a rack bay in a box case (`racks[].module_depth`) alike -- is the clear
+room *behind the module panel*: from the rails' front face, which is the back of
+the panel, to the inside of the frame's body web or the top of the box's floor.
+The panel's own 2 mm is not counted. A module that fits a 40 mm frame fits a
+40 mm bay. (The module panel designer's `eurorack_panel.module_depth` is still
+measured from the panel's face.)
+
 The power ribbon is the usual offender: a 16-way IDC plugged into a header
 standing ~9 mm off the PCB needs 15–20 mm behind the board before the cable will
 turn. Budget for the *cable*, not the connector.
