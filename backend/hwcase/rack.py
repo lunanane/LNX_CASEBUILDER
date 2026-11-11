@@ -69,6 +69,19 @@ RAIL_END_BORE = 4.4
 #: Clearance hole for that M5 in the side panel.
 M5_CLEAR = 5.0
 
+#: Thread an M5 needs in a tapped aluminium rail end: two diameters, the
+#: usual rule for a steel screw in a soft alloy.
+M5_ENGAGEMENT = 10.0
+
+#: Module fixings are bought by the row and not designed here, so they are
+#: an estimate: modules average about this wide...
+MODULE_HP_ESTIMATE = 8.0
+#: ...and take a screw at the top and the bottom of the panel (4 from 12 HP,
+#: which the average hides). An M3 goes through a 2 mm panel into a sliding
+#: nut about 3 mm thick.
+MODULE_PANEL_T = 2.0
+SLIDING_NUT_T = 3.0
+
 # --------------------------------------------------------------------------
 # the body
 # --------------------------------------------------------------------------
@@ -186,6 +199,13 @@ def resolve_margin(margin: float | None = None,
 #: spans the full case width and each end takes an M5 through the panel, so
 #: the panel's inner face is where the rail stops.
 SIDE_PANEL_T = 5.0
+
+#: The sheet a U-channel frame's side panels are cut from. Every cut plate of
+#: a frame carries its sheet (`Member.stock`), so the side-panel SVG, the
+#: packed sheets and the test coupon all cut it at the same kerf.
+U_PANEL_MATERIAL = Material(name=f"acrylic-{SIDE_PANEL_T:g}mm",
+                            thickness=SIDE_PANEL_T, kerf=0.15,
+                            color="#d8dde3")
 
 #: How far the sheet slot reaches forward from the rail's back face -- and so
 #: how far the body's flange enters the rail.
@@ -463,22 +483,56 @@ class RackModel:
                 2 * body_flange(self.module_depth) + self.web, 1),
         }
 
+    def rail_screw_length(self) -> float:
+        """The M5 that holds a rail: through the side panel and
+        `M5_ENGAGEMENT` into the tapped rail end, rounded up to stock."""
+        from .fasteners import fastener
+        return fastener("M5").bolt_length(self.panel_t + M5_ENGAGEMENT)
+
+    def module_fixings(self) -> list[dict[str, float | int | str]]:
+        """An estimate per row of the M3s and sliding nuts its modules take.
+
+        Not designed -- what goes in a row is the user's choice -- so it is
+        sized by HP at `MODULE_HP_ESTIMATE` per module and two screws each,
+        and always labelled an estimate.
+        """
+        import math
+
+        from .fasteners import fastener
+        m3 = fastener("M3")
+        length = m3.bolt_length(MODULE_PANEL_T + SLIDING_NUT_T)
+        out = []
+        for i, r in enumerate(self.rows):
+            n = 2 * math.ceil(self.hp / MODULE_HP_ESTIMATE)
+            out.append({"row": i + 1, "format": r.fmt.name, "hp": self.hp,
+                        "screws": n, "screw": f"M3x{length:g}",
+                        "strip_mm": round(self.width, 1)})
+        return out
+
     def bill_of_materials(self) -> dict[str, int | float]:
+        screws = 2 * len(self.rails)
         if self.style != "laser":
-            return {
+            out: dict[str, int | float] = {
                 "rail mm": round(self.width, 2) * len(self.rails),
                 "rails": len(self.rails),
                 "body mm": round(self.width, 2),
                 "side panels": 2,
-                "M5 screws": 2 * len(self.rails),
+                "M5 screws": screws,
             }
-        out: dict[str, int | float] = {
-            "rail mm": round(self.width, 2) * len(self.rails),
-            "rails": len(self.rails),
-            "side panels": 2,
-            "plates": len([m for m in self.members if m.kind == "plate"]),
-            "M5 screws": 2 * len(self.rails),
-        }
+        else:
+            out = {
+                "rail mm": round(self.width, 2) * len(self.rails),
+                "rails": len(self.rails),
+                "side panels": 2,
+                "plates": len([m for m in self.members if m.kind == "plate"]),
+                "M5 screws": screws,
+            }
+        out["M5 screw length mm"] = self.rail_screw_length()
+        fix = self.module_fixings()
+        if fix:
+            n = sum(int(f["screws"]) for f in fix)
+            out[f"{fix[0]['screw']} module screws (estimate)"] = n
+            out["M3 sliding nuts (estimate)"] = n
         for j in self.joints:
             for item, n in j.bom().items():
                 out[item] = out.get(item, 0) + n
@@ -745,6 +799,7 @@ def build(rows: list[RowFormat], hp: float, inserts_per_row: int = 0,
             axis="x",
             material="acrylic",
             holes=list(holes),
+            stock=U_PANEL_MATERIAL,
             notes=[f"{len(holes)} x M5 into rail ends"],
         ))
 
@@ -1024,3 +1079,79 @@ def build_spec(spec) -> RackModel:
                  joint=getattr(spec, "joint", "tslot"),
                  top_plate=getattr(spec, "top_plate", True),
                  fastener=getattr(spec, "fastener", "M3"))
+
+
+# --------------------------------------------------------------------------
+# what is wrong with a frame, as issues the editor lists
+# --------------------------------------------------------------------------
+
+#: Below this, a module and its power cable do not fit even a skiff
+#: (docs/eurorack.md section 5: "skiff friendly" is 25 mm, cable included).
+MIN_MODULE_DEPTH = 25.0
+
+
+def laser_min_sheet(joint: str, fastener: str = "M3") -> float:
+    """The thinnest sheet a laser frame's joints hold in.
+
+    A T-slot's nut stands in the edge of the plate with its flats against the
+    trap's two walls, and those walls are as deep as the sheet is thick. Less
+    than half the nut's width across flats in the sheet and the nut tilts out
+    of its trap the first time the bolt is driven. A glued finger joint has
+    no such floor.
+    """
+    from .fasteners import fastener as _fastener
+    return _fastener(fastener).nut_af / 2 if joint == "tslot" else 0.0
+
+
+def frame_issues(spec, model: RackModel, stock=None) -> list:
+    """Everything about a built frame the maker should hear before cutting.
+
+    `spec` is the scene's `RackSpec`, `stock` its `case` spec (the plates
+    the frame's parts are packed onto). No refs: an issue's refs name
+    placements, and a frame has none to select.
+    """
+    from .scene import Issue
+
+    out: list = []
+    panel = getattr(spec, "panel", None)
+    for edge in ("bottom", "top"):
+        asked = getattr(panel, edge, PANEL_MARGIN) if panel is not None \
+            else PANEL_MARGIN
+        got = getattr(model.plan, edge)
+        if got > asked + 1e-6:
+            why = ("to fit the base and top plates under and over the rails"
+                   if model.style == "laser"
+                   else "to keep the M5 holes on the panel")
+            out.append(Issue(
+                "warning", "margin_raised",
+                f"{edge} margin raised from {asked:.2f} to {got:.2f} mm {why}",
+                []))
+
+    if model.style == "laser":
+        t = model.panel_t
+        fz = getattr(spec, "fastener", "M3") or "M3"
+        need = laser_min_sheet(model.joint, fz)
+        if t < need - 1e-6:
+            out.append(Issue(
+                "warning", "sheet_thin",
+                f"{t:g} mm sheet is thinner than the {need:g} mm a {fz} "
+                f"T-slot needs: under half the nut stands in the sheet, and "
+                f"it tilts out of its trap. Use {need:g} mm or more, or "
+                f"finger joints", []))
+
+    if model.module_depth < MIN_MODULE_DEPTH - 1e-6:
+        out.append(Issue(
+            "warning", "module_depth_shallow",
+            f"module depth {model.module_depth:g} mm is under "
+            f"{MIN_MODULE_DEPTH:g} mm: not even a skiff-friendly module and "
+            f"its power cable fit behind the panel", []))
+
+    if stock is not None:
+        from .export import pack_sheets
+        from .flat import from_rack
+        for part in from_rack(model):
+            try:
+                pack_sheets([part], stock=stock)
+            except ValueError as exc:
+                out.append(Issue("error", "plate_too_big", str(exc), []))
+    return out

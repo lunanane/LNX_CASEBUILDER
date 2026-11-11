@@ -306,6 +306,8 @@ def rack_to_json(model) -> dict:
     are a rotation. Send depth to +Z instead and the basis becomes a
     reflection -- every member renders inside out.
     """
+    from .rack import LASER_MATERIAL
+
     def rings(geom):
         return [[list(c) for c in ring]
                 for poly in _polys(geom) for ring in _rings(poly)]
@@ -334,6 +336,12 @@ def rack_to_json(model) -> dict:
         "style": model.style,
         "joint": model.joint,
         "panel_t": model.panel_t,
+        # the sheet the plates are cut from, and the one a laser frame uses
+        # when the scene names none: the editor reads both from here rather
+        # than keeping its own copy
+        "sheet": _material_json(model.plates[0].stock) if model.plates
+        and model.plates[0].stock is not None else None,
+        "laser_sheet": _material_json(LASER_MATERIAL),
         "panel": {
             "top": model.plan.top, "bottom": model.plan.bottom,
             "front": model.plan.front, "back": model.plan.back,
@@ -362,7 +370,7 @@ def rack_to_json(model) -> dict:
     }
 
 
-def rack_panels_svg(model, apply_kerf: bool = True, kerf: float = 0.15) -> str:
+def rack_panels_svg(model, apply_kerf: bool = True) -> str:
     """The frame's cut plates, as one SVG ready for a laser.
 
     Only what is cut: the rails and the U-channel are bought as extrusion and
@@ -375,8 +383,13 @@ def rack_panels_svg(model, apply_kerf: bool = True, kerf: float = 0.15) -> str:
     document order, and an outline run early drops the part out of the sheet
     while its holes are still to come), and the y axis is flipped so the file
     reads the same way up as the 3D view.
+
+    The plates are the flat parts `rack_sheet_files` packs, so the two
+    exports cut the same sheet at the same kerf: each plate's own stock.
     """
-    panels = list(model.plates)
+    from .flat import from_rack
+
+    panels = from_rack(model)
     if not panels:
         raise ValueError("this frame has no side panels")
 
@@ -385,24 +398,24 @@ def rack_panels_svg(model, apply_kerf: bool = True, kerf: float = 0.15) -> str:
     max_x = max_y = 0.0
     dx = SHEET_MARGIN
     for i, panel in enumerate(panels):
-        geom = panel.cut if panel.cut is not None else panel.section
+        geom = panel.outline
         if apply_kerf:
-            geom = kerf_compensated(
-                geom, panel.stock.kerf if panel.stock is not None else kerf)
+            geom = kerf_compensated(geom, panel.material.kerf)
         geom = translate(geom, dx, SHEET_MARGIN)
         x0, y0, x1, y1 = geom.bounds
         max_x, max_y = max(max_x, x1), max(max_y, y1)
         holes, outlines = _holes_then_outlines(geom)
-        label = (f"{panel.name} -- {panel.material}, "
+        mat = panel.material.name
+        label = (f"{panel.name} -- {mat}, "
                  f"{x1 - x0:.1f} x {y1 - y0:.1f} mm")
         heads.append(
             f'<g id="{panel.name}-holes" data-pass="holes" '
-            f'data-material="{panel.material}">\n'
+            f'data-material="{mat}">\n'
             f'  <title>{label} -- inner cuts first</title>\n  '
             + "\n  ".join(_ring_path(r) for r in holes) + "\n</g>")
         tails.append(
             f'<g id="{panel.name}-outline" data-pass="outline" '
-            f'data-material="{panel.material}">\n'
+            f'data-material="{mat}">\n'
             f'  <title>{label} -- outer edge, cut last</title>\n  '
             + "\n  ".join(_ring_path(r) for r in outlines) + "\n</g>")
         dx = max_x + SHEET_MARGIN
@@ -791,6 +804,11 @@ def sheet_manifest(sheets: list[PackedSheet], stock) -> str:
                 f"  {pl.part.labels.listing} {x1 - x0:6.1f} x {y1 - y0:6.1f} mm"
                 f"{'  (rotated 90)' if pl.rotated else ''}"
                 f"{'  (MIRRORED: install engraved face down)' if pl.mirrored else ''}")
+            # what the part's builder said about it -- standoff lengths,
+            # bolt positions, channels cut -- belongs on the paper at the
+            # bench, not only in the editor
+            for note in pl.part.notes:
+                lines.append(f"      - {note}")
         lines.append("")
     return "\n".join(lines)
 
@@ -813,11 +831,36 @@ def sheet_files(source, fmt: str, basename: str = "case", stock=None
         files.append((f"{basename}-cutlist.txt",
                       box_cutlist(source, sheets, stock)))
         return files
+    from .case import CaseModel
+
     sheets = pack_sheets(source, stock=stock)
     files = _sheet_texts(sheets, fmt, basename)
-    files.append((f"{basename}-cutlist.txt",
-                  sheet_manifest(sheets, stock if stock is not None else source)))
+    text = sheet_manifest(sheets, stock if stock is not None else source)
+    if isinstance(source, CaseModel):
+        text = case_cutlist(source, text)
+    files.append((f"{basename}-cutlist.txt", text))
     return files
+
+
+def case_cutlist(model, manifest: str) -> str:
+    """A layered case's cut list: the sheets, then what is bought to put
+    them together -- the case bolts, the board screws and their nuts."""
+    lines = [manifest]
+    bought = model.hardware
+    if bought or model.hardware_notes:
+        lines += ["fixings:"]
+        lines += [f"  {n} x {item}" for item, n in bought.items()]
+        if any(k.endswith(" screw") for k in bought):
+            lines.append("  board screws: one per mounting hole, from the "
+                         "plate the head bears on through the board, nut on "
+                         "the board's far face")
+        lines += [f"  {n}" for n in model.hardware_notes]
+        lines.append("")
+    if model.assembly:
+        lines += ["assembly order:"]
+        lines += [f"  {s}" for s in model.assembly]
+        lines.append("")
+    return "\n".join(lines)
 
 
 def _sheet_texts(sheets: list[PackedSheet], fmt: str, basename: str
@@ -847,7 +890,9 @@ def _sheet_texts(sheets: list[PackedSheet], fmt: str, basename: str
 def rack_cutlist(model, sheets: list[PackedSheet], stock) -> str:
     """The frame's cut list: the sheets, then the plates measured from their
     datum edge, then the rails, the M5s and the U-channel order."""
+    from .fasteners import TAP_DRILL
     from .flat import from_rack
+    from .rack import M5_ENGAGEMENT, MODULE_HP_ESTIMATE, RAIL_END_BORE
 
     plates = from_rack(model)
     rows = " + ".join(r.fmt.name for r in model.rows)
@@ -880,13 +925,28 @@ def rack_cutlist(model, sheets: list[PackedSheet], stock) -> str:
     lines += [
         "",
         "fixings:",
-        f"  {2 * len(rails)} x M5 screw -- one through a side panel into "
-        f"each end of each of the {len(rails)} rails",
+        f"  {2 * len(rails)} x M5 screw, {model.rail_screw_length():g} mm "
+        f"long -- one through a side panel into each end of each of the "
+        f"{len(rails)} rails ({model.panel_t:g} mm panel + "
+        f"{M5_ENGAGEMENT:g} mm of thread, rounded up to stock)",
+        f"  tap both ends of every rail M5: the {RAIL_END_BORE:g} mm end "
+        f"channel takes the tap as it is; a solid rail end is drilled "
+        f"{TAP_DRILL['M5']:g} mm first",
     ]
     # a laser frame's joints: bolts by length, and their captive nuts
     for item, n in model.bill_of_materials().items():
         if item.endswith((" bolt", " nut")):
             lines.append(f"  {n} x {item}")
+    fix = model.module_fixings()
+    if fix:
+        lines += ["", "module fixings (an ESTIMATE -- count your modules' "
+                      f"holes: about one module per {MODULE_HP_ESTIMATE:g} HP, "
+                      f"two screws each, four from 12 HP):"]
+        for f in fix:
+            lines.append(
+                f"  row {f['row']} ({f['format']}, {f['hp']:g} HP): "
+                f"~{f['screws']} x {f['screw']} screw + ~{f['screws']} x M3 "
+                f"sliding nut, or 2 x M3 threaded strip {f['strip_mm']:g} mm")
     order = model.order_spec()
     if order is not None:
         lines += [

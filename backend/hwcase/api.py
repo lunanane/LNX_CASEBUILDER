@@ -262,11 +262,15 @@ STARTER = """# A new scene.
 #   panels:
 #     - name: main
 #       from_ref: <placement>.<volume>
+#
+# The stack is held by an M3 bolt near each corner: head in the lid, nut in
+# a hex trap in the floor. The cut list gives the bolt length.
 
 name: {name}
 placements: []
 case:
   style: layered
+  case_screws: corners
   materials:
     - {{name: plywood-3mm, thickness: 3.0, kerf: 0.15, sheet: [600.0, 400.0], color: "#c8a165"}}
   wall: 8.0
@@ -563,9 +567,16 @@ def post_build(scene: Scene = Body(...)):
     # format, not from the hardware -- so it takes the other builder entirely.
     if scene.kind == "rack":
         try:
-            return JSONResponse(export.rack_to_json(rack_mod.build_spec(scene.rack)))
+            frame = rack_mod.build_spec(scene.rack)
         except (KeyError, ValueError) as exc:
             raise HTTPException(400, str(exc))
+        payload = export.rack_to_json(frame)
+        # a frame has no resolve step, so its issues ride on the build
+        payload["issues"] = [
+            {"level": i.level, "code": i.code, "message": i.message,
+             "refs": i.refs}
+            for i in rack_mod.frame_issues(scene.rack, frame, scene.case)]
+        return JSONResponse(payload)
     lib = _lib_for(scene)
     try:
         res = resolve(scene, lib)
@@ -670,6 +681,48 @@ def export_sheets(fmt: str, scene: Scene = Body(...), as_json: bool = False):
     from fastapi.responses import Response
     return Response(buf.getvalue(), media_type="application/zip", headers={
         "Content-Disposition": f'attachment; filename="{base}-sheets-{fmt}.zip"',
+    })
+
+
+@app.post("/api/export/coupon/{fmt}")
+def export_coupon(fmt: str, scene: Scene = Body(...), as_json: bool = False):
+    """A test coupon per material, cut at the scene's kerf and clearance.
+
+    The job to run before the real one: a measured square, an M3 hole, a
+    T-slot and a finger-joint pair, each labelled with the values it was cut
+    at. Same answer shapes as the sheets export.
+    """
+    from . import coupon
+    from .flat import from_rack
+
+    if fmt not in ("svg", "dxf"):
+        raise HTTPException(400, "format is svg or dxf")
+    base = re.sub(r"[^A-Za-z0-9._-]+", "-", scene.name or "case").strip("-") or "case"
+    base += "-coupon"
+    try:
+        if scene.kind == "rack":
+            # the frame's own sheet -- the one its plates are cut from
+            frame = rack_mod.build_spec(scene.rack)
+            materials = [p.material for p in from_rack(frame)]
+            bolt = getattr(scene.rack, "fastener", "M3") or "M3"
+        else:
+            materials = list(scene.case.materials)
+            bolt = scene.case.box_fastener if scene.case.style == "box" else "M3"
+        files = coupon.coupon_files(materials, fmt, scene.case, base, bolt)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(422, str(exc))
+    if as_json:
+        return {"sheets": [{"name": n, "content": c} for n, c in files],
+                "count": len(files) - 1}
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, content in files:
+            z.writestr(name, content)
+    return Response(buf.getvalue(), media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="{base}-{fmt}.zip"',
     })
 
 

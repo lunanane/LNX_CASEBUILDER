@@ -610,8 +610,12 @@ const MEMBER_STYLE = {
   plate:      { color: 0xc8a165, roughness: 0.78, metalness: 0.0, opacity: 1 },
 };
 
-/** The sheet a laser frame is cut from, unless the scene names one. */
-const LASER_SHEET = { name: 'plywood-5mm', thickness: 5, kerf: 0.15 };
+/** The sheet a laser frame is cut from, unless the scene names one: the
+ *  server's default, off the last build, so there is one copy of it. */
+function laserSheet() {
+  const m = state.caseModel?.kind === 'rack' ? state.caseModel : null;
+  return m?.laser_sheet || { name: 'plywood' };
+}
 
 function buildRack(model) {
   caseGroup.clear();
@@ -745,7 +749,7 @@ function renderFramePanel() {
   const laser = spec.style === 'laser';
   $('fr-style').value = laser ? 'laser' : 'u_channel';
   if (document.activeElement !== $('fr-sheet-t')) {
-    $('fr-sheet-t').value = spec.material?.thickness ?? LASER_SHEET.thickness;
+    $('fr-sheet-t').value = spec.material?.thickness ?? laserSheet().thickness ?? '';
   }
   $('fr-joint').value = spec.joint === 'finger' ? 'finger' : 'tslot';
   $('fr-top-plate').checked = spec.top_plate !== false;
@@ -1005,7 +1009,7 @@ function wireFramePanel() {
     spec.style = $('fr-style').value;
     if (spec.style === 'laser') {
       spec.inserts_per_row = 0;       // a back plate closes the insert slots
-      if (!spec.material) spec.material = { ...LASER_SHEET };
+      // no material written: the server cuts its default laser sheet
     }
     renderFramePanel();
     doResolve();
@@ -1015,7 +1019,7 @@ function wireFramePanel() {
     if (!Number.isFinite(v) || v < 1) return;
     edit('fr-sheet-t');
     const spec = rackSpec();
-    const was = spec.material || LASER_SHEET;
+    const was = spec.material || laserSheet();
     // the name carries the thickness, as the case's materials do
     const stem = (was.name || 'plywood').replace(/-[\d.]+mm$/, '');
     spec.material = { ...was, name: stem + '-' + v + 'mm', thickness: v };
@@ -1280,6 +1284,8 @@ async function refreshCase() {
     if (state.caseModel && state.caseModel.kind === 'rack') {
       buildRack(state.caseModel);
       renderFramePanel();
+      // a frame has no resolve step: its issues come back with the build
+      renderIssues(state.caseModel.issues || []);
       return;
     }
     buildCase(state.caseModel);
@@ -1291,7 +1297,10 @@ async function refreshCase() {
     // added, the rebuild failed, and nothing on screen moved.
     console.warn('case build failed', err);
     status('build failed: ' + err.message, 'err');
-    if (state.scene && state.scene.kind === 'rack') renderFramePanel();
+    if (state.scene && state.scene.kind === 'rack') {
+      renderFramePanel();
+      renderIssues([{ level: 'error', code: 'build', message: err.message }]);
+    }
   }
 }
 
@@ -1423,6 +1432,28 @@ function renderMaterials() {
       refreshCase();
     };
     list.appendChild(row);
+    // the fit: measured on a test coupon (file > export test coupon), and
+    // what every outline offset and every joint is cut from
+    const fit = document.createElement('div');
+    fit.className = 'matrow fit';
+    fit.innerHTML =
+      `<label title="width of the cut the beam takes, mm">kerf</label>` +
+      `<input type="number" step="0.01" min="0" value="${m.kerf ?? 0.15}">` +
+      `<label title="gap left between a tab and its slot, mm: 0 press fit, 0.1 slides">joint clearance</label>` +
+      `<input type="number" step="0.01" min="0" value="${m.joint_clearance ?? 0.1}">`;
+    const [kerf, clear] = fit.querySelectorAll('input');
+    const fitField = (el, key) => {
+      el.onchange = () => {
+        const v = parseFloat(el.value);
+        if (!Number.isFinite(v) || v < 0) { el.value = m[key] ?? ''; return; }
+        edit();
+        m[key] = v;
+        refreshCase();
+      };
+    };
+    fitField(kerf, 'kerf');
+    fitField(clear, 'joint_clearance');
+    list.appendChild(fit);
   });
   if (!mats.length) {
     list.insertAdjacentHTML('beforeend',
@@ -2871,11 +2902,11 @@ $('btn-svg-bar').onclick = () => $('btn-svg').click();
  *  through the ordinary save path. Both come from the same server-side
  *  packing, so the files are identical either way.
  */
-async function exportSheets(fmt) {
-  status('packing sheets…');
+async function exportSheets(fmt, route = 'sheets') {
+  status(route === 'coupon' ? 'cutting a test coupon…' : 'packing sheets…');
   try {
     if (window.showDirectoryPicker) {
-      const r = await api(`/api/export/sheets/${fmt}?as_json=true`,
+      const r = await api(`/api/export/${route}/${fmt}?as_json=true`,
         { method: 'POST', body: JSON.stringify(state.scene) });
       try {
         const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
@@ -2893,13 +2924,13 @@ async function exportSheets(fmt) {
         console.warn('directory picker unavailable, falling back to zip', err);
       }
     }
-    const rz = await fetch(`/api/export/sheets/${fmt}`, {
+    const rz = await fetch(`/api/export/${route}/${fmt}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(state.scene),
     });
     if (!rz.ok) throw new Error((await rz.text()).slice(0, 300));
     const saved = await saveBlob(await rz.blob(),
-      `${state.sceneName}-sheets-${fmt}.zip`, 'Cut sheets', 'application/zip');
+      `${state.sceneName}-${route}-${fmt}.zip`, 'Cut sheets', 'application/zip');
     status(saved.message, saved.ok ? 'ok' : '');
   } catch (err) {
     status(`export failed — ${err.message}`, 'err');
@@ -2908,6 +2939,8 @@ async function exportSheets(fmt) {
 
 $('btn-svg').onclick = async () => exportSheets('svg');
 $('btn-dxf').onclick = async () => exportSheets('dxf');
+// a small job per material at its kerf and clearance, cut before the real one
+$('btn-coupon').onclick = async () => exportSheets('svg', 'coupon');
 
 const turnSelection = (dir) => {
   const pl = movableRoot(state.selection);

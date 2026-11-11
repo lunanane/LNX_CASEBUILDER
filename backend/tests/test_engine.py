@@ -1727,8 +1727,15 @@ def test_case_bolts_go_through_every_layer(demo):
             f"layer {layer.index} is missing bolt holes"
 
 
-def test_case_bolts_are_countersunk_at_both_faces(demo):
+def test_case_bolts_are_counterbored_in_the_lid_and_trapped_in_the_floor(demo):
+    """The head sinks into the lid; the floor holds the nut in a hexagon, so
+    it cannot spin while the bolt is driven from the top."""
     import math
+
+    from shapely.geometry import Polygon
+
+    from hwcase.case import NUT_TRAP_CLEARANCE
+    from hwcase.fasteners import fastener
 
     spec = demo.scene.case.model_copy(update={"case_screws": "corners"})
     model = build(demo, spec)
@@ -1748,7 +1755,16 @@ def test_case_bolts_are_countersunk_at_both_faces(demo):
     head = math.pi * (spec.case_screw_head / 2) ** 2
     assert head > shank
     assert smallest_round_hole(mid) == pytest.approx(shank, rel=0.02)
-    assert smallest_round_hole(model.layers[0]) == pytest.approx(head, rel=0.02)
+    assert smallest_round_hole(model.layers[-1]) == pytest.approx(head, rel=0.02)
+
+    af = fastener("M3").nut_af + NUT_TRAP_CLEARANCE
+    hexes = [Polygon(r) for p in _all_pieces(model.layers[0].geom)
+             for r in p.interiors
+             if Polygon(r).area == pytest.approx(math.sqrt(3) / 2 * af ** 2)]
+    assert len(hexes) == 4
+    for h in hexes:
+        x0, y0, x1, y1 = h.bounds
+        assert y1 - y0 == pytest.approx(af)          # across the flats
 
 
 def test_case_bolts_sit_inside_the_wall(demo):

@@ -924,7 +924,8 @@ def test_m7_row6_one_m3_nut_per_t_slot_bolt():
 
 def test_m7_finger_joints_need_no_hardware():
     bom = _laser(joint="finger").bill_of_materials()
-    assert not any("nut" in k or "bolt" in k for k in bom)
+    # no joint hardware; the module fixings' sliding nuts are not the joints'
+    assert not any(k.endswith((" bolt", " nut")) for k in bom)
 
 
 def test_m7_margins_rise_to_fit_the_plates_and_say_so():

@@ -58,16 +58,31 @@ class Fastener:
 
 #: Keyed by name. Add a row to support another size; nothing else changes.
 FASTENERS: dict[str, Fastener] = {
+    # the board screws: a Pico or a Feather hole takes M2 or M2.5
+    "M2": Fastener("M2", thread_d=2.0, clearance_d=2.4, nut_af=4.0,
+                   nut_t=1.6, thread_past_nut=0.8,
+                   lengths=(4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 20.0)),
     "M2.5": Fastener("M2.5", thread_d=2.5, clearance_d=2.9, nut_af=5.0,
                      nut_t=2.0, thread_past_nut=0.9,
-                     lengths=(6.0, 8.0, 10.0, 12.0, 16.0, 20.0)),
+                     lengths=(6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0)),
+    # through-bolts for a layered stack run long: up to 60 mm is stocked
     "M3": Fastener("M3", thread_d=3.0, clearance_d=3.4, nut_af=5.5,
                    nut_t=2.4, thread_past_nut=1.0,
-                   lengths=(6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0)),
+                   lengths=(6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0,
+                            35.0, 40.0, 45.0, 50.0, 60.0)),
     "M4": Fastener("M4", thread_d=4.0, clearance_d=4.5, nut_af=7.0,
                    nut_t=3.2, thread_past_nut=1.4,
                    lengths=(8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0)),
+    # a Eurorack frame's rails take an M5 in each end, into a tapped bore
+    "M5": Fastener("M5", thread_d=5.0, clearance_d=5.5, nut_af=8.0,
+                   nut_t=4.7, thread_past_nut=1.6,
+                   lengths=(8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0, 35.0,
+                            40.0)),
 }
+
+#: Tap drill per thread (ISO coarse: diameter minus pitch).
+TAP_DRILL: dict[str, float] = {"M2": 1.6, "M2.5": 2.05, "M3": 2.5,
+                               "M4": 3.3, "M5": 4.2}
 
 
 def fastener(name: str) -> Fastener:
