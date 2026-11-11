@@ -156,19 +156,15 @@ def panel_plane(res, spec) -> float:
 
 def build_box(res, spec, deck_top: Optional[float] = None,
               floor_top: Optional[float] = None, outer=None,
-              deck_cuts=(), extra=None, inside=frozenset(),
-              deck_fill=()) -> BoxModel:
+              deck_cuts=(), extra=None, deck_fill=()) -> BoxModel:
     """The box around a resolved scene.
 
     `deck_top`, `floor_top`, `outer` and `deck_cuts` let a caller (M10's rack
     bays) fix the deck's height, the box's footprint and cut extra openings;
     `deck_fill` is deck restored before those cuts -- a bay's footprint,
-    where its modules' own panel cutouts would otherwise bite into the
-    strip of deck its cheeks join;
+    so no other cutout bites into the strip of deck its cheeks join;
     `extra(box_parts)` is called before the joints are cut, to add plates and
-    joints of its own. `inside` names placements whose ports never open the
-    box's walls -- a bay's modules, which are patched from the front. Left
-    alone, everything follows from the hardware.
+    joints of its own. Left alone, everything follows from the hardware.
     """
     from .case import _layer_geometry, outer_shape
 
@@ -246,7 +242,7 @@ def build_box(res, spec, deck_top: Optional[float] = None,
     }
     openings: dict[str, list[Polygon]] = {w: [] for w in wall_frames}
     for wc in res.connectors:
-        if not wc.cuts_the_wall or wc.placement in inside:
+        if not wc.cuts_the_wall:
             continue
         key = (round(wc.face_normal[0]), round(wc.face_normal[1]))
         wall = _WALL_OF_NORMAL.get(key)
@@ -257,8 +253,6 @@ def build_box(res, spec, deck_top: Optional[float] = None,
             spec.part_clearance))
         notes.append(f"{wall} wall: opening for {wc.ref} ({wc.conn.type})")
     for so in res.side_openings:
-        if so.placement in inside:
-            continue
         wall = _WALL_OF_FACE.get(so.side.value)
         if wall is None:
             continue
@@ -451,8 +445,7 @@ def box_cutlist(model: BoxModel, sheets, stock) -> str:
     for bay in model.extras.get("bays", []):
         lines += ["", f"bay {bay['id']}: {bay['hp']:g} HP, rails "
                   f"{bay['width']:.2f} mm long, module depth "
-                  f"{bay['module_depth']:g} mm, modules: "
-                  f"{', '.join(bay['modules']) or 'none listed'}"]
+                  f"{bay['module_depth']:g} mm"]
     if hardware:
         lines += ["", "fixings and bought parts:"]
         lines += [f"  {v:g} x {k}" if not k.endswith(" mm")

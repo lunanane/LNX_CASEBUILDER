@@ -1,9 +1,9 @@
 # A Eurorack hybrid: a rack bay and Adafruit boards in one laser-cut box.
 #
-# The left of the deck is a 28 HP, 3U Eurorack bay. The AMYboard sits in it
-# as a module -- its own 10 HP panel resting on the rails -- with 18 HP to
-# spare for other modules. The module faces are the case's upper surface
-# (decision D-3), so the deck around the bay is flush with them.
+# The left of the deck is a 28 HP, 3U Eurorack bay: rails, the opening and
+# the room behind it, kept clear for whatever modules are screwed in later.
+# The module faces are the case's upper surface (decision D-3), so the deck
+# around the bay is flush with them.
 #
 # The right of the deck is two NeoTrellis boards side by side, each with its
 # elastomer 4x4 pad: 32 buttons whose tops are flush with the same surface,
@@ -13,12 +13,12 @@
 # bay's 40 mm module depth behind the rails' front face, so a module has 40 mm
 # of clear room behind its panel, as it would in a 40 mm frame.
 
-name: hybrid-trellis-amyboard
+name: hybrid-trellis-28hp
 
 panels:
 - name: main
   z: 0.0
-  note: "The module faces and the button tops -- the case's upper surface."
+  note: "The button tops and the module faces -- the case's upper surface."
 
 racks:
 - id: bay
@@ -28,25 +28,8 @@ racks:
   - {format: 3U}
   module_depth: 40.0
   module_panel_t: 2.0
-  # placed by slot: the AMYboard (and the panel mated to it) goes on the
-  # rails at 0 HP from the left end, row 0 -- no hand-computed position
-  modules:
-  - {id: amy, hp_slot: 0, row: 0}
 
 placements:
-# --- the module: AMYboard behind its own 10 HP panel ----------------------
-- id: amy
-  part: shorepine-amyboard
-  pos: [0.0, 0.0, 0.0]       # the bay puts it on its slot
-  on_panel: main
-  panel_ref: face            # its panel's face is the module face
-  support: none              # a module hangs from the rails, not the box
-- id: amy_panel
-  part: shorepine-amyboard-panel
-  parent: amy
-  parent_mate: panel
-  mate: board
-
 # --- 4 x 8 buttons: two NeoTrellis with elastomer pads ---------------------
 - id: trellis_a
   part: adafruit-3954-neotrellis

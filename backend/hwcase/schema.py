@@ -20,7 +20,7 @@ All lengths are millimetres. All angles are degrees.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -985,29 +985,14 @@ class RackSpec(Strict):
     fastener: str = "M3"
 
 
-class BayModule(Strict):
-    """A module in a rack bay, placed by its slot rather than by coordinates.
-
-    The engine moves the placement -- and whatever is mated to it -- so that
-    its panel's left edge lands `hp_slot` HP from the rails' left end and the
-    panel is centred on row `row`'s rails: the grid a module's screws find on
-    a real rail, so nothing is computed by hand and nothing drifts off it.
-    """
-
-    #: the placement that is the module; whatever is mated to it comes along
-    id: str
-    #: 0-based, in HP, from the rails' left end
-    hp_slot: int = Field(0, ge=0)
-    #: 0-based, bottom to top, into the bay's `rows`
-    row: int = Field(0, ge=0)
-
-
 class RackBay(Strict):
     """Eurorack rails set into a box case's deck, beside the other boards.
 
-    The module faces are the case's upper surface: modules rest on the
-    rails, so the rails sit `module_panel_t` below the deck top and the deck
-    is flush with the modules. See `hwcase.hybrid`.
+    The bay is rails, an opening and clear room behind it, kept for whatever
+    modules are screwed in later; the modules themselves are not modelled.
+    Their faces are the case's upper surface: they rest on the rails, so the
+    rails sit `module_panel_t` below the deck top and the deck is flush with
+    them. See `hwcase.hybrid`.
     """
 
     id: str = "bay"
@@ -1026,14 +1011,10 @@ class RackBay(Strict):
     #: how thick the modules' panels are -- the rails sit this far below the
     #: deck top so the module faces end up flush with it (D-3)
     module_panel_t: float = Field(2.0, gt=0)
-    #: The modules in this bay: they may enter its module space, and nothing
-    #: else may. `{id, hp_slot, row}` places a module by its slot; a bare id
-    #: is a module placed by hand with `pos`, which is still checked against
-    #: the bay's grid. Either way whatever is mated to it belongs to it too.
-    modules: list[Union[str, BayModule]] = Field(default_factory=list)
-
-    def module_ids(self) -> list[str]:
-        return [m if isinstance(m, str) else m.id for m in self.modules]
+    #: Retired: a bay once listed the placements that were its modules. The
+    #: key still loads, so an old scene file opens, but the list is ignored
+    #: -- the check says so -- and nothing may enter a bay's space.
+    modules: Optional[list[Any]] = Field(None, exclude_if=lambda v: v is None)
 
 
 class ViewSettings(Strict):
@@ -1066,8 +1047,9 @@ class Scene(Strict):
     kind: Literal["parts", "rack"] = "parts"
     #: `kind: rack` only.
     rack: RackSpec = Field(default_factory=RackSpec)
-    #: Eurorack bays set into a box case's deck: modules and boards in one
-    #: case. `kind: parts` with `case.style: box` only.
+    #: Eurorack bays set into a box case's deck: rails and room for modules
+    #: beside the boards, in one case. `kind: parts` with `case.style: box`
+    #: only.
     racks: list[RackBay] = Field(default_factory=list)
     anchor: Optional[str] = None       # placement id that defines the origin
     #: Parts carried by the scene itself, shadowing the shared library by id.

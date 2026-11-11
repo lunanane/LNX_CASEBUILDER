@@ -533,12 +533,6 @@ def resolve(scene: Scene, lib: PartLibrary) -> Resolved:
                            rot_z=f.rot_z, tilt=f.tilt)
                   for k, f in frames.items()}
 
-    # a rack bay's modules listed by slot go onto their slots: XY only, so
-    # nothing the panels solve below depends on it
-    if scene.racks:
-        from .hybrid import seat_modules
-        seat_modules(scene, lib, frames)
-
     # panels are world planes, so they are solved after the anchor shift, and
     # the placements that ride on them are slid into place after that
     panels, panel_issues = _resolve_panels(scene, lib, frames, by_id)
@@ -965,10 +959,10 @@ def check(res: Resolved, lib: PartLibrary) -> list[Issue]:
             except ValueError as exc:
                 issues.append(Issue("error", "pcb", str(exc), []))
 
-    # 8. rack bays: modules fit their bay, nothing else enters it
+    # 8. rack bays: where they are, and nothing enters one
     if res.scene.racks:
         from .hybrid import bay_issues
-        for level, code, message, refs in bay_issues(res, res.scene.case, lib):
+        for level, code, message, refs in bay_issues(res, res.scene.case):
             issues.append(Issue(level, code, message, refs))
     return issues
 

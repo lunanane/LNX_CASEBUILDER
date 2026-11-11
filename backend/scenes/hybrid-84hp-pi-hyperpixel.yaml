@@ -6,8 +6,8 @@
 # panel's thickness -- 2 mm -- under the deck top, and the floor sits the
 # bay's 40 mm module depth behind the rails' front face.
 #
-# The bay is empty: 84 HP of rails waiting for modules. A module goes in by
-# slot, e.g. `modules: [{id: amy, hp_slot: 0, row: 0}]`.
+# The bay is 84 HP of rails waiting for modules: whatever is bought later
+# is screwed in there, and no placement may enter its space.
 
 name: hybrid-84hp-pi-hyperpixel
 
@@ -24,7 +24,6 @@ racks:
   - {format: 3U}
   module_depth: 40.0
   module_panel_t: 2.0
-  modules: []
 
 placements:
 - id: pi

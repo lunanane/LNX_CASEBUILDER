@@ -1,7 +1,7 @@
 """M10: a Eurorack hybrid -- a rack bay and Adafruit boards in one box.
 
-The fixture is the builder's own final test: the AMYboard as a module in a
-28 HP bay, beside two NeoTrellis boards with their elastomer button pads.
+The fixture is an empty 28 HP bay -- rails and room for modules bought later
+-- beside two NeoTrellis boards with their elastomer button pads.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from hwcase.library import PartLibrary, load_scene
 from hwcase.scene import check, resolve
 
 LIB = PartLibrary.load()
-SCENE = Path(__file__).resolve().parents[1] / "scenes" / "hybrid-trellis-amyboard.yaml"
+SCENE = Path(__file__).resolve().parents[1] / "scenes" / "hybrid-trellis-28hp.yaml"
 
 
 def _scene(**changes):
@@ -71,14 +71,14 @@ def test_row1_the_hybrid_builds_with_no_errors(res, model):
 
 
 def test_row2_the_module_faces_are_the_upper_surface(res, model):
-    """D-3: the rails sit one module-panel thickness under the deck top,
-    and the module's own face lands on the deck top."""
+    """D-3: the rails sit one module-panel thickness under the deck top, so
+    a module screwed in later has its face flush with the deck -- and with
+    the buttons' tops."""
     deck = model.plate("deck")
     deck_top = deck.origin[2] + deck.material.thickness
     for rail in model.members:
         assert deck_top - rail.origin[2] == pytest.approx(2.0, abs=0.01)
-    face = max(s.z[1] for s in res.solids if s.placement == "amy_panel")
-    assert face == pytest.approx(deck_top, abs=0.01)
+    assert deck_top == pytest.approx(res.panels["main"], abs=0.01)
 
 
 def test_row3_a_board_dropped_into_the_module_space_is_an_error():
@@ -137,15 +137,14 @@ def test_row6_the_cut_list_has_the_rails_cheeks_and_deck(model):
     assert "4 x M5x12 screw" in cut
     assert "tapped" in cut or "tap each rail" in cut
     assert "M5 tap drill 4.2 mm" in cut
-    # the AMYboard is 10 HP: one column of holes, two screws and nuts
-    assert "2 x M3x6 module screw (estimate)" in cut
-    assert "2 x M3 sliding nut (estimate)" in cut
-    assert "bay bay: 28 HP" in cut
+    # what goes on the rails is bought later: no module fixings
+    assert "module screw" not in cut and "sliding nut" not in cut
+    assert "bay bay: 28 HP" in cut and "modules:" not in cut
     assert cut.count(" through the deck ") == 16      # 8 per NeoTrellis
 
 
 # --------------------------------------------------------------------------
-# what the builder asked for: buttons, a module, one surface
+# what the builder asked for: buttons, a bay, one surface
 # --------------------------------------------------------------------------
 
 
@@ -160,16 +159,15 @@ def test_the_deck_opens_for_all_32_buttons(res, model):
     assert len(buttons) == 32
 
 
-def test_the_module_drops_through_the_bay_aperture(res, model):
+def test_the_deck_is_open_over_the_rails(model):
+    """The aperture is the rail span by the rail stack: 28 HP of 3U."""
     x0, y0, _x1, _y1 = model.outer.bounds
     deck = translate(model.plate("deck").geom, x0, y0)
-    panel = next(s.poly for s in res.solids if s.placement == "amy_panel"
-                 and s.name == "pcb")
-    assert deck.intersection(panel).area < 0.01
-
-
-def test_a_modules_ports_never_open_the_box(model):
-    assert not [n for n in model.notes if "amy." in n]
+    (bay,) = model.extras["bays"]
+    ap = Polygon(bay["aperture"])
+    assert deck.intersection(ap.buffer(-0.5)).area < 0.01
+    ax0, ay0, ax1, ay1 = ap.bounds
+    assert ax1 - ax0 == pytest.approx(28 * 5.08, abs=0.01)
 
 
 def test_the_floor_gives_the_module_its_depth(model):
@@ -191,25 +189,11 @@ def test_module_depth_means_the_same_on_a_bay_and_a_frame():
     assert rack.case_depth(40.0) - rack.BODY_T == pytest.approx(40.0)
 
 
-def test_a_module_deeper_than_the_bay_is_an_error():
-    scene = _scene()
-    bay = scene.racks[0].model_copy(update={"module_depth": 20.0})
-    errors = _errors(scene.model_copy(update={"racks": [bay]}))
-    assert any(e.code == "module_depth" and "amy" in e.refs for e in errors)
-
-
 def test_a_bay_needs_a_box():
     scene = _scene()
     layered = scene.case.model_copy(update={"style": "layered"})
     errors = _errors(scene.model_copy(update={"case": layered}))
     assert any(e.code == "rack_bay" and "box" in e.message for e in errors)
-
-
-def test_a_module_that_is_not_a_placement_is_named():
-    scene = _scene()
-    bay = scene.racks[0].model_copy(update={"modules": ["amy", "ghost"]})
-    errors = _errors(scene.model_copy(update={"racks": [bay]}))
-    assert any("ghost" in e.message for e in errors)
 
 
 @pytest.mark.parametrize("joint", ["tslot", "finger"])
@@ -228,7 +212,7 @@ def test_the_editor_gets_plates_rails_and_the_bay(model):
     data = box_to_json(model)
     assert len(data["plates"]) == 8
     assert [m["role"] for m in data["members"]] == ["rail", "rail"]
-    assert data["extras"]["bays"][0]["modules"] == ["amy"]
+    assert "modules" not in data["extras"]["bays"][0]
     for p in data["plates"] + data["members"]:
         m = np.array(p["matrix"], float).reshape(4, 4)[:3, :3]
         assert np.linalg.det(m) == pytest.approx(1.0)
@@ -241,7 +225,7 @@ def test_the_command_line_builds_the_hybrid(tmp_path, capsys):
     names = [p.name for p in tmp_path.iterdir()]
     assert any(n.endswith(".svg") for n in names)
     assert any(n.endswith(".dxf") for n in names)
-    assert "hybrid-trellis-amyboard-cutlist.txt" in names
+    assert "hybrid-trellis-28hp-cutlist.txt" in names
     out = capsys.readouterr().out
     assert "8 plates" in out
 
@@ -311,7 +295,7 @@ def test_two_bays_side_by_side_are_an_issue_not_a_crash():
     bay's right cheek is."""
     scene = _scene()
     a = scene.racks[0]
-    b = a.model_copy(update={"id": "bay2", "modules": [],
+    b = a.model_copy(update={"id": "bay2",
                              "at": (a.at[0] + 28 * 5.08, a.at[1])})
     issues = check(resolve(_with_bays(a, b), LIB), LIB)
     hits = [i for i in issues if i.code == "rack_bay" and i.level == "error"
@@ -322,7 +306,7 @@ def test_two_bays_side_by_side_are_an_issue_not_a_crash():
 def test_two_bays_too_close_for_their_floor_slots_are_named():
     scene = _scene()
     a = scene.racks[0]
-    b = a.model_copy(update={"id": "bay2", "modules": [],
+    b = a.model_copy(update={"id": "bay2",
                              "at": (a.at[0] + 28 * 5.08 + 3.0 + 3.0 + 1.0,
                                     a.at[1])})
     issues = check(resolve(_with_bays(a, b), LIB), LIB)
@@ -333,7 +317,7 @@ def test_two_bays_too_close_for_their_floor_slots_are_named():
 def test_two_bays_far_enough_apart_build():
     scene = _scene()
     a = scene.racks[0]
-    b = a.model_copy(update={"id": "bay2", "modules": [], "hp": 8,
+    b = a.model_copy(update={"id": "bay2", "hp": 8,
                              "at": (a.at[0], a.at[1] - 200.0)})
     scene = _with_bays(a, b)
     res = resolve(scene, LIB)
@@ -352,121 +336,55 @@ def test_an_unknown_row_format_is_an_issue():
 def test_two_bays_with_one_id_are_named():
     scene = _scene()
     a = scene.racks[0]
-    b = a.model_copy(update={"modules": [], "at": (a.at[0], -250.0)})
+    b = a.model_copy(update={"at": (a.at[0], -250.0)})
     issues = check(resolve(_with_bays(a, b), LIB), LIB)
     assert any("two bays are called bay" in i.message for i in issues)
 
 
 
 # --------------------------------------------------------------------------
-# modules: by slot, on the grid
+# the bay is kept clear: no modules, no exceptions
 # --------------------------------------------------------------------------
 
-from hwcase.schema import BayModule  # noqa: E402
 
-
-def _panel_box(res, pid="amy_panel"):
-    return next(s.poly.bounds for s in res.solids
-                if s.placement == pid and s.name == "pcb")
-
-
-def _bay_errors(scene):
-    return [e for e in _errors(scene) if e.code == "rack_bay"]
-
-
-def _modules(*entries, **bay_changes):
+def test_any_placement_inside_a_bays_space_is_an_error():
+    """A board set down in the aperture, under the deck: there are no
+    modules to excuse it, so it is an error whatever it is."""
     scene = _scene()
-    bay = scene.racks[0].model_copy(update={"modules": list(entries),
-                                            **bay_changes})
-    return scene.model_copy(update={"racks": [bay]})
+    trellis = next(p for p in scene.placements if p.id == "trellis_a")
+    ghost = trellis.model_copy(update={"id": "intruder",
+                                       "pos": (30.0, 40.0, 0.0)})
+    pad = next(p for p in scene.placements if p.id == "pad_a")
+    errors = _errors(scene.model_copy(update={
+        "placements": scene.placements
+        + [ghost, pad.model_copy(update={"id": "pad_x",
+                                         "parent": "intruder"})]}))
+    hits = [e for e in errors if e.code == "rack_bay" and "intruder" in e.refs]
+    assert hits and "bay" in hits[0].refs
+    assert "module space" in hits[0].message
 
 
-def _second_amy(scene, pos=(0.0, 0.0, 0.0)):
-    amy = next(p for p in scene.placements if p.id == "amy")
-    panel = next(p for p in scene.placements if p.id == "amy_panel")
-    extra = [amy.model_copy(update={"id": "amy2", "pos": pos}),
-             panel.model_copy(update={"id": "amy2_panel", "parent": "amy2"})]
-    return scene.model_copy(update={"placements": scene.placements + extra})
+def test_an_old_scene_with_modules_still_loads_with_a_note(tmp_path):
+    """Bays once listed their modules. The key still loads, is ignored, and
+    each bay that has it says so, once."""
+    import yaml
 
-
-def test_a_module_is_placed_by_its_hp_slot():
-    """Slot 10 puts the panel's left edge 10 HP from the rails' left end and
-    centres it on the row's rails; its board comes along, however the scene
-    had it placed."""
-    res = resolve(_modules(BayModule(id="amy", hp_slot=10)), LIB)
-    x0, y0, _x1, y1 = _panel_box(res)
-    assert x0 == pytest.approx(10 * 5.08, abs=1e-6)
-    # 3U holes are 122.5 apart and 3.0 in from the panel's edges, so the
-    # panel's bottom edge is 2.0 under the bottom rail's slot centre (5.0)
-    assert y0 == pytest.approx(2.0, abs=1e-6)
-    assert y1 - y0 == pytest.approx(128.5, abs=1e-6)
-    board = _panel_box(res, "amy")
-    assert board[0] - x0 == pytest.approx(1.15, abs=1e-6)
-    assert [e for e in check(res, LIB) if e.level == "error"] == []
-
-
-def test_a_module_in_a_row_the_bay_does_not_have_is_named():
-    errors = _bay_errors(_modules(BayModule(id="amy", row=1)))
-    assert any("row 1" in e.message and "1 row" in e.message for e in errors)
-
-
-def test_a_module_running_past_the_rails_is_named():
-    errors = _bay_errors(_modules(BayModule(id="amy", hp_slot=20)))
-    assert any("past the end" in e.message and "amy" in e.refs
-               for e in errors)
-
-
-def test_two_modules_in_one_slot_overlap():
-    scene = _second_amy(_modules(BayModule(id="amy", hp_slot=0),
-                                 BayModule(id="amy2", hp_slot=5)))
-    errors = _bay_errors(scene)
-    assert any("overlap" in e.message and {"amy", "amy2"} <= set(e.refs)
-               for e in errors)
-
-
-def test_a_full_row_is_fine_and_one_more_hp_is_not():
-    scene = _second_amy(_modules(BayModule(id="amy", hp_slot=0),
-                                 BayModule(id="amy2", hp_slot=10), hp=20))
-    assert _bay_errors(scene) == []
-    scene = _second_amy(_modules(BayModule(id="amy", hp_slot=0),
-                                 BayModule(id="amy2", hp_slot=10), hp=19))
-    assert any("past the end" in e.message for e in _bay_errors(scene))
-
-
-def test_modules_listed_by_id_still_load_and_are_checked():
-    """The old form -- bare ids, the position typed by hand -- loads; on the
-    grid it is fine, 1.3 mm off it or out of the aperture it is an error."""
-    def free(dx=0.0, dy=0.0):
-        scene = _modules("amy", "amy_panel")
-        moved = [p.model_copy(update={"pos": (1.15 + dx, 13.35 + dy, 0.0)})
-                 if p.id == "amy" else p for p in scene.placements]
-        return scene.model_copy(update={"placements": moved})
-
-    assert _bay_errors(free()) == []
-    off = _bay_errors(free(dx=1.3))
-    assert any("1.30 mm off" in e.message and "hp_slot: 0" in e.message
-               for e in off)
-    high = _bay_errors(free(dx=5.08, dy=0.4))
-    assert any("off row 0's rails" in e.message for e in high)
-    # under the solid deck, beside the bay: nothing else catches this
-    gone = _bay_errors(free(dx=0.0, dy=-140.0))
-    assert any("not inside" in e.message for e in gone)
-
-
-def test_a_module_in_two_bays_is_named():
-    scene = _scene()
-    a = scene.racks[0]
-    b = a.model_copy(update={"id": "bay2", "at": (a.at[0], -250.0)})
-    errors = _bay_errors(scene.model_copy(update={"racks": [a, b]}))
-    assert any("more than one bay" in e.message for e in errors)
-
-
-def test_a_panel_thinner_than_the_bay_expects_is_a_warning():
-    """The AMYboard's 2 mm panel in a bay set for 3 mm panels: with its face
-    flush with the deck, its back stands a millimetre off the rails."""
-    res = resolve(_modules(BayModule(id="amy"), module_panel_t=3.0), LIB)
-    assert any(i.level == "warning" and "1.00 mm above the rails"
-               in i.message for i in check(res, LIB))
+    data = yaml.safe_load(SCENE.read_text(encoding="utf-8"))
+    data["racks"][0]["modules"] = [{"id": "amy", "hp_slot": 0, "row": 0},
+                                   "amy_panel"]
+    path = tmp_path / "old.yaml"
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    scene = load_scene(path)
+    res = resolve(scene, LIB)
+    issues = check(res, LIB)
+    notes = [i for i in issues if "no longer tracked" in i.message]
+    assert len(notes) == 1 and notes[0].level == "info"
+    assert notes[0].refs == ["bay"]
+    assert [i for i in issues if i.level == "error"] == []
+    # a scene without the key says nothing, and never writes it back
+    assert not [i for i in check(resolve(_scene(), LIB), LIB)
+                if "no longer tracked" in i.message]
+    assert "modules" not in _scene().model_dump(mode="json")["racks"][0]
 
 
 def test_the_m5_reaches_through_the_cheek_into_the_rail():
@@ -476,13 +394,10 @@ def test_the_m5_reaches_through_the_cheek_into_the_rail():
     assert m5_length(5.0) == 16.0
 
 
-def test_a_wide_module_counts_four_screws():
-    """12 HP and up: two columns of holes, four screws and sliding nuts."""
+def test_the_bay_bom_is_rails_and_their_m5s():
     from hwcase.hybrid import bay_bom
-    from hwcase.panel import hole_columns
 
-    assert len(hole_columns(10)) == 1 and len(hole_columns(12)) == 2
-    assert bay_bom(resolve(_scene(), LIB), [], [], 3.0) == {}
+    assert bay_bom([], 3.0) == {}
 
 
 def test_a_build_with_errors_writes_its_files_and_exits_1(tmp_path, capsys):
@@ -511,8 +426,7 @@ def test_a_build_the_builder_refuses_exits_1_not_a_traceback(tmp_path, capsys):
     from hwcase import cli
 
     data = yaml.safe_load(SCENE.read_text(encoding="utf-8"))
-    second = dict(data["racks"][0], id="bay2", modules=[],
-                  at=[28 * 5.08, 0.0])
+    second = dict(data["racks"][0], id="bay2", at=[28 * 5.08, 0.0])
     data["racks"].append(second)
     scene = tmp_path / "two.yaml"
     scene.write_text(yaml.safe_dump(data), encoding="utf-8")
@@ -631,14 +545,12 @@ def test_plan_row5_and_6_joints_validate_plates_fit_and_the_cut_list(
 def test_the_editor_gets_each_bay_to_draw_and_drag_before_a_build(res):
     from hwcase.hybrid import bays_json
 
-    (bay,) = bays_json(res, LIB)
+    (bay,) = bays_json(res)
     assert bay["hp"] == 28 and bay["x0"] == 0.0
     assert bay["z_top"] - bay["z_rail"] == pytest.approx(2.0)
     assert bay["z_rail"] - bay["z_floor"] == pytest.approx(40.0)
     assert len(bay["cheeks"]) == 2 and len(bay["rows"]) == 1
-    (mod,) = bay["modules"]
-    assert mod == {"id": "amy", "slot": 0, "row": 0, "hp": 10,
-                   "box": pytest.approx([0.0, 2.0, 50.5, 130.5])}
+    assert "modules" not in bay
     assert bay["rows"][0]["y_mid"] == pytest.approx(66.25)
 
 
