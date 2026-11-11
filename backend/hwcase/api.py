@@ -570,6 +570,9 @@ def post_resolve(scene: Scene = Body(...)):
     payload = export.scene_to_json(res, lib, issues)
     x0, y0, z0, x1, y1, z1 = res.bounds()
     payload["extent"] = {"min": [x0, y0, z0], "max": [x1, y1, z1]}
+    if scene.racks:
+        from .hybrid import bays_json
+        payload["bays"] = bays_json(res, lib)   # the editor's bay overlay
     return JSONResponse(payload)
 
 

@@ -546,6 +546,41 @@ def _module_issues(res, lib, spec_bay, b: Bay, z1: float):
     return out
 
 
+def bays_json(res, lib) -> list[dict]:
+    """Each bay as the editor draws and drags it, before any case is built:
+    aperture and cheeks (world XY), the deck top, rail face and floor (world
+    z), each row's centre line, and each listed module's slot, HP and panel
+    box. A box scene only; a bay that cannot be placed is left out."""
+    from .box import panel_plane
+
+    spec = res.scene.case
+    if spec.style != "box" or not res.scene.racks:
+        return []
+    t = spec.materials[0].thickness
+    z1 = panel_plane(res, spec)
+    out = []
+    for spec_bay in res.scene.racks:
+        try:
+            b = place_bay(spec_bay, z1)
+        except ValueError:
+            continue
+        out.append({
+            "id": spec_bay.id, "hp": spec_bay.hp, "x0": b.bx,
+            "width": b.width,
+            "aperture": list(b.aperture.bounds),
+            "cheeks": [list(c.bounds) for c in b.cheek_footprints(t)],
+            "z_top": z1, "z_rail": b.zr,
+            "z_floor": b.zr - spec_bay.module_depth,
+            "rows": [{"format": r.name, "y_mid": _slot_target(b, 0, i)[1]}
+                     for i, r in enumerate(b.rows)],
+            "modules": [{"id": mid, "slot": slot, "row": row, "hp": hp,
+                         "box": list(bounds)}
+                        for mid, slot, row, bounds, hp, _p
+                        in module_panels(res, lib, spec_bay)],
+        })
+    return out
+
+
 # --------------------------------------------------------------------------
 # checks
 # --------------------------------------------------------------------------

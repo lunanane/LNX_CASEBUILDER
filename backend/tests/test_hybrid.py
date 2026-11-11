@@ -626,3 +626,28 @@ def test_plan_row5_and_6_joints_validate_plates_fit_and_the_cut_list(
     for word in ("deck", "bay-cheek-left", "bay-cheek-right",
                  "2 x Eurorack rail, 426.72 mm (84 HP)"):
         assert word in cut
+
+
+def test_the_editor_gets_each_bay_to_draw_and_drag_before_a_build(res):
+    from hwcase.hybrid import bays_json
+
+    (bay,) = bays_json(res, LIB)
+    assert bay["hp"] == 28 and bay["x0"] == 0.0
+    assert bay["z_top"] - bay["z_rail"] == pytest.approx(2.0)
+    assert bay["z_rail"] - bay["z_floor"] == pytest.approx(40.0)
+    assert len(bay["cheeks"]) == 2 and len(bay["rows"]) == 1
+    (mod,) = bay["modules"]
+    assert mod == {"id": "amy", "slot": 0, "row": 0, "hp": 10,
+                   "box": pytest.approx([0.0, 2.0, 50.5, 130.5])}
+    assert bay["rows"][0]["y_mid"] == pytest.approx(66.25)
+
+
+def test_the_resolve_route_carries_the_bays():
+    from fastapi.testclient import TestClient
+
+    from hwcase.api import app
+
+    body = _scene().model_dump(mode="json")
+    r = TestClient(app).post("/api/resolve", json=body)
+    assert r.status_code == 200
+    assert r.json()["bays"][0]["id"] == "bay"
