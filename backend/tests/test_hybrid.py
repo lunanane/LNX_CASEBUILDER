@@ -483,3 +483,39 @@ def test_a_wide_module_counts_four_screws():
 
     assert len(hole_columns(10)) == 1 and len(hole_columns(12)) == 2
     assert bay_bom(resolve(_scene(), LIB), [], [], 3.0) == {}
+
+
+def test_a_build_with_errors_writes_its_files_and_exits_1(tmp_path, capsys):
+    """A board in the module space: the files are still written, to look
+    at, but the command does not report success."""
+    import yaml
+
+    from hwcase import cli
+
+    text = SCENE.read_text(encoding="utf-8").replace(
+        "pos: [220.0, 36.0, 0.0]", "pos: [60.0, 36.0, 0.0]")
+    assert "pos: [60.0, 36.0, 0.0]" in text
+    scene = tmp_path / "bad.yaml"
+    scene.write_text(text, encoding="utf-8")
+    assert yaml.safe_load(text)["name"]
+    assert cli.main(["build", str(scene), "-o", str(tmp_path / "o")]) == 1
+    assert any((tmp_path / "o").iterdir())
+    assert "errors -- run `check`" in capsys.readouterr().out
+
+
+def test_a_build_the_builder_refuses_exits_1_not_a_traceback(tmp_path, capsys):
+    """Two bays on top of each other: the builder cannot joint the cheeks,
+    and the command says why instead of raising."""
+    import yaml
+
+    from hwcase import cli
+
+    data = yaml.safe_load(SCENE.read_text(encoding="utf-8"))
+    second = dict(data["racks"][0], id="bay2", modules=[],
+                  at=[28 * 5.08, 0.0])
+    data["racks"].append(second)
+    scene = tmp_path / "two.yaml"
+    scene.write_text(yaml.safe_dump(data), encoding="utf-8")
+    assert cli.main(["build", str(scene), "-o", str(tmp_path / "o")]) == 1
+    out = capsys.readouterr().out
+    assert "overlap" in out and "[X] build" in out
