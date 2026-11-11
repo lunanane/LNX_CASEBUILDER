@@ -622,8 +622,10 @@ const MEMBER_STYLE = {
  *  server's default, off the last build, so there is one copy of it. */
 function laserSheet() {
   const m = state.caseModel;
-  if (m?.kind === 'hybrid') return m.extras?.sheet || { name: 'plywood' };
-  return (m?.kind === 'rack' ? m.laser_sheet : null) || { name: 'plywood' };
+  // before the first build: the server's default, as it stands today
+  const fallback = { name: 'plywood-5mm', thickness: 5, kerf: 0.15, color: '#c8a165' };
+  if (m?.kind === 'hybrid') return m.extras?.sheet || fallback;
+  return (m?.kind === 'rack' ? m.laser_sheet : null) || fallback;
 }
 
 function buildRack(model) {
@@ -845,6 +847,11 @@ function renderFramePanel() {
   $('fr-style').value = laser ? 'laser' : 'u_channel';
   if ($('fr-panel-t') && document.activeElement !== $('fr-panel-t')) {
     $('fr-panel-t').value = spec.module_panel_t ?? 2;
+  }
+  const co = spec.cable_openings || {};
+  for (const [id, key, dflt] of [['hy-co-count', 'count', ''],
+                                 ['hy-co-width', 'width', 30], ['hy-co-height', 'height', 15]]) {
+    if ($(id) && document.activeElement !== $(id)) $(id).value = co[key] ?? dflt;
   }
   if (document.activeElement !== $('fr-sheet-t')) {
     $('fr-sheet-t').value = spec.material?.thickness ?? laserSheet().thickness ?? '';
@@ -1123,6 +1130,7 @@ function wireFramePanel() {
       // no material written: the server cuts its default laser sheet
     }
     renderFramePanel();
+    renderMaterials();                // a U-channel frame chooses no sheet
     doResolve();
   };
   $('fr-sheet-t').oninput = () => {
@@ -1134,6 +1142,7 @@ function wireFramePanel() {
     // the name carries the thickness, as the case's materials do
     const stem = (was.name || 'plywood').replace(/-[\d.]+mm$/, '');
     spec.material = { ...was, name: stem + '-' + v + 'mm', thickness: v };
+    renderMaterials();          // the case tab's row is the same sheet
     scheduleResolve(250);
   };
   $('fr-joint').onchange = () => {
@@ -1196,6 +1205,24 @@ function wireFramePanel() {
       edit('fr-panel-t');
       rackSpec().module_panel_t = v;
       scheduleResolve(150);
+    };
+  }
+  for (const [id, key, min] of [['hy-co-count', 'count', 0],
+                                 ['hy-co-width', 'width', 5], ['hy-co-height', 'height', 5]]) {
+    if (!$(id)) continue;
+    $(id).oninput = () => {
+      const raw = $(id).value.trim();
+      const co = rackSpec().cable_openings || (rackSpec().cable_openings = {});
+      if (key === 'count' && raw === '') {
+        edit('hy-co-count');
+        delete co.count;              // auto: one per 90 mm of width
+      } else {
+        const v = key === 'count' ? parseInt(raw, 10) : parseFloat(raw);
+        if (!Number.isFinite(v) || v < min) return;
+        edit(id);
+        co[key] = v;
+      }
+      scheduleResolve(250);
     };
   }
   if ($('hy-add-above')) $('hy-add-above').onclick = () => addSection('above');
@@ -1402,12 +1429,13 @@ async function refreshCase() {
     if (state.caseModel && state.caseModel.kind === 'rack') {
       buildRack(state.caseModel);
       renderFramePanel();
+      renderMaterials();          // the default sheet comes with the build
       // a frame has no resolve step: its issues come back with the build
       renderIssues(state.caseModel.issues || []);
       return;
     }
     buildCase(state.caseModel);
-    if (state.caseModel?.kind === 'hybrid') renderFramePanel();
+    if (state.caseModel?.kind === 'hybrid') { renderFramePanel(); renderMaterials(); }
     renderCaseScrews();
     // the build is the only thing that knows a label outgrew its box
     renderEngravePanel();
@@ -1498,27 +1526,70 @@ let issuesSig = null;
  *  Thickness is left alone: it is a structural number, not an appearance one,
  *  and quietly changing it here would move every board in the case.
  */
+/** The sheets the open scene's build really cuts, and whose they are. A
+ *  layered case or a box cuts `case.materials`; a laser frame and a hybrid
+ *  cut one sheet, `rack.material` -- the server's default until the scene
+ *  sets it, so it is shown from the last build and only written to the
+ *  scene when edited. A U-channel frame cuts no sheet the editor chooses. */
+function sheetMaterials() {
+  const s = state.scene;
+  if (!s) return { mats: [], framed: false };
+  const framed = s.kind === 'rack' || s.kind === 'hybrid';
+  if (!framed) return { mats: s.case?.materials || [], framed };
+  if (s.kind === 'rack' && s.rack?.style !== 'laser') return { mats: [], framed, uchannel: true };
+  return { mats: [s.rack?.material || { ...laserSheet() }], framed };
+}
+
+/** Make a framed scene's sheet its own before it is edited, and rebuild. */
+function ownSheet(m) {
+  const s = state.scene;
+  if ((s.kind === 'rack' || s.kind === 'hybrid') && !rackSpec().material) {
+    rackSpec().material = m;
+  }
+  return m;
+}
+
+function materialChanged(rebuild = true) {
+  const s = state.scene;
+  if (s && (s.kind === 'rack' || s.kind === 'hybrid')) {
+    renderFramePanel();
+    if (rebuild) doResolve();
+    return;
+  }
+  if (rebuild) refreshCase();
+  else buildCase(state.caseModel);
+}
+
 function restockCase(stock) {
-  const mats = state.scene?.case?.materials || [];
+  const { mats } = sheetMaterials();
   if (!mats.length) return;
   edit();
   for (const m of mats) {
+    ownSheet(m);
     m.name = restockName(m.name, stock);
     m.color = stock.color;
   }
   renderMaterials();
-  buildCase(state.caseModel);
+  materialChanged(false);
   status(`whole case in ${stock.label}`, 'ok');
 }
 
 function renderMaterials() {
   const list = $('material-list');
+  if (!list) return;
   list.innerHTML = '';
-  const mats = state.scene?.case?.materials || [];
+  const { mats, framed, uchannel } = sheetMaterials();
+  if (uchannel) {
+    list.innerHTML = '<div class="note">A U-channel frame cuts only its two '
+      + 'side panels, from 5 mm acrylic. Make it laser-cut to choose its sheet.</div>';
+    return;
+  }
 
   const bar = document.createElement('div');
   bar.className = 'field';
-  bar.innerHTML = '<label title="set every layer at once">all layers</label>' +
+  bar.innerHTML = (framed
+    ? '<label title="the one sheet every plate is cut from">sheet</label>'
+    : '<label title="set every layer at once">all layers</label>') +
     `<select id="stock-all"><option value="">choose stock&hellip;</option>` +
     STOCK.map((v, i) => `<option value="${i}">${v.label}</option>`).join('') +
     '</select>';
@@ -1540,17 +1611,17 @@ function renderMaterials() {
       `<input type="number" step="0.1" value="${m.thickness}" title="thickness, mm">` +
       `<span class="preset">${f.preset || 'plain'}</span>`;
     const [colour, name, thick] = row.querySelectorAll('input');
-    colour.onchange = () => { edit(); m.color = colour.value; buildCase(state.caseModel); };
+    colour.onchange = () => { edit(); ownSheet(m).color = colour.value; materialChanged(false); };
     name.onchange = () => {
       edit();
-      m.name = name.value;
+      ownSheet(m).name = name.value;
       renderMaterials();
-      buildCase(state.caseModel);
+      materialChanged(false);
     };
     thick.onchange = () => {
       edit();
-      m.thickness = parseFloat(thick.value) || m.thickness;
-      refreshCase();
+      ownSheet(m).thickness = parseFloat(thick.value) || m.thickness;
+      materialChanged();
     };
     list.appendChild(row);
     // the fit: measured on a test coupon (file > export test coupon), and
@@ -1568,8 +1639,8 @@ function renderMaterials() {
         const v = parseFloat(el.value);
         if (!Number.isFinite(v) || v < 0) { el.value = m[key] ?? ''; return; }
         edit();
-        m[key] = v;
-        refreshCase();
+        ownSheet(m)[key] = v;
+        materialChanged();
       };
     };
     fitField(kerf, 'kerf');

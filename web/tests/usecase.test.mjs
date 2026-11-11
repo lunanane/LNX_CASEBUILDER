@@ -71,3 +71,38 @@ test('a hybrid shows the frame\'s rack controls, its sections, and no U-channel 
     assert.ok(pane.includes(`id="${id}"`), id);
   }
 });
+
+test('a frame and a hybrid reach the sheet, the stock and the materials', () => {
+  // the case tab serves them too, with only the groups that apply
+  assert.match(html, /data-pane="pane-case" data-uses="layered box panel frame hybrid"/);
+  const pane = html.slice(html.indexOf('<section id="pane-case"'),
+                          html.indexOf('<section id="pane-frame"'));
+  const tagged = (id) => {
+    // the data-uses of the nearest tagged ancestor-ish block before `id`
+    const at = pane.indexOf(`id="${id}"`);
+    assert.ok(at > 0, id);
+    const opens = [...pane.slice(0, at).matchAll(/<div data-uses="([^"]*)">|<\/div>/g)];
+    const stack = [];
+    for (const m of opens) {
+      if (m[0].startsWith('</')) stack.pop(); else stack.push(m[1]);
+    }
+    return stack.filter(Boolean).pop() ?? null;
+  };
+  // stock sizes, margin, spacing and the materials rows: everywhere
+  for (const id of ['plate-list', 'btn-add-plate', 'cs-sheet-margin', 'cs-sheet-gap', 'material-list']) {
+    assert.equal(tagged(id), null, id);
+  }
+  // layers, screws, construction and decoration are not a frame's or a hybrid's
+  for (const id of ['case-size', 'cs-style', 'case-screws', 'engrave-panel']) {
+    const tag = tagged(id);
+    assert.ok(tag && !/\b(frame|hybrid)\b/.test(tag), `${id}: ${tag}`);
+  }
+  // the test coupon is in the file menu, untagged
+  assert.match(html, /<button id="btn-coupon"(?![^>]*data-uses)/);
+});
+
+test('a hybrid sets its dividers\' cable openings', () => {
+  for (const id of ['hy-co-count', 'hy-co-width', 'hy-co-height']) {
+    assert.ok(html.includes(`id="${id}"`), id);
+  }
+});

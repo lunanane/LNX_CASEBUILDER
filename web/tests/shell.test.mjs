@@ -228,6 +228,19 @@ test('a box has no rack bays: Eurorack rows are the hybrid case\'s', () => {
   assert.match(js, /\[\.\.\.model\.plates, \.\.\.\(model\.members \|\| \[\]\)\]/);
 });
 
+test('one sheet: a framed scene\'s materials row and its sheet field edit rack.material', () => {
+  // the build cuts a laser frame and a hybrid from rack.material, not from
+  // case.materials, so that is what the case tab's row shows and writes
+  assert.match(js, /return \{ mats: \[s\.rack\?\.material \|\| \{ \.\.\.laserSheet\(\) \}\], framed \};/);
+  assert.match(js, /rackSpec\(\)\.material = m;/);
+  assert.match(js, /ownSheet\(m\)\.thickness = /);
+  assert.match(js, /ownSheet\(m\)\[key\] = v;/);
+  // the frame tab's sheet field writes the same object, and redraws the row
+  assert.match(js, /spec\.material = \{ \.\.\.was, name: stem \+ '-' \+ v \+ 'mm', thickness: v \};\s+renderMaterials\(\);/);
+  // the cable openings are rack.cable_openings
+  assert.match(js, /rackSpec\(\)\.cable_openings \|\| \(rackSpec\(\)\.cable_openings = \{\}\)/);
+});
+
 test('a hybrid edits its rack in the frame pane and its sections beside it', () => {
   assert.match(js, /const isRack = state\.scene\.kind === 'rack' \|\| isHybrid;/);
   assert.match(js, /\$\('hy-add-above'\)\.onclick = \(\) => addSection\('above'\)/);

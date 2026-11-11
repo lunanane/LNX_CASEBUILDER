@@ -139,7 +139,7 @@
          meant most people never found them at all. -->
     <nav class="tabs" role="tablist">
       <button class="tab active" data-pane="pane-layout" data-uses="layered box panel hybrid" role="tab">layout</button>
-      <button class="tab" data-pane="pane-case" data-uses="layered box panel" role="tab">case</button>
+      <button class="tab" data-pane="pane-case" data-uses="layered box panel frame hybrid" role="tab">case</button>
       <button class="tab" data-pane="pane-frame" data-uses="frame hybrid" role="tab">frame</button>
       <button class="tab" data-pane="pane-look" role="tab">look</button>
       <button class="tab" data-pane="pane-issues" data-uses="layered box panel frame hybrid" role="tab">
@@ -252,8 +252,10 @@
 
       <h2>materials</h2>
       <div id="material-list"></div>
-      <h2>decoration</h2>
-      <div id="engrave-panel"></div>
+      <div data-uses="layered box panel">
+        <h2>decoration</h2>
+        <div id="engrave-panel"></div>
+      </div>
     </section>
 
     <section id="pane-frame" class="pane" hidden>
@@ -292,6 +294,15 @@
         <div id="hy-sections"></div>
         <button id="hy-add-above" title="add a parts section above the rack, outermost">+ above</button>
         <button id="hy-add-below" title="add a parts section below the rack, outermost">+ below</button>
+        <h2>cable openings</h2>
+        <p class="note">Rounded slots through each divider, just above the
+        floor, for the cables between zones; kept clear of the joints.</p>
+        <div class="field"><label title="per divider; empty for one per 90 mm of width, 0 for none">count</label>
+          <input type="number" id="hy-co-count" step="1" min="0" max="20" placeholder="auto"></div>
+        <div class="field"><label title="each opening's width, with full radii">width</label>
+          <input type="number" id="hy-co-width" step="1" min="5"><span class="unit">mm</span></div>
+        <div class="field"><label title="each opening's height">height</label>
+          <input type="number" id="hy-co-height" step="1" min="5"><span class="unit">mm</span></div>
       </div>
 
       <h2>construction</h2>
