@@ -166,6 +166,49 @@ def cheek_outline(b: Bay, t: float, z1: float, z0: float):
     return outline, m5
 
 
+#: M5 lengths a hardware shop sells (ISO 4762 / 7380)
+M5_LENGTHS = (8.0, 10.0, 12.0, 16.0, 20.0, 25.0, 30.0)
+#: thread an M5 needs in aluminium: one and a half diameters, rounded up
+M5_ENGAGE = 8.0
+#: M5 tap drill
+M5_TAP_DRILL = 4.2
+#: the screw that takes a module panel to a sliding nut in the rail
+MODULE_SCREW = "M3x6"
+
+
+def m5_length(t: float) -> float:
+    """The shortest stock M5 that passes a `t` cheek and engages the rail."""
+    need = t + M5_ENGAGE
+    return next((L for L in M5_LENGTHS if L >= need - 1e-9), M5_LENGTHS[-1])
+
+
+def bay_bom(res, bays, rails_of, t: float) -> dict[str, int]:
+    """What the bays add to the box's bill of materials.
+
+    Rails by cut length; an M5 into each rail end, long enough to pass the
+    cheek and hold in the rail; and for every listed module an M3 screw and
+    a sliding nut per rail hole, by Doepfer's hole rule
+    (`panel.hole_columns`): two for a narrow panel, four from 12 HP. The
+    module count is an estimate -- it knows only the modules the scene lists.
+    """
+    from .panel import hole_columns
+
+    out: dict[str, int] = {}
+    for b, _r in rails_of:
+        key = f"Eurorack rail, {b.width:.2f} mm ({b.spec.hp:g} HP)"
+        out[key] = out.get(key, 0) + 1
+    if rails_of:
+        out[f"M5x{m5_length(t):g} screw"] = 2 * len(rails_of)
+    holes = 0
+    for b in bays:
+        for *_m, hp, _p in module_panels(res, None, b.spec):
+            holes += 2 * len(hole_columns(hp))
+    if holes:
+        out[f"{MODULE_SCREW} module screw (estimate)"] = holes
+        out["M3 sliding nut (estimate)"] = holes
+    return out
+
+
 def build_hybrid(res, spec):
     """A box case with every bay of the scene set into it."""
     from .box import BoxPlate, build_box, panel_plane
@@ -272,12 +315,15 @@ def build_hybrid(res, spec):
             f"{b.spec.id}-{r.name}", "rail", r.section,
             (b.bx, b.wy(r.origin[1]), b.zr), RAIL_AXES,
             rail_mat.model_copy(update={"thickness": b.width})))
-    n = len(rails_of)
-    model.extras["bom"] = {
-        "rails": n,
-        "rail mm": round(sum(b.width for b, _r in rails_of), 2),
-        "M5 screw": 2 * n,
-    }
+    model.extras["bom"] = bay_bom(res, bays, rails_of, t)
+    if bays:
+        model.notes.append(
+            f"rail ends: tap each rail's {rack.RAIL_END_BORE:g} mm end bore "
+            f"M5 (M5 tap drill {M5_TAP_DRILL:g} mm) for the cheek screws")
+        if any(not b.spec.modules for b in bays):
+            model.notes.append(
+                "module screws and sliding nuts are counted for the listed "
+                "modules only; add one pair per further rail hole")
     model.extras["bays"] = [{
         "id": b.spec.id, "hp": b.spec.hp, "width": b.width,
         "aperture": [list(c) for c in b.aperture.exterior.coords],
@@ -404,7 +450,11 @@ def module_panels(res, lib, spec_bay):
                 if s.placement in members and s.name == "pcb"]
         if not pcbs:
             continue
-        panels = [s for s in pcbs if lib[s.part].category == "panel"]
+        if lib is not None:
+            panels = [s for s in pcbs if lib[s.part].category == "panel"]
+        else:               # no library to ask: the widest board is the panel
+            panels = [max(pcbs, key=lambda s: s.poly.bounds[2]
+                          - s.poly.bounds[0])]
         bounds = unary_union([s.poly for s in (panels or pcbs)]).bounds
         out.append((mid, slot, row, bounds,
                     _module_hp(bounds[2] - bounds[0]), panels))

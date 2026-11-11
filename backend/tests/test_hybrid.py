@@ -132,8 +132,14 @@ def test_row6_the_cut_list_has_the_rails_cheeks_and_deck(model):
     cut = files["hybrid-cutlist.txt"]
     for word in ("deck", "bay-cheek-left", "bay-cheek-right", "floor"):
         assert word in cut
-    assert "2 x rails" in cut and "rail: 284.48 mm" in cut
-    assert "4 x M5 screw" in cut
+    assert "2 x Eurorack rail, 142.24 mm (28 HP)" in cut
+    assert "rail mm" not in cut
+    assert "4 x M5x12 screw" in cut
+    assert "tapped" in cut or "tap each rail" in cut
+    assert "M5 tap drill 4.2 mm" in cut
+    # the AMYboard is 10 HP: one column of holes, two screws and nuts
+    assert "2 x M3x6 module screw (estimate)" in cut
+    assert "2 x M3 sliding nut (estimate)" in cut
     assert "bay bay: 28 HP" in cut
     assert cut.count(" through the deck ") == 16      # 8 per NeoTrellis
 
@@ -461,3 +467,19 @@ def test_a_panel_thinner_than_the_bay_expects_is_a_warning():
     res = resolve(_modules(BayModule(id="amy"), module_panel_t=3.0), LIB)
     assert any(i.level == "warning" and "1.00 mm above the rails"
                in i.message for i in check(res, LIB))
+
+
+def test_the_m5_reaches_through_the_cheek_into_the_rail():
+    from hwcase.hybrid import m5_length
+
+    assert m5_length(3.0) == 12.0          # 3 + 8 of thread
+    assert m5_length(5.0) == 16.0
+
+
+def test_a_wide_module_counts_four_screws():
+    """12 HP and up: two columns of holes, four screws and sliding nuts."""
+    from hwcase.hybrid import bay_bom
+    from hwcase.panel import hole_columns
+
+    assert len(hole_columns(10)) == 1 and len(hole_columns(12)) == 2
+    assert bay_bom(resolve(_scene(), LIB), [], [], 3.0) == {}

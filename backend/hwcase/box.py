@@ -431,9 +431,10 @@ def box_cutlist(model: BoxModel, sheets, stock) -> str:
             lines.append(f"  {s.placement:<16} {s.length:5.1f} mm "
                          f"{s.screw or 'screw'} through the {s.through} "
                          f"at ({s.at[0]:.1f}, {s.at[1]:.1f})")
+    bought = model.extras.get("bom", {})       # a bay's rails and screws
     hardware = {k: v for k, v in model.bill_of_materials().items()
                 if k.endswith((" bolt", " nut", " screw", " mm"))
-                or k in ("rails",)}
+                or k in bought}
     for bay in model.extras.get("bays", []):
         lines += ["", f"bay {bay['id']}: {bay['hp']:g} HP, rails "
                   f"{bay['width']:.2f} mm long, module depth "
