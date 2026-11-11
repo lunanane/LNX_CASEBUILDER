@@ -596,25 +596,29 @@ function buildRack(model) {
 
   for (const m of model.members) {
     const style = MEMBER_STYLE[m.kind] || MEMBER_STYLE.body;
-
-    if (!solid) {
-      const mat = new THREE.LineBasicMaterial({
-        color: style.color, transparent: true, opacity: 0.6 });
-      for (const ring of m.rings) {
-        const pts = ring.map((pt) => new THREE.Vector3(
-          m.origin[0], m.origin[1] + pt[1], m.origin[2] - pt[0]));
-        if (pts.length) pts.push(pts[0]);
-        caseGroup.add(new THREE.Line(
-          new THREE.BufferGeometry().setFromPoints(pts), mat));
-      }
-      continue;
-    }
-
     const shapes = shapesFromRings(m.rings);
     if (!shapes.length) continue;
     const geom = new THREE.ExtrudeGeometry(shapes, {
       depth: m.length, bevelEnabled: false, curveSegments: 10 });
     geom.applyMatrix4(MEMBER_BASIS);
+
+    if (!solid) {
+      // The whole swept member, as its edges. Drawing only the section ring
+      // put one U-shaped outline at the frame's end, edge-on to the default
+      // camera and under the side panel's outline: the body, which is the
+      // case, vanished from the preview. A box's plate is a few mm thick and
+      // its outline reads; a member is as long as the case, so it needs its
+      // length drawn.
+      const mat = new THREE.LineBasicMaterial({
+        color: style.color, transparent: true, opacity: 0.6 });
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 20), mat);
+      geom.dispose();
+      edges.position.set(m.origin[0], m.origin[1], m.origin[2]);
+      edges.userData = { member: m.name, kind: m.kind };
+      caseGroup.add(edges);
+      continue;
+    }
+
     const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
       color: style.color, roughness: style.roughness, metalness: style.metalness,
       transparent: style.opacity < 1, opacity: style.opacity,
