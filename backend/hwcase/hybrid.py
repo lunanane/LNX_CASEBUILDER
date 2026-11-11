@@ -22,6 +22,10 @@ What a bay adds to the box:
   down to the module depth behind the rails, that nothing but the bay's own
   modules may enter.
 
+A bay's modules are listed by HP slot and row (`schema.BayModule`); resolve
+puts each on its slot (`seat_modules`) and the checks hold every module to
+the grid, the aperture, its row and its neighbours (`_module_issues`).
+
 Module depth means what it means on a frame: clear room behind the module
 panel, measured from the rails' front face -- the back of the panel -- to the
 floor (a frame measures it to the inside of its body's web, `rack.case_depth`).
