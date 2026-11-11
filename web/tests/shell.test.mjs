@@ -239,3 +239,15 @@ test('real models are vendored, mapped, toggled and placed by the engine', () =>
   assert.match(js, /new THREE\.Matrix4\(\)\.set\(\.\.\.frame\.matrix\)/);
   assert.match(js, /\/api\/parts\/\$\{encodeURIComponent\(partId\)\}\/model\.glb/);
 });
+
+test('a material row edits its kerf and joint clearance, and a coupon can be cut', () => {
+  // the two numbers a fit depends on are the user's to set, and measured on
+  // a coupon cut from the same scene before the real job
+  const fn = /function renderMaterials\(\) \{([\s\S]*?)\n\}/.exec(js);
+  assert.ok(fn, 'no renderMaterials');
+  assert.match(fn[1], /fitField\(kerf, 'kerf'\)/);
+  assert.match(fn[1], /fitField\(clear, 'joint_clearance'\)/);
+  assert.match(html, /<button id="btn-coupon"[^>]*>export test coupon<\/button>/);
+  assert.match(js, /exportSheets\('svg', 'coupon'\)/);
+  assert.match(js, /\/api\/export\/\$\{route\}\/\$\{fmt\}/);
+});

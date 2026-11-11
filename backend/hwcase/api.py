@@ -673,6 +673,48 @@ def export_sheets(fmt: str, scene: Scene = Body(...), as_json: bool = False):
     })
 
 
+@app.post("/api/export/coupon/{fmt}")
+def export_coupon(fmt: str, scene: Scene = Body(...), as_json: bool = False):
+    """A test coupon per material, cut at the scene's kerf and clearance.
+
+    The job to run before the real one: a measured square, an M3 hole, a
+    T-slot and a finger-joint pair, each labelled with the values it was cut
+    at. Same answer shapes as the sheets export.
+    """
+    from . import coupon
+    from .flat import from_rack
+
+    if fmt not in ("svg", "dxf"):
+        raise HTTPException(400, "format is svg or dxf")
+    base = re.sub(r"[^A-Za-z0-9._-]+", "-", scene.name or "case").strip("-") or "case"
+    base += "-coupon"
+    try:
+        if scene.kind == "rack":
+            # the frame's own sheet -- the one its plates are cut from
+            frame = rack_mod.build_spec(scene.rack)
+            materials = [p.material for p in from_rack(frame)]
+            bolt = getattr(scene.rack, "fastener", "M3") or "M3"
+        else:
+            materials = list(scene.case.materials)
+            bolt = scene.case.box_fastener if scene.case.style == "box" else "M3"
+        files = coupon.coupon_files(materials, fmt, scene.case, base, bolt)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(422, str(exc))
+    if as_json:
+        return {"sheets": [{"name": n, "content": c} for n, c in files],
+                "count": len(files) - 1}
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, content in files:
+            z.writestr(name, content)
+    return Response(buf.getvalue(), media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="{base}-{fmt}.zip"',
+    })
+
+
 @app.post("/api/case/freeze")
 def post_freeze(scene: Scene = Body(...)):
     """Turn the auto-derived case outline into a fixed one.

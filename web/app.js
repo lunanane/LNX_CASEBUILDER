@@ -1390,6 +1390,28 @@ function renderMaterials() {
       refreshCase();
     };
     list.appendChild(row);
+    // the fit: measured on a test coupon (file > export test coupon), and
+    // what every outline offset and every joint is cut from
+    const fit = document.createElement('div');
+    fit.className = 'matrow fit';
+    fit.innerHTML =
+      `<label title="width of the cut the beam takes, mm">kerf</label>` +
+      `<input type="number" step="0.01" min="0" value="${m.kerf ?? 0.15}">` +
+      `<label title="gap left between a tab and its slot, mm: 0 press fit, 0.1 slides">joint clearance</label>` +
+      `<input type="number" step="0.01" min="0" value="${m.joint_clearance ?? 0.1}">`;
+    const [kerf, clear] = fit.querySelectorAll('input');
+    const fitField = (el, key) => {
+      el.onchange = () => {
+        const v = parseFloat(el.value);
+        if (!Number.isFinite(v) || v < 0) { el.value = m[key] ?? ''; return; }
+        edit();
+        m[key] = v;
+        refreshCase();
+      };
+    };
+    fitField(kerf, 'kerf');
+    fitField(clear, 'joint_clearance');
+    list.appendChild(fit);
   });
   if (!mats.length) {
     list.insertAdjacentHTML('beforeend',
@@ -2838,11 +2860,11 @@ $('btn-svg-bar').onclick = () => $('btn-svg').click();
  *  through the ordinary save path. Both come from the same server-side
  *  packing, so the files are identical either way.
  */
-async function exportSheets(fmt) {
-  status('packing sheets…');
+async function exportSheets(fmt, route = 'sheets') {
+  status(route === 'coupon' ? 'cutting a test coupon…' : 'packing sheets…');
   try {
     if (window.showDirectoryPicker) {
-      const r = await api(`/api/export/sheets/${fmt}?as_json=true`,
+      const r = await api(`/api/export/${route}/${fmt}?as_json=true`,
         { method: 'POST', body: JSON.stringify(state.scene) });
       try {
         const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
@@ -2860,13 +2882,13 @@ async function exportSheets(fmt) {
         console.warn('directory picker unavailable, falling back to zip', err);
       }
     }
-    const rz = await fetch(`/api/export/sheets/${fmt}`, {
+    const rz = await fetch(`/api/export/${route}/${fmt}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(state.scene),
     });
     if (!rz.ok) throw new Error((await rz.text()).slice(0, 300));
     const saved = await saveBlob(await rz.blob(),
-      `${state.sceneName}-sheets-${fmt}.zip`, 'Cut sheets', 'application/zip');
+      `${state.sceneName}-${route}-${fmt}.zip`, 'Cut sheets', 'application/zip');
     status(saved.message, saved.ok ? 'ok' : '');
   } catch (err) {
     status(`export failed — ${err.message}`, 'err');
@@ -2875,6 +2897,8 @@ async function exportSheets(fmt) {
 
 $('btn-svg').onclick = async () => exportSheets('svg');
 $('btn-dxf').onclick = async () => exportSheets('dxf');
+// a small job per material at its kerf and clearance, cut before the real one
+$('btn-coupon').onclick = async () => exportSheets('svg', 'coupon');
 
 const turnSelection = (dir) => {
   const pl = movableRoot(state.selection);
