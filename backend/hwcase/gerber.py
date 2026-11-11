@@ -38,7 +38,7 @@ class Gerber:
                  generator: str = "hwcase"):
         self._head = [
             f"G04 {comment}*",
-            f"%TF.GenerationSoftware,{generator}*%",
+            f"%TF.GenerationSoftware,{generator},hwcase-panel,1*%",
             f"%TF.FileFunction,{function}*%",
             f"%TF.FilePolarity,{polarity}*%",
             "%FSLAX46Y46*%",
