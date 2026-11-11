@@ -1229,7 +1229,12 @@ async function doResolve() {
       `x ${(e.max[2] - e.min[2]).toFixed(1)} mm`;
     const errors = resolved.issues.filter((i) => i.level === 'error').length;
     status(errors ? `${errors} error${errors > 1 ? 's' : ''}` : 'ok', errors ? 'err' : 'ok');
-    if ($('chk-case').checked) await refreshCase();
+    // A box is built around its boards; with none it has no size, and the
+    // build's "too small for its walls" reads like a fault. Say what to do.
+    if (useCaseOf(state.scene) === 'box' && !state.scene.placements.length) {
+      caseGroup.clear();
+      status('add a board from the palette -- the box is built around it');
+    } else if ($('chk-case').checked) await refreshCase();
   } catch (err) {
     status(err.message, 'err');
     console.error(err);
