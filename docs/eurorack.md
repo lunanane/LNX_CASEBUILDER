@@ -194,17 +194,20 @@ drill sizes (§9). If the engine should *enforce* these rather than have them si
 in prose, the natural home is a `standards` block the checker reads — say the
 word and this lifts into YAML.
 
-**Rack bays in a box case** (`racks:`, `backend/hwcase/hybrid.py`). A bay's
-modules are listed by slot — `{id, hp_slot, row}`, both counted from 0, the slot
-in HP from the rails' left end, the row from the bottom — and the engine moves
-each module (and whatever is mated to it) so its panel's left edge lands on the
-slot and the panel is centred on the row's rails. A module's HP is its panel's
-width on the grid (a part of category `panel` in its mate tree; failing that,
-its widest board). A bare id with a hand-typed `pos` still loads, and is checked
-against the same grid to 0.05 mm. The bill of materials counts an M3 screw and a
-sliding nut per rail hole of each listed module by Doepfer's hole rule (§3, an
-estimate), and one M5 per rail end, its length the cheek plus 8 mm of thread;
-the rail's 4.4 mm end bore is tapped M5 (tap drill 4.2).
+**Rack bays in a box case** (`racks:`, `backend/hwcase/hybrid.py`). A bay is
+Eurorack rails set into the deck of a laser-cut box that otherwise holds your
+own hardware: `id`, `at` (the rails' bottom-left corner), `hp`, `rows`,
+`module_depth` (clear room behind the module panels, as on a frame) and
+`module_panel_t` (how far under the deck top the rails sit, so the faces of the
+modules fitted later are flush with it). The engine cuts the aperture, carries
+the rails on two cheeks jointed to the deck and the floor, drops the floor to
+the module depth, and lists the rails, one M5 per rail end (its length the cheek
+plus 8 mm of thread) and the M5 tap for the rail's 4.4 mm end bore (tap drill
+4.2). It does not model, place, list or count modules: whatever is bought later
+is screwed in by hand. The bay's space -- the rails' span and stack, from the
+deck top down to the module depth -- is kept clear, so any placement in it, or
+in a cheek, is an error. A `modules:` list in an older scene still loads, is
+ignored, and is reported as an info note.
 
 ## 11. A panel made as a PCB
 
