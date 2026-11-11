@@ -136,6 +136,20 @@ def test_row3_a_part_deeper_than_the_module_depth_is_an_error():
     assert not [i for i in check(res, LIB) if i.code == "module_depth"]
 
 
+def test_a_board_in_the_rail_band_is_an_error():
+    """Behind a 3U panel a board has about 110 mm between the rails: one
+    reaching into the top or bottom 9.25 mm hits a rail."""
+    assert panel.rail_band() == pytest.approx(9.25)
+    for y, hit in ((50.0, False), (2.0, True), (100.0, True)):
+        enc = dict(ENCODER, pos=[2.35, y, 0.0])
+        res = resolve(_scene(placements=[enc]), LIB)
+        got = [i for i in check(res, LIB) if i.code == "rail_clearance"]
+        assert bool(got) == hit, y
+        if hit:
+            assert got[0].level == "error" and got[0].refs == ["enc"]
+            assert "into the rails" in got[0].message
+
+
 def test_a_power_headers_ribbon_counts_against_the_depth():
     header = {"id": "pwr", "part": "eurorack-power-header-10",
               "pos": [30.0, 10.0, -20.0], "mount": "manual", "tilt": 180}

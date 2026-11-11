@@ -165,4 +165,40 @@ def depth_issues(res, spec) -> list[tuple[str, str, list[str]]]:
     return [("module_depth",
              f"{pl} reaches {limit - z:.1f} mm deeper than the "
              f"{ep.module_depth:g} mm module depth behind the panel",
-             [pl]) for pl, z in sorted(worst.items())]
+             [pl]) for pl, z in sorted(worst.items())] + rail_issues(res, spec)
+
+
+#: Room for a board between the rails behind a 3U panel (docs/eurorack.md
+#: section 5, `community`): the panel less about 9 mm at the top and the
+#: bottom, where the rails and their screws are.
+PCB_HEIGHT_3U = 110.0
+
+
+def rail_band(fmt: str = "3U") -> float:
+    """How far in from the top and the bottom edge the rails reach."""
+    return (_format(fmt).panel - PCB_HEIGHT_3U) / 2
+
+
+def rail_issues(res, spec) -> list[tuple[str, str, list[str]]]:
+    """(code, message, refs) for every board or part behind the panel that
+    reaches into the rail band at its top or bottom: it hits the rail."""
+    ep = spec.eurorack_panel
+    height = _format(ep.format).panel
+    band = rail_band(ep.format)
+    back = panel_plane(res, spec) - ep.thickness
+    hits: dict[str, list[float]] = {}
+    for s in res.solids:
+        if s.kind in (VolumeKind.display, VolumeKind.actuator):
+            continue
+        if s.z[0] >= back - 1e-6:
+            continue                       # on or in front of the panel
+        _x0, y0, _x1, y1 = s.poly.bounds
+        over = max(band - y0, y1 - (height - band))
+        if over > 1e-6:
+            worst = hits.setdefault(s.placement, [0.0])
+            worst[0] = max(worst[0], over)
+    return [("rail_clearance",
+             f"{pl} reaches {over[0]:.1f} mm into the rails: behind a "
+             f"{ep.format} panel a board has about {PCB_HEIGHT_3U:g} mm "
+             f"between them, {band:.2f} mm in from the top and the bottom",
+             [pl]) for pl, over in sorted(hits.items())]
