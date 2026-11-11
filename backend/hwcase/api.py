@@ -262,11 +262,15 @@ STARTER = """# A new scene.
 #   panels:
 #     - name: main
 #       from_ref: <placement>.<volume>
+#
+# The stack is held by an M3 bolt near each corner: head in the lid, nut in
+# a hex trap in the floor. The cut list gives the bolt length.
 
 name: {name}
 placements: []
 case:
   style: layered
+  case_screws: corners
   materials:
     - {{name: plywood-3mm, thickness: 3.0, kerf: 0.15, sheet: [600.0, 400.0], color: "#c8a165"}}
   wall: 8.0

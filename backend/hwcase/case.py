@@ -60,6 +60,12 @@ class CaseModel:
     layers: list[Layer]
     z0: float
     z1: float
+    #: bought parts, by name: the case bolts and their nuts, the board
+    #: screws -- what `hardware_for` worked out from the stack
+    hardware: dict[str, int] = field(default_factory=dict)
+    #: what the bench needs to know about them (a bolt too long, a nut
+    #: thicker than its trap)
+    hardware_notes: list[str] = field(default_factory=list)
 
     @property
     def height(self) -> float:
@@ -69,6 +75,8 @@ class CaseModel:
         out: dict[str, int] = {}
         for layer in self.layers:
             out[layer.material.name] = out.get(layer.material.name, 0) + 1
+        for item, n in self.hardware.items():
+            out[item] = out.get(item, 0) + n
         return out
 
 
@@ -189,7 +197,107 @@ def build(res: Resolved, spec: Optional[CaseSpec] = None) -> CaseModel:
 
     _report_orphan_supports(res, layers, notes_to=layers)
     _apply_engravings(res, layers)
-    return CaseModel(spec=spec, outer=outer, layers=layers, z0=z0, z1=cursor)
+    model = CaseModel(spec=spec, outer=outer, layers=layers, z0=z0, z1=cursor)
+    model.hardware, model.hardware_notes = hardware_for(res, model)
+    return model
+
+
+def _add(out: dict[str, int], item: str, n: int = 1) -> None:
+    out[item] = out.get(item, 0) + n
+
+
+def _board_fastener(sp):
+    """The screw a board hole takes: its named size, else the biggest thread
+    that passes the hole."""
+    from .fasteners import FASTENERS
+
+    if sp.screw in FASTENERS:
+        return FASTENERS[sp.screw]
+    fits = [f for f in FASTENERS.values() if f.thread_d <= sp.screw_d + 1e-6]
+    return max(fits, key=lambda f: f.thread_d) if fits else None
+
+
+def hardware_for(res: Resolved, model: CaseModel
+                 ) -> tuple[dict[str, int], list[str]]:
+    """The bolts, nuts and screws a layered stack is assembled with.
+
+    **Case bolts.** The head sits in the lid's counterbore and bears on the
+    layer under it; the nut sits in the floor's hex trap and bears on the
+    layer above that. The bolt has to reach between those two faces, through
+    the nut and `thread_past_nut` beyond -- rounded up to a length that is
+    sold. A bolt whose tip then stands out of the floor is said so.
+
+    **Board screws.** Each board hole is held by a screw from the plate its
+    head bears on (the screw seat of a well, or the outer plate) through the
+    board, with a nut on the far side -- read off the layer notes the stack
+    already wrote, so this cannot disagree with the holes that were cut.
+    """
+    out: dict[str, int] = {}
+    notes: list[str] = []
+    layers, spec = model.layers, model.spec
+
+    points = [p for p in case_screw_points(spec, model.outer)
+              if model.outer.contains(Point(p))]
+    if points and len(layers) >= 2:
+        f = case_bolt_fastener(spec)
+        floor, lid = layers[0], layers[-1]
+        head_z, nut_z = lid.z0, floor.z1
+        needed = head_z - nut_z + f.nut_t + f.thread_past_nut
+        try:
+            length = f.bolt_length(needed)
+        except ValueError:
+            notes.append(
+                f"case bolts: the stack needs {needed:.1f} mm under the head "
+                f"and no {f.name} bolt that long is stocked -- use "
+                f"{f.name} threaded rod cut to {needed:.0f} mm")
+        else:
+            _add(out, f"{f.name}x{length:g} bolt", len(points))
+            notes.append(
+                f"case bolts: {len(points)} x {f.name}x{length:g} "
+                f"({head_z - nut_z:.1f} mm between the head and the nut, "
+                f"plus the nut and {f.thread_past_nut:g} mm of thread), head "
+                f"in the lid, nut in the floor's hex trap")
+            proud = floor.z0 - (head_z - length)
+            if proud > 0.05:
+                notes.append(f"case bolts: the {length:g} mm bolt stands "
+                             f"{proud:.1f} mm out of the floor -- file it or "
+                             f"use rubber feet at least that tall")
+        _add(out, f"{f.name} hex nut", len(points))
+        if floor.thickness < f.nut_t - 1e-6:
+            notes.append(f"case bolts: an {f.name} nut is {f.nut_t:g} mm "
+                         f"thick and the floor only {floor.thickness:g} mm, "
+                         f"so it stands proud of its trap")
+
+    for sp in res.supports:
+        if sp.mode not in (Support.from_floor, Support.from_lid):
+            continue
+        f = _board_fastener(sp)
+        if f is None:
+            notes.append(f"{sp.ref}: no screw in the table fits a "
+                         f"{sp.screw_d:g} mm hole")
+            continue
+        bearing = {f"screw seat for {sp.ref}", f"clearance hole for {sp.ref}"}
+        seats = [l for l in layers if bearing & set(l.notes)]
+        sunk = [l for l in layers if f"countersink for {sp.ref}" in l.notes]
+        up = sp.mode == Support.from_floor
+        if seats:
+            head_z = (min(l.z0 for l in seats) if up
+                      else max(l.z1 for l in seats))
+        elif sunk:
+            head_z = sunk[0].z1 if up else sunk[0].z0
+        else:
+            continue
+        reach = (sp.board_top - head_z) if up else (head_z - sp.board_bottom)
+        needed = reach + f.nut_t + f.thread_past_nut
+        try:
+            length = f.bolt_length(needed)
+        except ValueError:
+            notes.append(f"{sp.ref}: needs a {f.name} screw {needed:.1f} mm "
+                         f"long, longer than any stocked")
+            continue
+        _add(out, f"{f.name}x{length:g} screw", 1)
+        _add(out, f"{f.name} hex nut", 1)
+    return out, notes
 
 
 def _apply_engravings(res: Resolved, layers: list[Layer]) -> None:
@@ -623,14 +731,51 @@ def _case_screw_bosses(res: Resolved, spec: CaseSpec, outer: Polygon,
     return out
 
 
+#: Room around a trapped nut, across its flats: enough to press it in by
+#: hand, little enough that it cannot turn while the bolt is driven.
+NUT_TRAP_CLEARANCE = 0.2
+
+
+def case_bolt_fastener(spec: CaseSpec):
+    """The bolt the stack is held with: the table row whose clearance hole is
+    nearest `case_screw_d` (3.4 mm is M3)."""
+    from .fasteners import FASTENERS
+
+    return min(FASTENERS.values(),
+               key=lambda f: abs(f.clearance_d - spec.case_screw_d))
+
+
+def nut_trap(at: tuple[float, float], af: float) -> Polygon:
+    """A hexagon `af` across its flats, flats parallel to x."""
+    import math
+
+    r = af / 2.0 / math.cos(math.radians(30.0))
+    return Polygon([(at[0] + r * math.cos(math.radians(60.0 * k)),
+                     at[1] + r * math.sin(math.radians(60.0 * k)))
+                    for k in range(6)])
+
+
 def _case_screws(spec: CaseSpec, outer: Polygon, role: Role):
-    """Bolt holes for one layer: a countersink at the outer faces, a shank
-    everywhere in between."""
-    d = spec.case_screw_head if role in ("floor", "lid") else spec.case_screw_d
+    """Bolt holes for one layer: a counterbore for the head in the lid, a
+    hex trap for the nut in the floor, a shank everywhere in between.
+
+    The floor used to take the same round head bore as the lid, and a nut
+    dropped into a round hole spins: the bolt could be tightened only by
+    holding the nut with pliers from outside. A hexagon the nut's own width
+    across flats holds it while the bolt is driven from the top.
+    """
     holes, notes = [], []
+    f = case_bolt_fastener(spec) if role == "floor" else None
+    d = spec.case_screw_head if role == "lid" else spec.case_screw_d
     for cx, cy in case_screw_points(spec, outer):
         p = Point(cx, cy)
         if not outer.contains(p):
+            continue
+        if f is not None:
+            holes.append(nut_trap((cx, cy), f.nut_af + NUT_TRAP_CLEARANCE))
+            notes.append(f"case bolt at ({cx:.1f}, {cy:.1f}): {f.name} nut "
+                         f"trap, {f.nut_af + NUT_TRAP_CLEARANCE:g} mm across "
+                         f"flats")
             continue
         holes.append(p.buffer(d / 2.0, quad_segs=24))
         notes.append(f"case bolt at ({cx:.1f}, {cy:.1f})")

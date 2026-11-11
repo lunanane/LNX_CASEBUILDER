@@ -818,11 +818,32 @@ def sheet_files(source, fmt: str, basename: str = "case", stock=None
         files.append((f"{basename}-cutlist.txt",
                       box_cutlist(source, sheets, stock)))
         return files
+    from .case import CaseModel
+
     sheets = pack_sheets(source, stock=stock)
     files = _sheet_texts(sheets, fmt, basename)
-    files.append((f"{basename}-cutlist.txt",
-                  sheet_manifest(sheets, stock if stock is not None else source)))
+    text = sheet_manifest(sheets, stock if stock is not None else source)
+    if isinstance(source, CaseModel):
+        text = case_cutlist(source, text)
+    files.append((f"{basename}-cutlist.txt", text))
     return files
+
+
+def case_cutlist(model, manifest: str) -> str:
+    """A layered case's cut list: the sheets, then what is bought to put
+    them together -- the case bolts, the board screws and their nuts."""
+    lines = [manifest]
+    bought = model.hardware
+    if bought or model.hardware_notes:
+        lines += ["fixings:"]
+        lines += [f"  {n} x {item}" for item, n in bought.items()]
+        if any(k.endswith(" screw") for k in bought):
+            lines.append("  board screws: one per mounting hole, from the "
+                         "plate the head bears on through the board, nut on "
+                         "the board's far face")
+        lines += [f"  {n}" for n in model.hardware_notes]
+        lines.append("")
+    return "\n".join(lines)
 
 
 def _sheet_texts(sheets: list[PackedSheet], fmt: str, basename: str
