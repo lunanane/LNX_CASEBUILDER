@@ -4435,6 +4435,7 @@ function buildPcbLayers(caseModel) {
   wireCatalog();
   wireMenus();
   wireTabs();
+  refreshUseCase();   // before any scene: the layered case's panes, not all four
   wireFramePanel();
   wireHelp();
   wirePlates();
