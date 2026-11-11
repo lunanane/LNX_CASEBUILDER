@@ -519,3 +519,40 @@ def test_a_build_the_builder_refuses_exits_1_not_a_traceback(tmp_path, capsys):
     assert cli.main(["build", str(scene), "-o", str(tmp_path / "o")]) == 1
     out = capsys.readouterr().out
     assert "overlap" in out and "[X] build" in out
+
+
+# --------------------------------------------------------------------------
+# the box starter
+# --------------------------------------------------------------------------
+
+
+def _starter_scene(uncomment_bay: bool):
+    import yaml
+
+    from hwcase.api import _starter_text
+    from hwcase.schema import Scene
+
+    text = _starter_text("new-box", "box")
+    if uncomment_bay:
+        lines = text.splitlines()
+        i = lines.index("# racks:")
+        j = i
+        while j < len(lines) and lines[j].startswith("#"):
+            j += 1
+        lines[i:j] = [ln[2:] for ln in lines[i:j]]
+        text = "\n".join(lines)
+    return Scene.model_validate(yaml.safe_load(text))
+
+
+def test_the_box_starter_builds_with_nothing_placed():
+    model = case_mod.build(resolve(_starter_scene(False), LIB))
+    assert len(model.plates) == 6 and model.height > 20.0
+
+
+def test_the_box_starters_sample_bay_builds_when_uncommented():
+    scene = _starter_scene(True)
+    assert scene.racks[0].hp == 28 and scene.placements == []
+    res = resolve(scene, LIB)
+    assert [i for i in check(res, LIB) if i.level == "error"] == []
+    model = case_mod.build(res)
+    assert {"bay1-cheek-left", "bay1-cheek-right"} <= {p.name for p in model.plates}

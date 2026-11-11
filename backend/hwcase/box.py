@@ -58,6 +58,10 @@ _WALL_OF_NORMAL = {(0, -1): "front", (0, 1): "back", (-1, 0): "left",
 _WALL_OF_FACE = {"-y": "front", "+y": "back", "-x": "left", "+x": "right"}
 
 
+#: an empty scene's box, inside (x, y, height): a placeholder, not a design
+EMPTY_BOX = (120.0, 80.0, 30.0)
+
+
 @dataclass
 class BoxPlate:
     """One cut plate of the box."""
@@ -176,6 +180,15 @@ def build_box(res, spec, deck_top: Optional[float] = None,
     i = t if joint == "tslot" else 0.0          # walls stand this far in
     trim = t if joint == "tslot" else 0.0       # side-wall joints stop short
 
+    if not res.solids and outer is None and spec.outline is None:
+        # Nothing placed yet -- a new project. A box sized from no hardware
+        # is a sliver no joint fits, so it gets a placeholder to look at
+        # until the first board (or bay) gives it a size.
+        w, d, h = EMPTY_BOX
+        outer = rect(-w / 2, -d / 2, w / 2, d / 2)
+        if floor_top is None:
+            floor_top = (panel_plane(res, spec) if deck_top is None
+                         else deck_top) - h
     if outer is None:
         outer = outer_shape(res, spec)
     x0, y0, x1, y1 = outer.bounds

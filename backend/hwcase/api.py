@@ -286,7 +286,23 @@ BOX_STARTER = """# A new box case.
 #
 # Eurorack rails can be set into the deck as rack bays (the case pane): the
 # module faces become the case's surface, and only the placements listed as a
-# bay's modules may enter its space.
+# bay's modules may enter its space. Until something is placed, the box is a
+# 120 x 80 x 30 mm placeholder.
+#
+# A bay, to uncomment: 28 HP of 3U rails whose bottom-left corner is at the
+# origin, 40 mm of room behind the module panels. A module is placed by its
+# slot -- HP from the rails' left end, row from the bottom, both from 0 -- and
+# whatever is mated to it (its panel) comes along:
+#
+# racks:
+#   - id: bay1
+#     at: [0.0, 0.0]
+#     hp: 28
+#     rows:
+#       - {{format: 3U}}
+#     module_depth: 40.0
+#     module_panel_t: 2.0
+#     modules: []          # e.g. - {{id: amy, hp_slot: 0, row: 0}}
 
 name: {name}
 placements: []
