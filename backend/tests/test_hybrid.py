@@ -222,7 +222,7 @@ def test_the_editor_gets_plates_rails_and_the_bay(model):
     data = box_to_json(model)
     assert len(data["plates"]) == 8
     assert [m["role"] for m in data["members"]] == ["rail", "rail"]
-    assert data["extras"]["bays"][0]["modules"] == ["amy", "amy_panel"]
+    assert data["extras"]["bays"][0]["modules"] == ["amy"]
     for p in data["plates"] + data["members"]:
         m = np.array(p["matrix"], float).reshape(4, 4)[:3, :3]
         assert np.linalg.det(m) == pytest.approx(1.0)
@@ -349,3 +349,115 @@ def test_two_bays_with_one_id_are_named():
     b = a.model_copy(update={"modules": [], "at": (a.at[0], -250.0)})
     issues = check(resolve(_with_bays(a, b), LIB), LIB)
     assert any("two bays are called bay" in i.message for i in issues)
+
+
+
+# --------------------------------------------------------------------------
+# modules: by slot, on the grid
+# --------------------------------------------------------------------------
+
+from hwcase.schema import BayModule  # noqa: E402
+
+
+def _panel_box(res, pid="amy_panel"):
+    return next(s.poly.bounds for s in res.solids
+                if s.placement == pid and s.name == "pcb")
+
+
+def _bay_errors(scene):
+    return [e for e in _errors(scene) if e.code == "rack_bay"]
+
+
+def _modules(*entries, **bay_changes):
+    scene = _scene()
+    bay = scene.racks[0].model_copy(update={"modules": list(entries),
+                                            **bay_changes})
+    return scene.model_copy(update={"racks": [bay]})
+
+
+def _second_amy(scene, pos=(0.0, 0.0, 0.0)):
+    amy = next(p for p in scene.placements if p.id == "amy")
+    panel = next(p for p in scene.placements if p.id == "amy_panel")
+    extra = [amy.model_copy(update={"id": "amy2", "pos": pos}),
+             panel.model_copy(update={"id": "amy2_panel", "parent": "amy2"})]
+    return scene.model_copy(update={"placements": scene.placements + extra})
+
+
+def test_a_module_is_placed_by_its_hp_slot():
+    """Slot 10 puts the panel's left edge 10 HP from the rails' left end and
+    centres it on the row's rails; its board comes along, however the scene
+    had it placed."""
+    res = resolve(_modules(BayModule(id="amy", hp_slot=10)), LIB)
+    x0, y0, _x1, y1 = _panel_box(res)
+    assert x0 == pytest.approx(10 * 5.08, abs=1e-6)
+    # 3U holes are 122.5 apart and 3.0 in from the panel's edges, so the
+    # panel's bottom edge is 2.0 under the bottom rail's slot centre (5.0)
+    assert y0 == pytest.approx(2.0, abs=1e-6)
+    assert y1 - y0 == pytest.approx(128.5, abs=1e-6)
+    board = _panel_box(res, "amy")
+    assert board[0] - x0 == pytest.approx(1.15, abs=1e-6)
+    assert [e for e in check(res, LIB) if e.level == "error"] == []
+
+
+def test_a_module_in_a_row_the_bay_does_not_have_is_named():
+    errors = _bay_errors(_modules(BayModule(id="amy", row=1)))
+    assert any("row 1" in e.message and "1 row" in e.message for e in errors)
+
+
+def test_a_module_running_past_the_rails_is_named():
+    errors = _bay_errors(_modules(BayModule(id="amy", hp_slot=20)))
+    assert any("past the end" in e.message and "amy" in e.refs
+               for e in errors)
+
+
+def test_two_modules_in_one_slot_overlap():
+    scene = _second_amy(_modules(BayModule(id="amy", hp_slot=0),
+                                 BayModule(id="amy2", hp_slot=5)))
+    errors = _bay_errors(scene)
+    assert any("overlap" in e.message and {"amy", "amy2"} <= set(e.refs)
+               for e in errors)
+
+
+def test_a_full_row_is_fine_and_one_more_hp_is_not():
+    scene = _second_amy(_modules(BayModule(id="amy", hp_slot=0),
+                                 BayModule(id="amy2", hp_slot=10), hp=20))
+    assert _bay_errors(scene) == []
+    scene = _second_amy(_modules(BayModule(id="amy", hp_slot=0),
+                                 BayModule(id="amy2", hp_slot=10), hp=19))
+    assert any("past the end" in e.message for e in _bay_errors(scene))
+
+
+def test_modules_listed_by_id_still_load_and_are_checked():
+    """The old form -- bare ids, the position typed by hand -- loads; on the
+    grid it is fine, 1.3 mm off it or out of the aperture it is an error."""
+    def free(dx=0.0, dy=0.0):
+        scene = _modules("amy", "amy_panel")
+        moved = [p.model_copy(update={"pos": (1.15 + dx, 13.35 + dy, 0.0)})
+                 if p.id == "amy" else p for p in scene.placements]
+        return scene.model_copy(update={"placements": moved})
+
+    assert _bay_errors(free()) == []
+    off = _bay_errors(free(dx=1.3))
+    assert any("1.30 mm off" in e.message and "hp_slot: 0" in e.message
+               for e in off)
+    high = _bay_errors(free(dx=5.08, dy=0.4))
+    assert any("off row 0's rails" in e.message for e in high)
+    # under the solid deck, beside the bay: nothing else catches this
+    gone = _bay_errors(free(dx=0.0, dy=-140.0))
+    assert any("not inside" in e.message for e in gone)
+
+
+def test_a_module_in_two_bays_is_named():
+    scene = _scene()
+    a = scene.racks[0]
+    b = a.model_copy(update={"id": "bay2", "at": (a.at[0], -250.0)})
+    errors = _bay_errors(scene.model_copy(update={"racks": [a, b]}))
+    assert any("more than one bay" in e.message for e in errors)
+
+
+def test_a_panel_thinner_than_the_bay_expects_is_a_warning():
+    """The AMYboard's 2 mm panel in a bay set for 3 mm panels: with its face
+    flush with the deck, its back stands a millimetre off the rails."""
+    res = resolve(_modules(BayModule(id="amy"), module_panel_t=3.0), LIB)
+    assert any(i.level == "warning" and "1.00 mm above the rails"
+               in i.message for i in check(res, LIB))
