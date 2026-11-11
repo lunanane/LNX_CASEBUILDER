@@ -186,6 +186,72 @@ drill sizes (§9). If the engine should *enforce* these rather than have them si
 in prose, the natural home is a `standards` block the checker reads — say the
 word and this lifts into YAML.
 
+## 11. A panel made as a PCB
+
+Many DIY panels are not cut at all: they are 1.6 mm FR4 boards from a PCB
+service, black (or any colour) soldermask, white silkscreen lettering, and gold
+where the mask is opened over copper. The editor's panel group has a **made as**
+choice for this; in the scene it is
+
+```yaml
+case:
+  eurorack_panel:
+    hp: 10
+    fab: pcb            # laser (the default) | pcb
+    pcb: {thickness: 1.6, mask: black, silk: white, finish: enig, ring: 0.6}
+```
+
+**What can be ordered** lives in one table, [`web/pcb-fab.json`](../web/pcb-fab.json),
+read by the backend (validation, checks, fab notes; also served at
+`/api/pcb/palette`) and by the editor (swatches, the image preview, the 3D
+colours). Mask: green, matte green, black, matte black, white, blue, red,
+yellow, purple. Silk: white or black (black on white or yellow mask; white on
+the rest). Finish: ENIG (gold), HASL and lead-free HASL (silver). Thickness:
+0.8–2.0 mm. The preview colours are sRGB approximations, not the services'
+renderings. With `fab: pcb` the board thickness *is* the panel thickness, so
+the standoffs are measured from the back of a 1.6 mm board.
+
+**Layers.** Every decoration element gets a `layer`: `silk` (printed),
+`copper` (exposed metal: copper under a mask opening, gold or silver by the
+finish) or `substrate` (mask opened, no copper: bare FR4). `ring` puts a
+metal rim of that width round every round panel hole.
+
+**Image artwork** (`scene.artwork`). Any PNG/JPG/SVG is sampled in the browser
+to at most 512 × 512 greyscale and stored in the scene as `z64:` base64 of the
+zlib-compressed bytes — a few kB to a few hundred kB, inside the 1 MB scene
+limit — together with the thresholds and the layer of each band. The original
+file and the traced outlines are *not* stored; the build traces the bands from
+the greyscale (marching squares with interpolated edge crossings, numpy and
+shapely only) every time, so thresholds stay editable. One threshold makes two
+bands, two make three; each band maps to `mask` (leave it), `silk`, `copper` or
+`substrate`. `blur` (mm) despeckles; `min_feature` (mm) drops anything thinner,
+and the issues list says how much was dropped. Artwork is clipped to the
+board, kept 0.5 mm off the holes and 2.5 mm off the rail slots (the screw head
+sits there).
+
+**What the build does for the fab, and says:** silk on a mask opening or over
+a hole is clipped off (a fab would do it anyway); copper is pulled 0.3 mm in
+from every edge and hole; silk lines under 0.15 mm, lettering under 1 mm, a
+ring under 0.15 mm and metal lines under 0.15 mm are warnings.
+
+**The package** (*export for PCB fab*, `POST /api/export/pcb`) is a zip with
+Protel-named Gerbers (RS-274X, 4.6 mm, X2 file attributes): `.GTL` top copper,
+`.GTS` top mask (drawn = opening), `.GTO` top silk, `.GBL`/`.GBS` an empty
+bottom, `.GKO` outline, and `-NPTH.DRL` (Excellon, metric). Polygons with holes
+are drawn dark and their holes cleared (`%LPD*%`/`%LPC*%`); unclipped lettering
+is stroked with a round aperture the width of its line. All panel holes are
+non-plated. Round ones are drilled; the oval rail slots and any other cut-out
+(display windows) are **routed — drawn as closed contours on the `.GKO`
+outline layer**, which JLCPCB, PCBWay, Aisler and OSH Park all route as
+internal cut-outs, rather than as Excellon G85 slots, which not every
+service's CAM reads. The `-fab-notes.txt` says what to tick: 2 layers, FR4,
+thickness, mask, silk, finish, no edge plating, and *remove order number* (or
+*specify a location*) — otherwise the order number is printed on the front.
+
+Before paying, upload the zip to the service's Gerber viewer and check: the
+outline and the rail slots routed, the holes drilled, gold where you meant
+gold, and no order-number placement on the face.
+
 ## Sources
 
 - [Doepfer A-100 construction details](https://doepfer.de/a100_man/a100m_e.htm) —
