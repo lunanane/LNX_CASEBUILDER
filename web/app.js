@@ -462,8 +462,18 @@ function buildSupports(resolved) {
  *  Only the walls: the flat faces are what you look at, and dimming those
  *  would just make the whole model muddy. Returns whether it did anything, so
  *  the material only pays for vertex colours when there are some.
+ *
+ *  The walls need vertices inside the slab for the darkening to fade out:
+ *  extrude with `contactSteps` or every wall vertex sits on a seam and the
+ *  whole wall goes uniformly dark. `seams` says which faces actually touch
+ *  another sheet -- the floor's underside and the lid's top do not.
  */
-function bakeContactShading(geom, depth, strength) {
+function contactSteps(depth, strength) {
+  if (!(strength > 0) || depth <= 0) return 1;
+  return Math.max(2, Math.ceil(depth / Math.min(1.2, depth / 2)));
+}
+
+function bakeContactShading(geom, depth, strength, seams = { bottom: true, top: true }) {
   if (!(strength > 0) || depth <= 0) return false;
   const pos = geom.getAttribute('position');
   const nrm = geom.getAttribute('normal');
@@ -478,7 +488,8 @@ function bakeContactShading(geom, depth, strength) {
   for (let i = 0; i < pos.count; i++) {
     if (Math.abs(nrm.getZ(i)) > 0.5) continue;          // a cap, not a wall
     const z = pos.getZ(i);
-    const d = Math.min(z, depth - z);                   // distance to a seam
+    const d = Math.min(seams.bottom ? z : Infinity,     // distance to a seam
+                       seams.top ? depth - z : Infinity);
     if (d >= reach) continue;
     const shade = 1 - strength * (1 - d / reach);
     col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = shade;
@@ -548,16 +559,29 @@ function buildCase(caseModel) {
     }
     const shapes = shapesFromRings(layer.rings);
     if (!shapes.length) continue;
-    const depth = Math.max(layer.z1 - layer.z0 - 0.05, 0.05);
+    // Full thickness, at the layer's own z. A display gap between sheets
+    // (there used to be 0.05 mm) shows the lower sheet's sunlit top through
+    // it: every seam became a bright sliver that flickers in and out as the
+    // view moves, so the stack read as overlapping surfaces. Touching sheets
+    // only share faces where both are hidden inside the stack; the seam is
+    // drawn by the contact shading instead, dark as a real joint is.
+    const depth = Math.max(layer.z1 - layer.z0, 0.05);
+    const strength = renderSettings().ao;
     const geom = new THREE.ExtrudeGeometry(shapes, {
-      depth, bevelEnabled: false, curveSegments: 6 });
-    const ao = bakeContactShading(geom, depth, renderSettings().ao);
+      depth, bevelEnabled: false, curveSegments: 6,
+      steps: contactSteps(depth, strength) });
+    const ao = bakeContactShading(geom, depth, strength, {
+      bottom: layer.role !== 'floor', top: layer.role !== 'lid' });
+    const clear = finish.opacity < 1;
     const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
       color: finish.color, roughness: finish.roughness, metalness: finish.metalness,
-      transparent: finish.opacity < 1, opacity: finish.opacity,
+      transparent: clear, opacity: finish.opacity,
+      // see-through sheets show their shared faces; without this the two
+      // coincident faces fight over the depth buffer and blend in a mottle
+      depthWrite: !clear,
       side: THREE.DoubleSide, vertexColors: ao,
     }));
-    mesh.position.z = layer.z0 + 0.025;
+    mesh.position.z = layer.z0;
     mesh.castShadow = mesh.receiveShadow = true;
     caseGroup.add(mesh);
   }
@@ -596,25 +620,29 @@ function buildRack(model) {
 
   for (const m of model.members) {
     const style = MEMBER_STYLE[m.kind] || MEMBER_STYLE.body;
-
-    if (!solid) {
-      const mat = new THREE.LineBasicMaterial({
-        color: style.color, transparent: true, opacity: 0.6 });
-      for (const ring of m.rings) {
-        const pts = ring.map((pt) => new THREE.Vector3(
-          m.origin[0], m.origin[1] + pt[1], m.origin[2] - pt[0]));
-        if (pts.length) pts.push(pts[0]);
-        caseGroup.add(new THREE.Line(
-          new THREE.BufferGeometry().setFromPoints(pts), mat));
-      }
-      continue;
-    }
-
     const shapes = shapesFromRings(m.rings);
     if (!shapes.length) continue;
     const geom = new THREE.ExtrudeGeometry(shapes, {
       depth: m.length, bevelEnabled: false, curveSegments: 10 });
     geom.applyMatrix4(MEMBER_BASIS);
+
+    if (!solid) {
+      // The whole swept member, as its edges. Drawing only the section ring
+      // put one U-shaped outline at the frame's end, edge-on to the default
+      // camera and under the side panel's outline: the body, which is the
+      // case, vanished from the preview. A box's plate is a few mm thick and
+      // its outline reads; a member is as long as the case, so it needs its
+      // length drawn.
+      const mat = new THREE.LineBasicMaterial({
+        color: style.color, transparent: true, opacity: 0.6 });
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 20), mat);
+      geom.dispose();
+      edges.position.set(m.origin[0], m.origin[1], m.origin[2]);
+      edges.userData = { member: m.name, kind: m.kind };
+      caseGroup.add(edges);
+      continue;
+    }
+
     const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
       color: style.color, roughness: style.roughness, metalness: style.metalness,
       transparent: style.opacity < 1, opacity: style.opacity,
