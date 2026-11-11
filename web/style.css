@@ -291,7 +291,7 @@ body:not(.rendering) .sunctl { opacity: .35; }
   width: 62px; background: var(--panel-2); color: var(--fg);
   border: 1px solid var(--line); border-radius: 3px; padding: 2px 5px; font: inherit;
 }
-#engrave-panel select, #engrave-panel .eng-name { width: 100%; }
+#engrave-panel select, #engrave-panel .eng-name, #engrave-panel .art-name { width: 100%; }
 #engrave-panel .unit { color: var(--dim); font-size: 11px; }
 #engrave-panel .check { display: block; color: var(--dim); margin: 3px 0; cursor: pointer; }
 #engrave-panel .check input { margin-right: 5px; }
@@ -305,11 +305,11 @@ body:not(.rendering) .sunctl { opacity: .35; }
 }
 .engrow.through { border-color: var(--warn); }
 .engrow-head { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
-.eng-del {
+.eng-del, .art-del {
   flex: 0 0 auto; padding: 0 6px; line-height: 1.4;
   border: 1px solid var(--line); background: none; color: var(--dim);
 }
-.eng-del:hover { color: var(--err); border-color: var(--err); }
+.eng-del:hover, .art-del:hover { color: var(--err); border-color: var(--err); }
 
 
 #render-panel .field { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
@@ -353,3 +353,19 @@ body:not(.rendering) .sunctl { opacity: .35; }
 }
 .plate-row .pl-del:hover { color: var(--err); border-color: var(--err); }
 #btn-add-plate { margin: 2px 0 8px 62px; }
+
+/* PCB panel: colour swatches from pcb-fab.json, and the artwork preview */
+.swatches { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.swatch {
+  width: 20px; height: 20px; padding: 0; border-radius: 4px; cursor: pointer;
+  background: var(--sw); border: 1px solid rgba(127, 127, 127, 0.6);
+}
+.swatch.on { outline: 2px solid var(--accent, #57c7ff); outline-offset: 1px; }
+.swatch.odd { opacity: 0.45; }
+.swatch.small { width: 12px; height: 12px; cursor: default; display: inline-block; vertical-align: middle; }
+.art-canvas {
+  display: block; width: 100%; max-height: 220px; object-fit: contain;
+  image-rendering: pixelated; margin: 4px 0 6px; border-radius: 3px;
+  background: #000;
+}
+.artrow input[type="range"] { flex: 1; min-width: 80px; }

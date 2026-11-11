@@ -10,6 +10,10 @@ import { STOCK, restockName } from './stock.js';
 import { wireMenus } from './menu.js';
 import { store, files, nameFromFile, NAME_RE } from './store.js';
 import { applyUseCase, STARTER_KIND, useCaseOf } from './usecase.js';
+import {
+  ART_LAYERS, ELEMENT_LAYERS, PCB_DEFAULTS, decodeGray, encodeGray, fitSize, layerColor,
+  layerLabel, newArtwork, pcbOf, setBands, thresholdPreview, toGray,
+} from './pcb.js';
 
 // ---------------------------------------------------------------------------
 // state
@@ -1587,6 +1591,59 @@ function renderPanelSettings() {
     if (document.activeElement !== el) el.value = ep[key] ?? dflt;
   }
   $('ep-hp-mm').textContent = '= ' + ((ep.hp ?? 10) * 5.08).toFixed(2) + ' mm of rail';
+  renderPcbSettings(ep);
+}
+
+/** What a PCB service offers (pcb-fab.json, via /api/pcb/palette), loaded
+ *  once at boot; the swatches, the image preview and the 3D colours all
+ *  read it. */
+let PCB_PALETTE = null;
+
+function swatchesHtml(kind, current, allowed = null) {
+  return Object.entries(PCB_PALETTE?.[kind] ?? {}).map(([key, row]) => {
+    const odd = allowed && !allowed.includes(key);
+    return `<button type="button" class="swatch${key === current ? ' on' : ''}${odd ? ' odd' : ''}"
+      data-kind="${kind}" data-key="${key}" style="--sw:${row.color}"
+      title="${escapeHtml(row.label)}${odd ? ' -- not usually offered with this mask' : ''}"></button>`;
+  }).join('');
+}
+
+function renderPcbSettings(ep) {
+  const pcb = ep.fab === 'pcb' ? { ...PCB_DEFAULTS, ...(ep.pcb ?? {}) } : null;
+  if (document.activeElement !== $('ep-fab')) $('ep-fab').value = pcb ? 'pcb' : 'laser';
+  $('ep-t-row').hidden = !!pcb;
+  $('ep-pcb').hidden = !pcb;
+  if (!pcb) return;
+  $('ep-pcb-t').innerHTML = (PCB_PALETTE?.thickness ?? [pcb.thickness]).map((t) =>
+    `<option value="${t}"${t === pcb.thickness ? ' selected' : ''}>${t}</option>`).join('');
+  $('ep-pcb-mask').innerHTML = swatchesHtml('mask', pcb.mask);
+  $('ep-pcb-silk').innerHTML = swatchesHtml('silk', pcb.silk, PCB_PALETTE?.mask?.[pcb.mask]?.silk);
+  $('ep-pcb-finish').innerHTML = swatchesHtml('finish', pcb.finish);
+  if (document.activeElement !== $('ep-pcb-ring')) $('ep-pcb-ring').value = pcb.ring ?? 0;
+  const lbl = (k, v) => PCB_PALETTE?.[k]?.[v]?.label ?? v;
+  $('ep-pcb-note').textContent = `${pcb.thickness} mm FR4, ${lbl('mask', pcb.mask)} mask, ` +
+    `${lbl('silk', pcb.silk)} silk, ${lbl('finish', pcb.finish)}. Decoration picks ` +
+    `silk, ${layerLabel(PCB_PALETTE, pcb, 'copper')} or bare board per element.`;
+}
+
+/** Fetch the zip a board house takes and save it. */
+async function exportPcb() {
+  const btn = $('ep-pcb-export');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/export/pcb', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(state.scene),
+    });
+    if (!r.ok) throw new Error((await r.text()).slice(0, 300));
+    const name = (state.scene.name || 'panel').replace(/[^A-Za-z0-9._-]+/g, '-');
+    await saveBlob(await r.blob(), `${name}-pcb.zip`, 'Gerber package', 'application/zip');
+    status('PCB package exported -- check it in the Gerber viewer of the service');
+  } catch (err) {
+    status('PCB export failed: ' + err.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function wirePanelSettings() {
@@ -1607,6 +1664,40 @@ function wirePanelSettings() {
       scheduleResolve(250);
     };
   }
+  const pcbEdit = (key, fn) => {
+    const ep = state.scene?.case?.eurorack_panel;
+    if (!ep) return;
+    edit('panel-' + key);
+    fn(ep);
+    renderPanelSettings();
+    renderEngravePanel();
+    scheduleResolve(150);
+  };
+  $('ep-fab').onchange = () => pcbEdit('fab', (ep) => {
+    ep.fab = $('ep-fab').value;
+    if (ep.fab === 'pcb') ep.pcb = { ...PCB_DEFAULTS, ...(ep.pcb ?? {}) };
+  });
+  $('ep-pcb-t').onchange = () => pcbEdit('pcb-t', (ep) => {
+    ep.pcb = { ...PCB_DEFAULTS, ...(ep.pcb ?? {}), thickness: parseFloat($('ep-pcb-t').value) };
+  });
+  $('ep-pcb-ring').onchange = () => {
+    const v = parseFloat($('ep-pcb-ring').value);
+    if (!Number.isFinite(v) || v < 0) return;
+    pcbEdit('pcb-ring', (ep) => { ep.pcb = { ...PCB_DEFAULTS, ...(ep.pcb ?? {}), ring: v }; });
+  };
+  $('ep-pcb').addEventListener('click', (ev) => {
+    const sw = ev.target.closest('.swatch');
+    if (!sw) return;
+    pcbEdit('pcb-' + sw.dataset.kind, (ep) => {
+      ep.pcb = { ...PCB_DEFAULTS, ...(ep.pcb ?? {}), [sw.dataset.kind]: sw.dataset.key };
+      // a white mask takes black silk and the rest white: follow the mask
+      if (sw.dataset.kind === 'mask') {
+        const ok = PCB_PALETTE?.mask?.[sw.dataset.key]?.silk ?? [];
+        if (ok.length && !ok.includes(ep.pcb.silk)) ep.pcb.silk = ok[0];
+      }
+    });
+  });
+  $('ep-pcb-export').onclick = exportPcb;
 }
 
 function wireCaseScrews() {
@@ -3686,6 +3777,7 @@ function renderEngravePanel() {
   if (typing) return;
 
   const list = engravings();
+  const pcb = pcbOf(state.scene);
 
   box.innerHTML = `
     <div class="field">
@@ -3697,6 +3789,7 @@ function renderEngravePanel() {
       </select>
     </div>
     <div id="eng-list"></div>
+    <div id="art-list"></div>
     ${list.length ? '' : `<p class="note">Nothing engraved yet. Marks go on
       the faceplate or the backplate and are exported as their own pass, in
       blue, on their own DXF layer — a cutter must never run them as cuts.
@@ -3727,6 +3820,11 @@ function renderEngravePanel() {
           <option value="lid"${(e.face ?? 'lid') === 'lid' ? ' selected' : ''}>faceplate</option>
           <option value="floor"${e.face === 'floor' ? ' selected' : ''}>backplate</option>
         </select></div>
+      ${pcb ? `<div class="field"><label title="printed silk, exposed metal (copper under a mask opening, plated by the finish), or bare board (mask opened, no copper)">layer</label>
+        <select class="eng-layer">${ELEMENT_LAYERS.map((l) =>
+          `<option value="${l}"${(e.layer ?? 'silk') === l ? ' selected' : ''}>${layerLabel(PCB_PALETTE, pcb, l)}</option>`).join('')}
+        </select>
+        <span class="swatch small" style="--sw:${layerColor(PCB_PALETTE, pcb, e.layer ?? 'silk')}"></span></div>` : ''}
       <div class="field"><label>centre</label>
         <input type="number" class="eng-x" step="1" value="${e.at[0]}">
         <input type="number" class="eng-y" step="1" value="${e.at[1]}"></div>
@@ -3784,6 +3882,10 @@ function renderEngravePanel() {
       refreshCase();
     };
     el.querySelector('.eng-name').onchange = (ev) => set(() => { e.name = ev.target.value; });
+    el.querySelector('.eng-layer')?.addEventListener('change', (ev) => {
+      set(() => { e.layer = ev.target.value; });
+      renderEngravePanel();
+    });
     el.querySelector('.eng-face').onchange = (ev) => {
       set(() => { e.face = ev.target.value; });
       renderEngravePanel();
@@ -3830,6 +3932,192 @@ function renderEngravePanel() {
     };
     holder.appendChild(el);
   });
+  renderArtwork($('art-list'), pcb);
+}
+
+// ---------------------------------------------------------------------------
+// raster artwork on a PCB panel
+// ---------------------------------------------------------------------------
+
+/** Decoded greyscale per stored `data` string, so a slider redraws at once. */
+const artGray = new Map();
+
+function grayOf(art) {
+  if (!artGray.has(art.data)) artGray.set(art.data, decodeGray(art.data));
+  return artGray.get(art.data);
+}
+
+async function drawArt(canvas, art, pcb) {
+  const gray = await grayOf(art);
+  const [w, h] = art.pixels;
+  canvas.width = w;
+  canvas.height = h;
+  const img = new ImageData(thresholdPreview(gray, art, PCB_PALETTE, pcb), w, h);
+  canvas.getContext('2d').putImageData(img, 0, 0);
+}
+
+/** Read an image file down to the greyscale a scene stores. */
+async function loadArtFile(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    // an SVG with no size of its own reports 0: give it the full raster
+    const [w, h] = fitSize(img.naturalWidth || 512, img.naturalHeight || 512);
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    const gray = toGray(ctx.getImageData(0, 0, w, h).data, w, h);
+    return { pixels: [w, h], data: await encodeGray(gray) };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function artwork() {
+  if (!state.scene.artwork) state.scene.artwork = [];
+  return state.scene.artwork;
+}
+
+function renderArtwork(holder, pcb) {
+  if (!holder) return;
+  holder.innerHTML = '';
+  if (!pcb) {
+    if (state.scene?.artwork?.length) {
+      holder.innerHTML = `<p class="note warn">This scene has image artwork, which
+        only a panel made as a PCB prints -- set "made as" to PCB.</p>`;
+    }
+    return;
+  }
+  const head = document.createElement('div');
+  head.innerHTML = `
+    <div class="field"><label title="any PNG, JPG or SVG; it is split by brightness into two or three layers">add image</label>
+      <select class="art-new-bands">
+        <option value="3">3 layers</option>
+        <option value="2">2 layers</option>
+      </select>
+      <input type="file" class="art-file" accept="image/png,image/jpeg,image/svg+xml"></div>`;
+  holder.appendChild(head);
+  head.querySelector('.art-file').onchange = async (ev) => {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    try {
+      const { pixels, data } = await loadArtFile(file);
+      const ep = state.scene.case.eurorack_panel;
+      const rings = state.caseModel?.layers?.[0]?.rings ?? [];
+      const panelW = rings.length
+        ? Math.max(...rings.flat().map((pt) => pt[0]))
+        : (ep.hp ?? 10) * 5.08;
+      edit();
+      artwork().push(newArtwork(file.name.replace(/\.[^.]+$/, '') || 'image', pixels, data,
+        panelW, parseInt(head.querySelector('.art-new-bands').value, 10)));
+      renderEngravePanel();
+      refreshCase();
+    } catch (err) {
+      status('could not read that image: ' + err.message, 'err');
+    }
+  };
+
+  const issues = state.resolved?.issues ?? [];
+  artwork().forEach((art, i) => {
+    const el = document.createElement('div');
+    el.className = 'engrow artrow';
+    const bands = art.layers.length;
+    el.innerHTML = `
+      <div class="engrow-head">
+        <input type="text" class="art-name" value="${escapeHtml(art.name)}" title="name">
+        <button class="art-del" title="remove this image">&times;</button>
+      </div>
+      <canvas class="art-canvas" title="as it will come out: each brightness band in its layer's colour"></canvas>
+      <div class="field"><label>layers</label>
+        <select class="art-bands">
+          <option value="2"${bands === 2 ? ' selected' : ''}>2</option>
+          <option value="3"${bands === 3 ? ' selected' : ''}>3</option>
+        </select>
+        <label class="check"><input type="checkbox" class="art-invert"${art.invert ? ' checked' : ''}> invert</label></div>
+      ${art.layers.map((l, b) => `
+        <div class="field"><label>${b === 0 ? 'darkest' : b === bands - 1 ? 'brightest' : 'middle'}</label>
+          <select class="art-layer" data-band="${b}">${ART_LAYERS.map((k) =>
+            `<option value="${k}"${k === l ? ' selected' : ''}>${escapeHtml(layerLabel(PCB_PALETTE, pcb, k))}</option>`).join('')}
+          </select>
+          <span class="swatch small" style="--sw:${layerColor(PCB_PALETTE, pcb, l)}"></span></div>
+        ${b < bands - 1 ? `<div class="field"><label title="brightness where this band ends and the next begins">cut</label>
+          <input type="range" class="art-t" data-t="${b}" min="0" max="255" step="1" value="${art.thresholds[b]}">
+          <span class="unit art-tv">${Math.round(art.thresholds[b])}</span></div>` : ''}`).join('')}
+      <div class="field"><label title="smoothing before the cut, mm: takes out speckle">blur</label>
+        <input type="number" class="art-blur" step="0.05" min="0" max="5" value="${art.blur ?? 0}"><span class="unit">mm</span>
+        <label title="anything thinner is dropped; match the fab: silk 0.15, copper 0.15-0.2">min</label>
+        <input type="number" class="art-min" step="0.05" min="0" max="5" value="${art.min_feature ?? 0.2}"><span class="unit">mm</span></div>
+      <div class="field"><label>centre</label>
+        <input type="number" class="art-x" step="0.5" value="${art.at[0]}">
+        <input type="number" class="art-y" step="0.5" value="${art.at[1]}"></div>
+      <div class="field"><label title="printed width; the height follows the image">width</label>
+        <input type="number" class="art-w" step="0.5" min="1" value="${art.width}"><span class="unit">mm,
+          ${(art.width * art.pixels[1] / art.pixels[0]).toFixed(1)} tall</span></div>
+      ${issues.filter((x) => x.code?.startsWith('pcb_art') && x.message.includes(`'${art.name}'`))
+        .map((x) => `<p class="note${x.level === 'info' ? '' : ' warn'}">${escapeHtml(x.message)}</p>`).join('')}
+      <p class="note">Kept clear of the holes and the rail screws, clipped to the panel.</p>
+    `;
+    const canvas = el.querySelector('.art-canvas');
+    drawArt(canvas, art, pcb).catch((err) => console.warn('artwork preview', err));
+
+    const num = (sel) => parseFloat(el.querySelector(sel).value);
+    const set = (fn) => { edit(); fn(); refreshCase(); };
+    el.querySelector('.art-del').onclick = () => {
+      edit();
+      artwork().splice(i, 1);
+      renderEngravePanel();
+      refreshCase();
+    };
+    el.querySelector('.art-name').onchange = (ev) => set(() => { art.name = ev.target.value; });
+    el.querySelector('.art-bands').onchange = (ev) => {
+      set(() => setBands(art, parseInt(ev.target.value, 10)));
+      renderEngravePanel();
+    };
+    el.querySelector('.art-invert').onchange = (ev) => {
+      set(() => { art.invert = ev.target.checked; });
+      drawArt(canvas, art, pcb);
+    };
+    el.querySelectorAll('.art-layer').forEach((sel) => {
+      sel.onchange = () => {
+        set(() => { art.layers[+sel.dataset.band] = sel.value; });
+        renderEngravePanel();
+      };
+    });
+    // a slider previews live on the canvas and commits when it is let go
+    el.querySelectorAll('.art-t').forEach((r) => {
+      const k = +r.dataset.t;
+      const clampT = () => {
+        let v = parseFloat(r.value);
+        if (k > 0) v = Math.max(v, art.thresholds[k - 1]);
+        if (k < art.thresholds.length - 1) v = Math.min(v, art.thresholds[k + 1]);
+        return v;
+      };
+      r.oninput = () => {
+        const v = clampT();
+        r.nextElementSibling.textContent = Math.round(v);
+        const ts = [...art.thresholds];
+        ts[k] = v;
+        drawArt(canvas, { ...art, thresholds: ts }, pcb);
+      };
+      r.onchange = () => set(() => { art.thresholds[k] = clampT(); });
+    });
+    el.querySelector('.art-blur').onchange = () => {
+      set(() => { art.blur = Math.max(0, num('.art-blur') || 0); });
+      drawArt(canvas, art, pcb);
+    };
+    el.querySelector('.art-min').onchange = () => set(() => { art.min_feature = Math.max(0, num('.art-min') || 0); });
+    el.querySelector('.art-x').onchange = () => set(() => { art.at = [num('.art-x'), art.at[1]]; });
+    el.querySelector('.art-y').onchange = () => set(() => { art.at = [art.at[0], num('.art-y')]; });
+    el.querySelector('.art-w').onchange = () => {
+      const v = num('.art-w');
+      if (v > 0) set(() => { art.width = v; });
+    };
+    holder.appendChild(el);
+  });
 }
 
 /** Anything the build said about this engraving that is worth repeating.
@@ -3856,6 +4144,7 @@ function buildEngravings(caseModel) {
   // a frame has no lid, and a box's deck carries its engraving in its cut
   if (!caseModel || caseModel.kind === 'rack' || caseModel.kind === 'box'
       || !$('chk-case').checked) return;
+  if (caseModel.pcb) { buildPcbLayers(caseModel); return; }
   for (const layer of caseModel.layers) {
     if (!layer.engrave?.length) continue;
     const shapes = shapesFromRings(layer.engrave);
@@ -3871,6 +4160,28 @@ function buildEngravings(caseModel) {
   }
 }
 
+
+/** A PCB panel's face: the board is already in the mask colour; bare
+ *  board, metal and silk go on top of it in that order, each a hair above
+ *  the last so none of them z-fights. Metal is a little metallic. */
+function buildPcbLayers(caseModel) {
+  const lid = caseModel.layers[caseModel.layers.length - 1];
+  const c = caseModel.pcb.colors;
+  const looks = [
+    ['substrate', c.substrate, 0.0, 0.85, 0.02],
+    ['copper', c.metal, 0.75, 0.32, 0.04],
+    ['silk', c.silk, 0.0, 0.9, 0.06],
+  ];
+  for (const [key, color, metalness, roughness, lift] of looks) {
+    const shapes = shapesFromRings(caseModel.pcb.layers[key] ?? []);
+    if (!shapes.length) continue;
+    const geom = new THREE.ShapeGeometry(shapes, 6);
+    const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({
+      color: new THREE.Color(color), metalness, roughness }));
+    mesh.position.z = lid.z1 + lift;
+    engraveGroup.add(mesh);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // boot
@@ -3890,6 +4201,9 @@ function buildEngravings(caseModel) {
   wirePlates();
   renderRenderPanel();
   renderEngravePanel();
+  api('/api/pcb/palette')
+    .then((p) => { PCB_PALETTE = p; renderPanelSettings(); renderEngravePanel(); })
+    .catch(() => {});
   try {
     api('/api/health')
       .then((h) => {

@@ -162,8 +162,27 @@
             <input type="number" id="ep-hp" step="1" min="1" max="200"><span class="unit" id="ep-hp-mm"></span></div>
           <div class="field"><label title="row format. Only 3U has its rail-hole positions recorded.">format</label>
             <span>3U</span></div>
-          <div class="field"><label title="sheet thickness. 2 mm aluminium is the Doepfer panel; 3 mm stretches a jack's thread.">thick</label>
+          <div class="field"><label title="laser-cut sheet, or an FR4 board from a PCB service: soldermask colour, silkscreen, and gold or silver where the mask opens over copper">made as</label>
+            <select id="ep-fab">
+              <option value="laser">laser-cut sheet</option>
+              <option value="pcb">PCB</option>
+            </select></div>
+          <div class="field" id="ep-t-row"><label title="sheet thickness. 2 mm aluminium is the Doepfer panel; 3 mm stretches a jack's thread.">thick</label>
             <input type="number" id="ep-t" step="0.1" min="0.5" max="10"><span class="unit">mm</span></div>
+          <div id="ep-pcb" hidden>
+            <div class="field"><label title="board thickness -- what services offer. 1.6 is the stiff, standard one">board</label>
+              <select id="ep-pcb-t"></select><span class="unit">mm</span></div>
+            <div class="field"><label title="soldermask: the panel's colour">mask</label>
+              <span class="swatches" id="ep-pcb-mask"></span></div>
+            <div class="field"><label title="silkscreen: the lettering">silk</label>
+              <span class="swatches" id="ep-pcb-silk"></span></div>
+            <div class="field"><label title="what exposed copper is plated with: ENIG is gold, HASL silver">finish</label>
+              <span class="swatches" id="ep-pcb-finish"></span></div>
+            <div class="field"><label title="a ring of exposed metal round every round hole, so a jack sits on a gold or silver rim. 0 for none">ring</label>
+              <input type="number" id="ep-pcb-ring" step="0.1" min="0" max="5"><span class="unit">mm</span></div>
+            <p class="note" id="ep-pcb-note"></p>
+            <button id="ep-pcb-export" title="Gerbers (copper, mask, silk, outline), the NPTH drill file and the notes for the order form, as one zip">export for PCB fab</button>
+          </div>
           <div class="field"><label title="how far behind the panel's face anything may reach and still fit the case: 25 a skiff, 40 a shallow case, 50-60 a deep one">depth</label>
             <input type="number" id="ep-depth" step="1" min="5"><span class="unit">mm</span></div>
         </div>
