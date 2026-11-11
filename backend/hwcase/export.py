@@ -877,7 +877,9 @@ def _sheet_texts(sheets: list[PackedSheet], fmt: str, basename: str
 def rack_cutlist(model, sheets: list[PackedSheet], stock) -> str:
     """The frame's cut list: the sheets, then the plates measured from their
     datum edge, then the rails, the M5s and the U-channel order."""
+    from .fasteners import TAP_DRILL
     from .flat import from_rack
+    from .rack import M5_ENGAGEMENT, MODULE_HP_ESTIMATE, RAIL_END_BORE
 
     plates = from_rack(model)
     rows = " + ".join(r.fmt.name for r in model.rows)
@@ -910,13 +912,28 @@ def rack_cutlist(model, sheets: list[PackedSheet], stock) -> str:
     lines += [
         "",
         "fixings:",
-        f"  {2 * len(rails)} x M5 screw -- one through a side panel into "
-        f"each end of each of the {len(rails)} rails",
+        f"  {2 * len(rails)} x M5 screw, {model.rail_screw_length():g} mm "
+        f"long -- one through a side panel into each end of each of the "
+        f"{len(rails)} rails ({model.panel_t:g} mm panel + "
+        f"{M5_ENGAGEMENT:g} mm of thread, rounded up to stock)",
+        f"  tap both ends of every rail M5: the {RAIL_END_BORE:g} mm end "
+        f"channel takes the tap as it is; a solid rail end is drilled "
+        f"{TAP_DRILL['M5']:g} mm first",
     ]
     # a laser frame's joints: bolts by length, and their captive nuts
     for item, n in model.bill_of_materials().items():
         if item.endswith((" bolt", " nut")):
             lines.append(f"  {n} x {item}")
+    fix = model.module_fixings()
+    if fix:
+        lines += ["", "module fixings (an ESTIMATE -- count your modules' "
+                      f"holes: about one module per {MODULE_HP_ESTIMATE:g} HP, "
+                      f"two screws each, four from 12 HP):"]
+        for f in fix:
+            lines.append(
+                f"  row {f['row']} ({f['format']}, {f['hp']:g} HP): "
+                f"~{f['screws']} x {f['screw']} screw + ~{f['screws']} x M3 "
+                f"sliding nut, or 2 x M3 threaded strip {f['strip_mm']:g} mm")
     order = model.order_spec()
     if order is not None:
         lines += [

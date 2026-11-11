@@ -109,3 +109,48 @@ def test_a_board_goes_in_after_the_last_layer_below_it():
     by_index = {f"{l.index:02d}": l for l in model.layers}
     assert all(by_index[s.split()[1]].z1 <= board + 1e-6 for s in before)
     assert by_index[after[0].split()[1]].z1 > board
+
+
+# --------------------------------------------------------------------------
+# a frame's fixings
+# --------------------------------------------------------------------------
+
+from hwcase import rack                                    # noqa: E402
+from hwcase.eurorack import ROW_FORMATS                     # noqa: E402
+from hwcase.schema import CaseSpec, Material               # noqa: E402
+
+SIX_U = [ROW_FORMATS["3U"], ROW_FORMATS["3U"]]
+WIDE = CaseSpec(plates=[(600.0, 400.0)])
+
+
+@pytest.mark.parametrize("t,length", [(4.0, 16.0), (5.0, 16.0), (6.0, 16.0)])
+def test_the_m5_is_the_panel_plus_its_thread_rounded_to_stock(t, length):
+    model = rack.build(SIX_U, 42.0, style="laser",
+                       material=Material(name="ply", thickness=t))
+    assert model.rail_screw_length() == length
+    assert length >= t + rack.M5_ENGAGEMENT
+    assert length in fastener("M5").lengths
+    assert model.bill_of_materials()["M5 screw length mm"] == length
+    import dataclasses
+    thick = dataclasses.replace(model, panel_t=8.0)
+    assert thick.rail_screw_length() == 20.0          # 18 is not stocked
+
+
+def test_the_frame_cut_list_says_tap_m5_and_how_long_the_screw_is():
+    model = rack.build(SIX_U, 68.0)
+    cut = export.rack_sheet_files(model, "svg", "f", WIDE)[-1][1]
+    assert "8 x M5 screw, 16 mm long" in cut
+    assert "tap both ends of every rail M5" in cut and "4.2 mm" in cut
+
+
+def test_module_fixings_are_sized_by_hp_and_called_an_estimate():
+    model = rack.build(SIX_U, 84.0)
+    fix = model.module_fixings()
+    assert [f["row"] for f in fix] == [1, 2]
+    assert all(f["screws"] == 2 * 11 and f["screw"] == "M3x6" for f in fix)
+    bom = model.bill_of_materials()
+    assert bom["M3x6 module screws (estimate)"] == 44
+    assert bom["M3 sliding nuts (estimate)"] == 44
+    cut = export.rack_sheet_files(model, "svg", "f", WIDE)[-1][1]
+    assert "module fixings (an ESTIMATE" in cut
+    assert "row 2 (3U, 84 HP): ~22 x M3x6 screw + ~22 x M3 sliding nut" in cut
