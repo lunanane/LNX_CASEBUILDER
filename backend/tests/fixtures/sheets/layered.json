@@ -11,7 +11,7 @@
  },
  "soundmachine-lnx1-v2-29mm.yaml": {
   "dxf": {
-   "soundmachine-lnx1-v2-29mm-cutlist.txt": "019b5aab8be23d277fe517f19c8c3bb704efaf960b114ad21ff109bc479dc717",
+   "soundmachine-lnx1-v2-29mm-cutlist.txt": "ce0b462dbab2b4b594f61dcdadf46f2a7207b0151e12fc35a5ed83c794f7d9e1",
    "soundmachine-lnx1-v2-29mm-sheet-01-of-06.dxf": "c0893faf722f18195edfa39513c247e9de5ec2d099aea895f78f495cf6b63a08",
    "soundmachine-lnx1-v2-29mm-sheet-02-of-06.dxf": "285d2d98d9c8c96a10bbc02c8e3262877681a40f5a594538c5974eed6cc8d776",
    "soundmachine-lnx1-v2-29mm-sheet-03-of-06.dxf": "96b074b207bbda9783eb8b38c9dab8213651fac133f30ff6ff1e26ced5956848",
@@ -20,7 +20,7 @@
    "soundmachine-lnx1-v2-29mm-sheet-06-of-06.dxf": "2dc0b8c645b19945f9cdd0f087e01257616b38957f3e0ef6a462af3e8e257f36"
   },
   "svg": {
-   "soundmachine-lnx1-v2-29mm-cutlist.txt": "019b5aab8be23d277fe517f19c8c3bb704efaf960b114ad21ff109bc479dc717",
+   "soundmachine-lnx1-v2-29mm-cutlist.txt": "ce0b462dbab2b4b594f61dcdadf46f2a7207b0151e12fc35a5ed83c794f7d9e1",
    "soundmachine-lnx1-v2-29mm-sheet-01-of-06.svg": "44807aa97fe1d3ddd2451e96ad0fd3caddb67fd65b8ccfb5591df1e4eade0a79",
    "soundmachine-lnx1-v2-29mm-sheet-02-of-06.svg": "0fed47f03fff91b4c49abcef7d8cf685659514803e63fdda5c6185e5832ebd98",
    "soundmachine-lnx1-v2-29mm-sheet-03-of-06.svg": "ad70a2bd6de0fa7d25fbce78b54d93ee7c529c1a4478c2eaa3fa27801027d799",
@@ -31,7 +31,7 @@
  },
  "soundmachine-lnx1-v3.yaml": {
   "dxf": {
-   "soundmachine-lnx1-v3-cutlist.txt": "8662ed7588de14e34ea832797d583818b0df323bc0daf25eff2408dd041ddb19",
+   "soundmachine-lnx1-v3-cutlist.txt": "ff40aa2d5aeba3f759fc91a648f9a2fe27c0c7c177c129894327cda1c7a4ea9f",
    "soundmachine-lnx1-v3-sheet-01-of-05.dxf": "ecad057aeea82b2d7cdb9845e4b988fdb6c12dc5e9046b583eef81df65559316",
    "soundmachine-lnx1-v3-sheet-02-of-05.dxf": "95f540e4da6fae51f1e0c412679d985542a80432e1696f43e5cb5a4c9dcafad6",
    "soundmachine-lnx1-v3-sheet-03-of-05.dxf": "64f6b9cb060ec22c821358052039bb90f9ecf58537acc2b8f56cbc9dd7bcf929",
@@ -39,7 +39,7 @@
    "soundmachine-lnx1-v3-sheet-05-of-05.dxf": "124991d76e9a4e98d538fd04bbcad1e53df2f7957b50720b74ee3b9b37c0e067"
   },
   "svg": {
-   "soundmachine-lnx1-v3-cutlist.txt": "8662ed7588de14e34ea832797d583818b0df323bc0daf25eff2408dd041ddb19",
+   "soundmachine-lnx1-v3-cutlist.txt": "ff40aa2d5aeba3f759fc91a648f9a2fe27c0c7c177c129894327cda1c7a4ea9f",
    "soundmachine-lnx1-v3-sheet-01-of-05.svg": "6c9912f9ad33001643360fd116d9e94ad8d1e43b17402e63d5575e1eafb8c7ea",
    "soundmachine-lnx1-v3-sheet-02-of-05.svg": "3dc72016a9a77400d9f3a74ffd422987ac0a0454f4adea62357871cfd25fcfba",
    "soundmachine-lnx1-v3-sheet-03-of-05.svg": "95ded1b45ab4bf499afb8e3e4b7dcbef6a11e2ce3983c5b9914a8f8fef8a6793",
@@ -49,7 +49,7 @@
  },
  "soundmachine-lnx1-v4.yaml": {
   "dxf": {
-   "soundmachine-lnx1-v4-cutlist.txt": "bfd78798f5079baf9d289c51dd2b0b6bc1839037f9367602b8d6433ad25eedb0",
+   "soundmachine-lnx1-v4-cutlist.txt": "5ca55d793a81785e9bcafb9a269741ae7af585b9d6968d85f55fe180ae95af94",
    "soundmachine-lnx1-v4-sheet-01-of-05.dxf": "b548a59dc9d815ca0d28f88cdbe80b8002ecacb01fc8e018a8fd3203bbaa428f",
    "soundmachine-lnx1-v4-sheet-02-of-05.dxf": "7cfd0edf14ac22128da5993c937b9298eadc0c5c9ed6e63126140035aeb55429",
    "soundmachine-lnx1-v4-sheet-03-of-05.dxf": "39ad4f600a26cd58c21a33755e4a0503e95e262ed1827bcffbec5c726c359a3f",
@@ -57,7 +57,7 @@
    "soundmachine-lnx1-v4-sheet-05-of-05.dxf": "3104dffed550170c3122e8dce6a239ca80b6cc07f860b34d88d93d93615d8325"
   },
   "svg": {
-   "soundmachine-lnx1-v4-cutlist.txt": "bfd78798f5079baf9d289c51dd2b0b6bc1839037f9367602b8d6433ad25eedb0",
+   "soundmachine-lnx1-v4-cutlist.txt": "5ca55d793a81785e9bcafb9a269741ae7af585b9d6968d85f55fe180ae95af94",
    "soundmachine-lnx1-v4-sheet-01-of-05.svg": "9a52211ee7a2ea7540c61ba0e978ef029ce09963d46fdeb8b432b6f5cd6b8ab1",
    "soundmachine-lnx1-v4-sheet-02-of-05.svg": "89c1d400cb8f53594bf01840b36cc9798aea53dd7a1a5ad07c7d147d541b16e8",
    "soundmachine-lnx1-v4-sheet-03-of-05.svg": "dee6f36b969ac15dbe562d0e5b6891d6967d5f3e5f309cb317c5688ec61f2159",
@@ -67,7 +67,7 @@
  },
  "soundmachine-lnx1.yaml": {
   "dxf": {
-   "soundmachine-lnx1-cutlist.txt": "685bc6ce723aba117bf85a7aab6916630a2e9b30aeba84a1b029fa9b90d76ca2",
+   "soundmachine-lnx1-cutlist.txt": "8693616c159d69bb7aaea762c0ad1a3447f4f455eaba82af16e12fd7a2556763",
    "soundmachine-lnx1-sheet-01-of-05.dxf": "a77887542265aa7f03ad2d2c41b2cea04a074d439005da69a77b015fd222fcef",
    "soundmachine-lnx1-sheet-02-of-05.dxf": "429853111d475ad9ffa085f8dcbcc0b53b14938a7fbac15ef20cc1a59a426c36",
    "soundmachine-lnx1-sheet-03-of-05.dxf": "0477353305185394a27a36faf575c61ba9268757b7d0fd28454c61e610cf7283",
@@ -75,7 +75,7 @@
    "soundmachine-lnx1-sheet-05-of-05.dxf": "04aafce8064f01f2ce57e58b205c1c62f2835de192f5bee00a257e5600443195"
   },
   "svg": {
-   "soundmachine-lnx1-cutlist.txt": "685bc6ce723aba117bf85a7aab6916630a2e9b30aeba84a1b029fa9b90d76ca2",
+   "soundmachine-lnx1-cutlist.txt": "8693616c159d69bb7aaea762c0ad1a3447f4f455eaba82af16e12fd7a2556763",
    "soundmachine-lnx1-sheet-01-of-05.svg": "2ed03b0883a0064539f78dbcc87cf5eb6850eb76af86c8d8dad899524b4248d9",
    "soundmachine-lnx1-sheet-02-of-05.svg": "d5f8f22bf697256faa636bc498f6439c15c5f2eec1d60a99b7af374328679120",
    "soundmachine-lnx1-sheet-03-of-05.svg": "32c7c62b44c4a97146f275e19e6d1eb3064961a6d757c612bf72a1a736b36085",
@@ -85,7 +85,7 @@
  },
  "soundmachine-v0.yaml": {
   "dxf": {
-   "soundmachine-v0-cutlist.txt": "d58bea1fa6f0052e3abd57f5b9874725372138cedea7d77ab433f1a619b51ae2",
+   "soundmachine-v0-cutlist.txt": "d05d1fee773c0dfdb41ae3c7f4f71aae5702f2a2f81d1fcfc810802432848e2e",
    "soundmachine-v0-sheet-01-of-05.dxf": "ff72a6a4138dc588ea61577707293a891fd6aa478dbe42b04cdae94aeb5d381f",
    "soundmachine-v0-sheet-02-of-05.dxf": "4bba69bb73edf8b3245ee907cc9875063c4d9693eece3bc5f7f2e3d5f44c9d6a",
    "soundmachine-v0-sheet-03-of-05.dxf": "53e9ca92da3b2086b3ee4111dafc475a4cee5526818ebea8329ccbe32f265a31",
@@ -93,7 +93,7 @@
    "soundmachine-v0-sheet-05-of-05.dxf": "92debbd4fd581379d3d03e96e04a03e86f63cb3c28adbcef3e18cd8daa91d747"
   },
   "svg": {
-   "soundmachine-v0-cutlist.txt": "d58bea1fa6f0052e3abd57f5b9874725372138cedea7d77ab433f1a619b51ae2",
+   "soundmachine-v0-cutlist.txt": "d05d1fee773c0dfdb41ae3c7f4f71aae5702f2a2f81d1fcfc810802432848e2e",
    "soundmachine-v0-sheet-01-of-05.svg": "019edd267fe6fbef836aafb94fa98de79e0290f9cf8d43cadb47afde097b9da7",
    "soundmachine-v0-sheet-02-of-05.svg": "43232016ca3874026612eea5521b4b39f076946a80373b2e2da5012bd1474ba8",
    "soundmachine-v0-sheet-03-of-05.svg": "fc4953558f852863586ecd2eefbc8a706685c932ed24a188497da2ea7bb44672",

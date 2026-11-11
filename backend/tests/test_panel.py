@@ -113,6 +113,19 @@ def test_controls_come_through_and_each_board_screw_gets_a_standoff():
     assert all("enc:" in n and "(M2)" in n for n in standoffs)
 
 
+def test_the_exported_cut_list_gives_every_board_its_standoff():
+    """The starter promises it: the paper that goes to the bench carries the
+    standoffs, not only the layer's notes in the editor."""
+    _res, model = _build(_scene(placements=[ENCODER]))
+    files = dict(export.sheet_files(model, "svg", "p"))
+    cut = files["p-cutlist.txt"]
+    lines = [ln for ln in cut.splitlines() if "standoff" in ln]
+    assert len(lines) == 4
+    assert all("enc:" in ln and "(M2)" in ln for ln in lines)
+    for note in model.layers[0].notes:
+        assert note in cut
+
+
 def test_row3_a_part_deeper_than_the_module_depth_is_an_error():
     res = resolve(_scene(placements=[ENCODER], depth=10.0), LIB)
     errors = [i for i in check(res, LIB) if i.code == "module_depth"]

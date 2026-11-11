@@ -791,6 +791,11 @@ def sheet_manifest(sheets: list[PackedSheet], stock) -> str:
                 f"  {pl.part.labels.listing} {x1 - x0:6.1f} x {y1 - y0:6.1f} mm"
                 f"{'  (rotated 90)' if pl.rotated else ''}"
                 f"{'  (MIRRORED: install engraved face down)' if pl.mirrored else ''}")
+            # what the part's builder said about it -- standoff lengths,
+            # bolt positions, channels cut -- belongs on the paper at the
+            # bench, not only in the editor
+            for note in pl.part.notes:
+                lines.append(f"      - {note}")
         lines.append("")
     return "\n".join(lines)
 
