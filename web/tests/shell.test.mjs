@@ -259,6 +259,6 @@ test('the frame keeps no copy of the default laser sheet of its own', () => {
 });
 
 test('a frame shows its issues, which come back with its build', () => {
-  assert.match(html, /data-pane="pane-issues" data-uses="[^"]*frame/);
+  assert.match(html, /data-pane="pane-issues" data-uses="[^"]* ?frame"/);
   assert.match(js, /renderIssues\(state\.caseModel\.issues \|\| \[\]\)/);
 });
