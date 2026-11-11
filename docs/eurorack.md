@@ -103,11 +103,11 @@ collide. Treat this whole section as `community`.
 | standard / deep case | 50–60 mm usable |
 
 **How this repo measures it.** `module_depth` -- on a frame (`rack.module_depth`)
-and on a rack bay in a box case (`racks[].module_depth`) alike -- is the clear
+and on a hybrid case's rack alike -- is the clear
 room *behind the module panel*: from the rails' front face, which is the back of
-the panel, to the inside of the frame's body web or the top of the box's floor.
-The panel's own 2 mm is not counted. A module that fits a 40 mm frame fits a
-40 mm bay. (The module panel designer's `eurorack_panel.module_depth` is still
+the panel, to the inside of the frame's body web or the top of the hybrid's rack
+floor. The panel's own 2 mm is not counted. A module that fits a 40 mm frame
+fits a 40 mm hybrid. (The module panel designer's `eurorack_panel.module_depth` is still
 measured from the panel's face.)
 
 The power ribbon is the usual offender: a 16-way IDC plugged into a header
@@ -194,20 +194,28 @@ drill sizes (§9). If the engine should *enforce* these rather than have them si
 in prose, the natural home is a `standards` block the checker reads — say the
 word and this lifts into YAML.
 
-**Rack bays in a box case** (`racks:`, `backend/hwcase/hybrid.py`). A bay is
-Eurorack rails set into the deck of a laser-cut box that otherwise holds your
-own hardware: `id`, `at` (the rails' bottom-left corner), `hp`, `rows`,
-`module_depth` (clear room behind the module panels, as on a frame) and
-`module_panel_t` (how far under the deck top the rails sit, so the faces of the
-modules fitted later are flush with it). The engine cuts the aperture, carries
-the rails on two cheeks jointed to the deck and the floor, drops the floor to
-the module depth, and lists the rails, one M5 per rail end (its length the cheek
-plus 8 mm of thread) and the M5 tap for the rail's 4.4 mm end bore (tap drill
-4.2). It does not model, place, list or count modules: whatever is bought later
-is screwed in by hand. The bay's space -- the rails' span and stack, from the
-deck top down to the module depth -- is kept clear, so any placement in it, or
-in a cheek, is an error. A `modules:` list in an older scene still loads, is
-ignored, and is reported as an info note.
+**The hybrid case** (`kind: hybrid`, `backend/hwcase/hybrid.py`). A laser-cut
+frame lying flat, with your own hardware beside it: `rack:` is the frame's spec
+(rows, `hp`, `module_depth`, `panel` overhangs and radii, `material`, `joint`,
+`fastener`, plus `module_panel_t`), and the HP rail span is the width of the
+whole case -- there are no left and right walls, the case's ends across the
+width are the two side panels, with an M5 through each into each rail end. The
+deck top is the module face (D-3), so the rails sit `module_panel_t` under it.
+`sections:` are stretches of deck fixed above or below the rack, each
+`{id, side: above|below, length, depth}` and as wide as the rails; several on
+one side stack outwards in list order. Each section gets a deck cut as a
+layered lid is (so boards placed there get their windows, shaft holes and
+standoffs), every run of zones at one depth a floor, a full-height step wall
+where neighbouring depths differ, and an end wall at each end; every plate is
+jointed into both side panels, whose outline follows the stepped profile grown
+by the overhangs (bottom/top past the end walls, front past the deck, back past
+the floors). The rack keeps no modules: its space is kept clear, and a part
+outside its section, in the rack's space or deeper than its section's floor is
+an error. The cut list gives the plates, the rails by length, an M5 per rail
+end (the side panel plus 10 mm of thread, rounded up to stock) with the M5 tap
+for the rail's 4.4 mm end bore (tap drill 4.2), the joint bolts and nuts, and
+every standoff. An older box scene's `racks:` (rack bays set into a box) still
+loads, is ignored, and the check says the bay moved to the hybrid case.
 
 ## 11. A panel made as a PCB
 
