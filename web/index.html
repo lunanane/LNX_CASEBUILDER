@@ -56,23 +56,23 @@
         <button id="btn-undo">undo<kbd>ctrl Z</kbd></button>
         <button id="btn-redo">redo<kbd>ctrl &#8679; Z</kbd></button>
         <hr>
-        <button id="btn-ccw" data-uses="layered box panel">rotate 90&deg; left<kbd>&#8679; R</kbd></button>
-        <button id="btn-cw" data-uses="layered box panel">rotate 90&deg; right<kbd>R</kbd></button>
-        <button id="btn-delete" data-uses="layered box panel">remove selected<kbd>del</kbd></button>
+        <button id="btn-ccw" data-uses="layered box panel hybrid">rotate 90&deg; left<kbd>&#8679; R</kbd></button>
+        <button id="btn-cw" data-uses="layered box panel hybrid">rotate 90&deg; right<kbd>R</kbd></button>
+        <button id="btn-delete" data-uses="layered box panel hybrid">remove selected<kbd>del</kbd></button>
       </div>
     </div>
 
     <div class="menu" data-menu="view">
       <button class="menu-btn" aria-haspopup="true" aria-expanded="false">view</button>
       <div class="menu-pop" role="menu">
-        <label data-uses="layered box panel"><input type="checkbox" id="chk-corridors"> plug corridors</label>
-        <label data-uses="layered box panel"><input type="checkbox" id="chk-panels" checked> panel plane</label>
-        <label data-uses="layered box"><input type="checkbox" id="chk-openings" checked> open sides</label>
-        <label data-uses="layered box panel"><input type="checkbox" id="chk-supports" checked> screws</label>
+        <label data-uses="layered box panel hybrid"><input type="checkbox" id="chk-corridors"> plug corridors</label>
+        <label data-uses="layered box panel hybrid"><input type="checkbox" id="chk-panels" checked> panel plane</label>
+        <label data-uses="layered box hybrid"><input type="checkbox" id="chk-openings" checked> open sides</label>
+        <label data-uses="layered box panel hybrid"><input type="checkbox" id="chk-supports" checked> screws</label>
         <label><input type="checkbox" id="chk-grid" checked> grid</label>
-        <label data-uses="layered box panel" title="draw parts as their vendor models where they have one; checks and cuts still use the boxes"><input type="checkbox" id="chk-models"> real models</label>
-        <hr data-uses="layered box panel">
-        <label data-uses="layered box panel"><input type="checkbox" id="chk-snap" checked>snap board edges</label>
+        <label data-uses="layered box panel hybrid" title="draw parts as their vendor models where they have one; checks and cuts still use the boxes"><input type="checkbox" id="chk-models"> real models</label>
+        <hr data-uses="layered box panel hybrid">
+        <label data-uses="layered box panel hybrid"><input type="checkbox" id="chk-snap" checked>snap board edges</label>
         <hr>
         <button id="btn-frame">frame the scene</button>
       </div>
@@ -98,7 +98,7 @@
   <span class="sep"></span>
   <!-- These two stay on the bar: they change what you are looking at, and you
        reach for them constantly. -->
-  <label data-uses="layered box panel"><input type="checkbox" id="chk-case" checked> case</label>
+  <label data-uses="layered box panel hybrid"><input type="checkbox" id="chk-case" checked> case</label>
   <select id="sel-interior" data-uses="layered" title="what the layers between the hardware look like">
     <option value="pocketed">pocketed</option>
     <option value="hollow">hollow</option>
@@ -117,7 +117,7 @@
 </header>
 
 <main>
-  <aside id="palette" data-uses="layered box panel">
+  <aside id="palette" data-uses="layered box panel hybrid">
     <h2>parts</h2>
     <div id="part-list"></div>
 
@@ -138,11 +138,11 @@
          only by scrolling past everything about the selected board, which
          meant most people never found them at all. -->
     <nav class="tabs" role="tablist">
-      <button class="tab active" data-pane="pane-layout" data-uses="layered box panel" role="tab">layout</button>
+      <button class="tab active" data-pane="pane-layout" data-uses="layered box panel hybrid" role="tab">layout</button>
       <button class="tab" data-pane="pane-case" data-uses="layered box panel" role="tab">case</button>
-      <button class="tab" data-pane="pane-frame" data-uses="frame" role="tab">frame</button>
+      <button class="tab" data-pane="pane-frame" data-uses="frame hybrid" role="tab">frame</button>
       <button class="tab" data-pane="pane-look" role="tab">look</button>
-      <button class="tab" data-pane="pane-issues" data-uses="layered box panel frame" role="tab">
+      <button class="tab" data-pane="pane-issues" data-uses="layered box panel frame hybrid" role="tab">
         issues<span id="issue-count"></span></button>
     </nav>
 
@@ -212,16 +212,6 @@
         </div>
       </div>
 
-      <div data-uses="box">
-        <h2>rack bays</h2>
-        <p class="note">Eurorack rails set into a box's deck. The module faces are
-        the case's surface: the rails sit a module panel's thickness under the
-        deck top. Nothing may enter a bay's space: it is kept clear for the
-        modules you screw in later.</p>
-        <div id="bay-list"></div>
-        <button id="btn-add-bay" title="add a 3U rack bay to this box case">+ rack bay</button>
-      </div>
-
       <div data-uses="layered">
       <h2>screws</h2>
       <div id="case-screws">
@@ -267,9 +257,13 @@
     </section>
 
     <section id="pane-frame" class="pane" hidden>
-      <p class="note" id="fr-note">A Eurorack frame is two side panels, one
+      <p class="note" id="fr-note" data-uses="frame">A Eurorack frame is two side panels, one
       folded body, and two rails per row bolted between the panels with an M5
       at each end. Everything below the width is derived from the format.</p>
+      <p class="note" data-uses="hybrid">A hybrid case is a laser-cut Eurorack
+      frame lying flat, with parts sections above and below it. Its width in
+      HP is the width of the whole case; the deck top is the module face, and
+      the flat surface your boards are flush with.</p>
 
       <h2>width</h2>
       <div class="field">
@@ -283,9 +277,25 @@
         <label title="clear space from the module face back to the inside of the body's web -- how deep a module may be. Sets the case depth: the folded flange and the side panels follow from it. Skiffs run 25-40 mm.">module depth</label>
         <input type="number" id="fr-depth" step="1" min="18"><span class="unit">mm</span>
       </div>
+      <div class="field" data-uses="hybrid">
+        <label title="how thick the modules' panels are: the rails sit this far under the deck top, so the module faces are flush with it">panel</label>
+        <input type="number" id="fr-panel-t" step="0.1" min="0.5"><span class="unit">mm</span>
+      </div>
+
+      <div data-uses="hybrid">
+        <h2>parts sections</h2>
+        <p class="note">Stretches of deck above and below the rack, as wide as
+        the rails. Each has its own length and its own depth under the deck;
+        place boards in them from the parts palette. Several on one side stack
+        outwards in list order. A part outside its section, in the rack's
+        space or deeper than its floor is an error.</p>
+        <div id="hy-sections"></div>
+        <button id="hy-add-above" title="add a parts section above the rack, outermost">+ above</button>
+        <button id="hy-add-below" title="add a parts section below the rack, outermost">+ below</button>
+      </div>
 
       <h2>construction</h2>
-      <div class="field">
+      <div class="field" data-uses="frame">
         <label title="U-channel: the rails, a folded aluminium body and two side panels. Laser-cut: the same rails, and every other piece cut from one sheet and jointed together.">style</label>
         <select id="fr-style">
           <option value="u_channel">U-channel</option>
@@ -303,7 +313,7 @@
           <option value="finger">finger (glued)</option>
         </select>
       </div>
-      <label class="check" title="close the top of a laser-cut frame with a plate, as the U-channel's top flange does"><input type="checkbox" id="fr-top-plate"> top plate</label>
+      <label class="check" data-uses="frame" title="close the top of a laser-cut frame with a plate, as the U-channel's top flange does"><input type="checkbox" id="fr-top-plate"> top plate</label>
 
       <h2>rows</h2>
       <div id="fr-rows"></div>
@@ -311,10 +321,13 @@
       <button id="fr-add-1u" title="add a 1U tile row at the top">+ 1U</button>
 
       <h2>stance</h2>
-      <p class="note">The rail stands <b>2.7 mm</b> proud of the body. That is
+      <p class="note" data-uses="hybrid">How far each side panel reaches past
+      the plates: bottom and top past the end walls, front past the deck, back
+      past the floors. With T-slots it is at least a sheet everywhere.</p>
+      <p class="note" data-uses="frame">The rail stands <b>2.7 mm</b> proud of the body. That is
       where the extrusion's sheet slot is, not a choice &mdash; there is one
       rail profile and the body has to meet it.</p>
-      <p class="note">How far each panel edge reaches past the case. Bottom
+      <p class="note" data-uses="frame">How far each panel edge reaches past the case. Bottom
       and top decide what it rests on: below 2.7 mm the rails carry it, above
       that the panel does. Front and back are pure lip.</p>
       <div class="field"><label title="past the body's bottom edge. Below the rail's 2.7 mm overhang the case stands on its rails.">bottom</label>
@@ -339,8 +352,8 @@
       <div class="field"><label>top / front</label>
         <input type="number" id="fr-r-tf" step="1" min="0"><span class="unit">mm</span></div>
 
-      <h2>side panel inserts</h2>
-      <label class="check" title="a 4 HP slot cut into each side panel per 3U row, so a module slides in from the side. Adds 8 HP of capacity per 3U row without widening the rails."><input type="checkbox" id="fr-inserts"> 4 HP slot per side, per 3U row</label>
+      <h2 data-uses="frame">side panel inserts</h2>
+      <label class="check" data-uses="frame" title="a 4 HP slot cut into each side panel per 3U row, so a module slides in from the side. Adds 8 HP of capacity per 3U row without widening the rails."><input type="checkbox" id="fr-inserts"> 4 HP slot per side, per 3U row</label>
 
       <h2>result</h2>
       <div id="fr-result"></div>

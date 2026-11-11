@@ -11,6 +11,7 @@ const html = fs.readFileSync(path.join(here, '..', 'index.html'), 'utf8');
 
 test('a scene is read as the use case it already stores', () => {
   assert.equal(useCaseOf({ kind: 'rack', case: {} }), 'frame');
+  assert.equal(useCaseOf({ kind: 'hybrid', case: { style: 'layered' } }), 'hybrid');
   assert.equal(useCaseOf({ kind: 'parts', case: { style: 'box' } }), 'box');
   assert.equal(useCaseOf({ kind: 'parts', case: { style: 'layered' } }), 'layered');
   assert.equal(useCaseOf({ kind: 'parts' }), 'layered');
@@ -48,7 +49,25 @@ test('every use case has a starter, and every tag in the page names one', () => 
   assert.deepEqual(unknown, [], `data-uses names no use case: ${unknown}`);
 });
 
-test('the frame tab is the frame\'s alone, and the frame has no palette', () => {
-  assert.match(html, /data-pane="pane-frame"[^>]*data-uses="frame"|data-uses="frame"[^>]*data-pane="pane-frame"/);
-  assert.match(html, /<aside id="palette" data-uses="layered box panel"/);
+test('the frame tab is the frame\'s and the hybrid\'s; only the hybrid has a palette too', () => {
+  assert.match(html, /data-pane="pane-frame" data-uses="frame hybrid"/);
+  assert.match(html, /<aside id="palette" data-uses="layered box panel hybrid"/);
+  assert.equal(STARTER_KIND.hybrid, 'hybrid');
+});
+
+test('a hybrid shows the frame\'s rack controls, its sections, and no U-channel ones', () => {
+  const pane = html.slice(html.indexOf('<section id="pane-frame"'),
+                          html.indexOf('<section id="pane-look"'));
+  assert.match(pane, /<div data-uses="hybrid">\s*<h2>parts sections<\/h2>/);
+  for (const id of ['hy-sections', 'hy-add-above', 'hy-add-below', 'fr-panel-t']) {
+    assert.ok(pane.includes(`id="${id}"`), id);
+  }
+  // style, top plate and inserts are a frame's alone: a hybrid is always cut
+  assert.match(pane, /<div class="field" data-uses="frame">\s*<label title="U-channel/);
+  assert.match(pane, /data-uses="frame"[^>]*><input type="checkbox" id="fr-top-plate">/);
+  assert.match(pane, /data-uses="frame"[^>]*><input type="checkbox" id="fr-inserts">/);
+  // HP, depth, sheet, joints, rows, stance and corners are untagged: both
+  for (const id of ['fr-hp', 'fr-depth', 'fr-sheet-t', 'fr-joint', 'fr-rows', 'fr-m-bottom', 'fr-r-bf']) {
+    assert.ok(pane.includes(`id="${id}"`), id);
+  }
 });

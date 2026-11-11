@@ -1,21 +1,21 @@
-// Which of the four use cases a scene is, and which controls belong to it.
+// Which of the five use cases a scene is, and which controls belong to it.
 //
 // The editor grew one pipeline at a time -- layered case, Eurorack frame,
-// module panel, box of plates with rack bays -- and each brought its own
-// controls into the one shared inspector. Most of them were simply greyed out
-// in the other three, which left every project wading through the settings of
-// all four. A control now says which use cases it serves (`data-uses="layered
+// module panel, box of plates, hybrid -- and each brought its own controls
+// into the one shared inspector. Most of them were simply greyed out in the
+// others, which left every project wading through the settings of all. A control now says which use cases it serves (`data-uses="layered
 // box"`), and anything that does not serve the open scene is hidden.
 //
 // Kept out of app.js so it can be tested headlessly.
 
-/** The four use cases, in the order the project chooser offers them. */
-export const USE_CASES = ['layered', 'box', 'frame', 'panel'];
+/** The five use cases, in the order the project chooser offers them. */
+export const USE_CASES = ['layered', 'box', 'hybrid', 'frame', 'panel'];
 
 /** The server-side starter each use case begins from. A box is a parts scene
- *  with `case.style: box`, a panel one with `case.eurorack_panel`. */
+ *  with `case.style: box`, a panel one with `case.eurorack_panel`; a hybrid
+ *  is its own kind -- a laser frame with parts sections. */
 export const STARTER_KIND = {
-  layered: 'parts', box: 'box', frame: 'rack', panel: 'panel',
+  layered: 'parts', box: 'box', hybrid: 'hybrid', frame: 'rack', panel: 'panel',
 };
 
 /** Read off what the scene already stores -- no field of its own, so every
@@ -24,6 +24,7 @@ export const STARTER_KIND = {
 export function useCaseOf(scene) {
   if (!scene) return 'layered';
   if (scene.kind === 'rack') return 'frame';
+  if (scene.kind === 'hybrid') return 'hybrid';
   if (scene.case?.eurorack_panel) return 'panel';
   if (scene.case?.style === 'box') return 'box';
   return 'layered';

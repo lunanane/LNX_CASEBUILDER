@@ -217,33 +217,29 @@ test('the case pane offers a box of plates, and its controls are wired', () => {
     assert.ok(staticIds.has(id), `${id} is missing from index.html`);
     assert.match(js, new RegExp(`\\$\\('${id}'\\)\\.onchange =`), `${id} has no handler`);
   }
-  assert.match(js, /caseModel\.kind === 'box'\) \{ buildBox\(caseModel\)/);
+  assert.match(js, /caseModel\.kind === 'box' \|\| caseModel\.kind === 'hybrid'\)\) \{\s+buildBox\(caseModel\);/);
 });
 
-test('rack bays can be added to a box, and the box draws its rails', () => {
-  // M10: bays live in the case pane; the 3D view draws plates and members
-  assert.ok(staticIds.has('bay-list') && staticIds.has('btn-add-bay'));
-  assert.match(js, /\$\('btn-add-bay'\)\.onclick =/);
-  assert.match(js, /at: newBayAt\(boxes\), hp: BAY_DEFAULTS\.hp/);
+test('a box has no rack bays: Eurorack rows are the hybrid case\'s', () => {
+  assert.ok(!staticIds.has('bay-list') && !staticIds.has('btn-add-bay'));
+  assert.doesNotMatch(js, /bays\.js|buildBays|renderBays|resolved\.bays/);
+  assert.doesNotMatch(html, /rack bays/);
+  // a hybrid's build is plates and rails, drawn as a box's are
   assert.match(js, /\[\.\.\.model\.plates, \.\.\.\(model\.members \|\| \[\]\)\]/);
 });
 
-test('a bay is drawn while editing, and knows nothing of modules', () => {
-  // the overlay comes from /api/resolve's bays, built after every resolve
-  assert.match(js, /buildSupports\(resolved\);\s+buildBays\(resolved\);/);
-  assert.match(js, /for \(const b of resolved\.bays \|\| \[\]\)/);
-  // one HP fallback, the engine's; rows and panel thickness are fields
-  assert.doesNotMatch(js, /bay\.hp \?\? 84/);
-  assert.match(js, /bay\.hp \?\? BAY_DEFAULTS\.hp/);
-  assert.match(js, /bay\.module_panel_t \?\? BAY_DEFAULTS\.module_panel_t/);
-  assert.match(js, /BAY_ROW_FORMATS\.map/);
-  // no module picker, no slots, no slot-snapping drag: a bay is rails and
-  // room, and whatever is screwed in later is not the editor's business
-  assert.doesNotMatch(js, /add a module|setModuleSlot|applyBaySnap|nearestSlot|hp_slot/);
-  assert.match(js, /if \(!drag\.vertical\) d = applySnap\(d\);/);
-  assert.match(html, /Nothing may enter a bay's space: it is kept clear for the\s+modules you screw in later\./);
-  // the rack bay controls still belong to the box use case only
-  assert.match(html, /<div data-uses="box">\s*<h2>rack bays<\/h2>/);
+test('a hybrid edits its rack in the frame pane and its sections beside it', () => {
+  assert.match(js, /const isRack = state\.scene\.kind === 'rack' \|\| isHybrid;/);
+  assert.match(js, /\$\('hy-add-above'\)\.onclick = \(\) => addSection\('above'\)/);
+  assert.match(js, /\$\('hy-add-below'\)\.onclick = \(\) => addSection\('below'\)/);
+  assert.match(js, /secs\.push\(\{ id: side \+ n, side, length: 100, depth: 40 \}\)/);
+  assert.match(js, /rackSpec\(\)\.module_panel_t = v/);
+  // the sections are drawn over the built case, the rails' aperture too
+  assert.match(js, /function buildSections\(model\)/);
+  assert.match(js, /for \(const z of hy\.zones\)/);
+  // the chooser offers it, and it opens on the frame pane
+  assert.match(js, /new hybrid case: Eurorack rows with your own parts above and below/);
+  assert.match(js, /useCase === 'frame' \|\| useCase === 'hybrid'\) showPane\('pane-frame'\)/);
 });
 
 test('real models are vendored, mapped, toggled and placed by the engine', () => {
@@ -277,6 +273,6 @@ test('the frame keeps no copy of the default laser sheet of its own', () => {
 });
 
 test('a frame shows its issues, which come back with its build', () => {
-  assert.match(html, /data-pane="pane-issues" data-uses="[^"]* ?frame"/);
+  assert.match(html, /data-pane="pane-issues" data-uses="[^"]*\bframe\b[^"]*"/);
   assert.match(js, /renderIssues\(state\.caseModel\.issues \|\| \[\]\)/);
 });

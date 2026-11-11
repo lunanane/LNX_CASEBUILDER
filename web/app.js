@@ -11,9 +11,6 @@ import { wireMenus } from './menu.js';
 import { store, files, nameFromFile, NAME_RE } from './store.js';
 import { applyUseCase, STARTER_KIND, useCaseOf } from './usecase.js';
 import {
-  BAY_DEFAULTS, ROW_FORMATS as BAY_ROW_FORMATS, newBayAt, roughBayBox, rowsLabel,
-} from './bays.js';
-import {
   ART_LAYERS, ELEMENT_LAYERS, PCB_DEFAULTS, decodeGray, encodeGray, fitSize, layerColor,
   layerLabel, newArtwork, pcbOf, setBands, thresholdPreview, toGray,
 } from './pcb.js';
@@ -513,7 +510,7 @@ function buildBox(model) {
   caseGroup.clear();
   if (!model || !$('chk-case').checked) return;
   const solid = $('chk-render').checked;
-  // cut plates, then bought parts drawn but never cut: a bay's rails
+  // cut plates, then bought parts drawn but never cut: a hybrid's rails
   for (const p of [...model.plates, ...(model.members || [])]) {
     const m4 = new THREE.Matrix4().set(...p.matrix);
     const finish = finishFor({ name: p.material, color: p.color });
@@ -547,7 +544,11 @@ function buildCase(caseModel) {
   // among them -- and reading .layers off a frame threw, which cleared the
   // preview and left it blank until the case box was toggled again.
   if (caseModel && caseModel.kind === 'rack') { buildRack(caseModel); return; }
-  if (caseModel && caseModel.kind === 'box') { buildBox(caseModel); return; }
+  if (caseModel && (caseModel.kind === 'box' || caseModel.kind === 'hybrid')) {
+    buildBox(caseModel);
+    buildSections(caseModel);
+    return;
+  }
 
   caseGroup.clear();
   if (!caseModel || !$('chk-case').checked) return;
@@ -620,8 +621,9 @@ const MEMBER_STYLE = {
 /** The sheet a laser frame is cut from, unless the scene names one: the
  *  server's default, off the last build, so there is one copy of it. */
 function laserSheet() {
-  const m = state.caseModel?.kind === 'rack' ? state.caseModel : null;
-  return m?.laser_sheet || { name: 'plywood' };
+  const m = state.caseModel;
+  if (m?.kind === 'hybrid') return m.extras?.sheet || { name: 'plywood' };
+  return (m?.kind === 'rack' ? m.laser_sheet : null) || { name: 'plywood' };
 }
 
 function buildRack(model) {
@@ -705,6 +707,89 @@ function laserPlatesHtml(m) {
     'plate, the rails and the fixings.</p>';
 }
 
+/** A hybrid case: what is cut, the rails, and the zones along the rows. */
+function hybridResultHtml(m) {
+  const hy = m.extras?.hybrid || {};
+  const bom = m.bom || {};
+  const bought = Object.entries(bom)
+    .filter(([k]) => / (bolt|nut|screw)$/.test(k) || /^Eurorack rail/.test(k))
+    .map(([k, n]) => '<div class="field"><label>' + escapeHtml(k) +
+         '</label><span>' + n + '</span></div>').join('');
+  const zones = (hy.zones || []).map((z) => '<div class="field"><label>' +
+    escapeHtml(z.rack ? 'rack' : z.name) + '</label><span>' +
+    (z.y1 - z.y0).toFixed(1) + ' long, ' + (+z.depth).toFixed(1) +
+    ' deep</span></div>').join('');
+  return '<div class="field"><label>rail span</label><span>' + (+hy.width).toFixed(2) + ' mm</span></div>' +
+    '<div class="field"><label>length</label><span>' + (+hy.length).toFixed(1) + ' mm</span></div>' +
+    '<div class="field"><label>height</label><span>' + (m.z1 - m.z0).toFixed(1) + ' mm</span></div>' +
+    '<div class="field"><label>plates</label><span>' + m.plates.length + ' x ' +
+    (+hy.sheet_t).toFixed(1) + ' mm</span></div>' +
+    '<div class="field"><label>standoffs</label><span>' + (m.standoffs || []).length + '</span></div>' +
+    zones + '<h2>bought</h2>' + bought +
+    '<p class="note">Every deck, floor and wall is jointed into both side ' +
+    'panels; the cut list gives the plates, the rails, the M5s with their ' +
+    'tap and every standoff. Export it from the file menu, as any case.</p>';
+}
+
+/** A hybrid's parts sections: side, length and depth each, in list order --
+ *  which is the order they stack outwards from the rack on their side. */
+function renderSections() {
+  const list = $('hy-sections');
+  if (!list || !state.scene) return;
+  const hybrid = state.scene.kind === 'hybrid';
+  const secs = hybrid ? (state.scene.sections || (state.scene.sections = [])) : [];
+  list.innerHTML = '';
+  secs.forEach((sec, i) => {
+    const div = document.createElement('div');
+    div.className = 'section';
+    const f = document.createElement('div');
+    f.className = 'field';
+    f.innerHTML = '<label title="this section\'s id">' + escapeHtml(sec.id || ('section ' + (i + 1))) +
+      '</label><select title="which end of the rack it is fixed to">' +
+      '<option value="below">below</option><option value="above">above</option></select>';
+    const sel = f.querySelector('select');
+    sel.value = sec.side === 'above' ? 'above' : 'below';
+    sel.onchange = () => { edit(); sec.side = sel.value; renderSections(); doResolve(); };
+    const del = document.createElement('button');
+    del.textContent = 'x';
+    del.title = 'remove this section';
+    del.onclick = () => { edit(); secs.splice(i, 1); renderSections(); doResolve(); };
+    f.appendChild(del);
+    div.appendChild(f);
+    for (const [key, label, title, dflt] of [
+      ['length', 'length', 'how far it reaches from its inner end, along the rows', 100],
+      ['depth', 'depth', 'clear room under the deck: deck top down to its floor', 40]]) {
+      const g = document.createElement('div');
+      g.className = 'field';
+      g.innerHTML = '<label title="' + escapeHtml(title) + '">' + label +
+        '</label><input type="number" step="1" min="1"><span class="unit">mm</span>';
+      const inp = g.querySelector('input');
+      inp.value = sec[key] ?? dflt;
+      inp.oninput = () => {
+        const v = parseFloat(inp.value);
+        if (!Number.isFinite(v) || v <= 0) return;
+        edit('hy-' + i + '-' + key);
+        sec[key] = v;
+        scheduleResolve(250);
+      };
+      div.appendChild(g);
+    }
+    list.appendChild(div);
+  });
+}
+
+/** A new section on `side`, outermost there, with an id nobody has. */
+function addSection(side) {
+  edit();
+  const secs = state.scene.sections || (state.scene.sections = []);
+  const ids = new Set(secs.map((s) => s.id));
+  let n = secs.filter((s) => s.side === side).length + 1;
+  while (ids.has(side + n)) n++;
+  secs.push({ id: side + n, side, length: 100, depth: 40 });
+  renderSections();
+  doResolve();
+}
+
 function rackSpec() {
   if (!state.scene.rack) {
     state.scene.rack = {
@@ -724,12 +809,15 @@ function rackSpec() {
 
 function renderFramePanel() {
   if (!state.scene || !$('fr-hp')) return;
-  const isRack = state.scene.kind === 'rack';
+  const isHybrid = state.scene.kind === 'hybrid';
+  // a hybrid's rack is a laser frame: the same controls, less the style
+  const isRack = state.scene.kind === 'rack' || isHybrid;
   for (const id of ['fr-hp', 'fr-depth', 'fr-inserts', 'fr-add-3u',
                     'fr-add-1u', 'fr-style', 'fr-sheet-t', 'fr-joint',
-                    'fr-top-plate', ...PANEL_FIELDS.map((f) => f[0])]) {
+                    'fr-top-plate', 'fr-panel-t', ...PANEL_FIELDS.map((f) => f[0])]) {
     if ($(id)) $(id).disabled = !isRack;
   }
+  renderSections();
 
   if (!isRack) {
     // Bail before rackSpec(), which would otherwise graft a rack block onto
@@ -753,8 +841,11 @@ function renderFramePanel() {
 
   // construction: the laser-only controls are live only for a laser frame,
   // and the inserts only for a U-channel one -- a back plate closes them
-  const laser = spec.style === 'laser';
+  const laser = spec.style === 'laser' || isHybrid;
   $('fr-style').value = laser ? 'laser' : 'u_channel';
+  if ($('fr-panel-t') && document.activeElement !== $('fr-panel-t')) {
+    $('fr-panel-t').value = spec.module_panel_t ?? 2;
+  }
   if (document.activeElement !== $('fr-sheet-t')) {
     $('fr-sheet-t').value = spec.material?.thickness ?? laserSheet().thickness ?? '';
   }
@@ -812,6 +903,12 @@ function renderFramePanel() {
   }
 
   const stance = $('fr-stance');
+  if (isHybrid) {
+    stance.textContent = '';
+    const m = state.caseModel?.kind === 'hybrid' ? state.caseModel : null;
+    $('fr-result').innerHTML = m ? hybridResultHtml(m) : '<p class="note">building...</p>';
+    return;
+  }
   const m0 = (state.caseModel && state.caseModel.kind === 'rack')
     ? state.caseModel : null;
   {
@@ -877,8 +974,13 @@ const PROJECT_KINDS = {
   box: {
     label: 'new box case',
     blurb: 'The same boards, in a box of six jointed plates -- deep cases for '
-         + 'little material. Eurorack rails can be set into its deck as rack '
-         + 'bays, so modules and your own hardware share one case.',
+         + 'little material.',
+  },
+  hybrid: {
+    label: 'new hybrid case: Eurorack rows with your own parts above and below',
+    blurb: 'A laser-cut Eurorack frame lying flat, its HP span the width of the '
+         + 'case, with parts sections above and below it: place your boards '
+         + 'there as in a layered case, flush with the module faces.',
   },
   frame: {
     label: 'new Eurorack frame',
@@ -897,7 +999,8 @@ const PROJECT_KINDS = {
 /** A frame has nothing to show but its case, so make sure the box is on.
  *  Left off, a rack project opens to an empty viewport. */
 function ensureCaseVisible() {
-  if (state.scene?.kind === 'rack' && !$('chk-case').checked) {
+  const framed = state.scene?.kind === 'rack' || state.scene?.kind === 'hybrid';
+  if (framed && !$('chk-case').checked) {
     $('chk-case').checked = true;
   }
 }
@@ -947,7 +1050,8 @@ async function freeSceneName(base) {
 async function startProject(useCase) {
   const kind = STARTER_KIND[useCase] || 'parts';
   let suggested = await freeSceneName(
-    { frame: 'frame', panel: 'panel', box: 'box' }[useCase] || 'case');
+    { frame: 'frame', panel: 'panel', box: 'box', hybrid: 'hybrid' }[useCase]
+      || 'case');
   for (;;) {
     const name = askName('Name for the new project', suggested);
     if (!name) return null;
@@ -957,7 +1061,7 @@ async function startProject(useCase) {
       await refreshScenes(name);
       await loadScene(name);
       // open on the pane that use case starts from
-      if (useCase === 'frame') showPane('pane-frame');
+      if (useCase === 'frame' || useCase === 'hybrid') showPane('pane-frame');
       else if (useCase === 'panel') showPane('pane-case');
       ensureCaseVisible();
       status(`started ${name}`, 'ok');
@@ -1084,6 +1188,18 @@ function wireFramePanel() {
   };
   $('fr-add-3u').onclick = add('3U');
   $('fr-add-1u').onclick = add('1U-intellijel');
+  // a hybrid only: the module panels' thickness, and the parts sections
+  if ($('fr-panel-t')) {
+    $('fr-panel-t').oninput = () => {
+      const v = parseFloat($('fr-panel-t').value);
+      if (!Number.isFinite(v) || v <= 0) return;
+      edit('fr-panel-t');
+      rackSpec().module_panel_t = v;
+      scheduleResolve(150);
+    };
+  }
+  if ($('hy-add-above')) $('hy-add-above').onclick = () => addSection('above');
+  if ($('hy-add-below')) $('hy-add-below').onclick = () => addSection('below');
 }
 
 // ---------------------------------------------------------------------------
@@ -1254,7 +1370,6 @@ async function doResolve() {
     buildPanels(resolved);
     buildSideOpenings(resolved);
     buildSupports(resolved);
-    buildBays(resolved);
     if ($('chk-render').checked) applyRenderMode();
     if (!drag) buildGizmo();
     renderIssues(resolved.issues);
@@ -1292,6 +1407,7 @@ async function refreshCase() {
       return;
     }
     buildCase(state.caseModel);
+    if (state.caseModel?.kind === 'hybrid') renderFramePanel();
     renderCaseScrews();
     // the build is the only thing that knows a label outgrew its box
     renderEngravePanel();
@@ -1303,6 +1419,8 @@ async function refreshCase() {
     if (state.scene && state.scene.kind === 'rack') {
       renderFramePanel();
       renderIssues([{ level: 'error', code: 'build', message: err.message }]);
+    } else if (state.scene?.kind === 'hybrid') {
+      renderFramePanel();
     }
   }
 }
@@ -1535,145 +1653,40 @@ function wirePlates() {
   };
 }
 
-/** The case pane's rack bays: Eurorack rails set into a box's deck (M10).
- *  Each bay is a block of fields -- HP, where it is, its rows, its depth and
- *  panel thickness. The modules screwed in later are not the editor's
- *  business; edits go straight back to the engine. */
-function renderBays() {
-  const list = $('bay-list');
-  if (!list || !state.scene) return;
-  const box = state.scene.case?.style === 'box' && state.scene.kind !== 'rack';
-  const bays = state.scene.racks || [];
-  $('btn-add-bay').disabled = !box;
-  list.innerHTML = '';
-  bays.forEach((bay, i) => list.appendChild(bayBlock(bay, i, bays, box)));
-}
-
-/** Something about a bay changed: show it, and let the engine re-place. */
-function bayChanged(delay = 0) {
-  renderBays();
-  scheduleResolve(delay);
-}
-
-function bayBlock(bay, i, bays, box) {
-  const div = document.createElement('div');
-  div.className = 'bay';
-  const field = (label, title, inner) => {
-    const f = document.createElement('div');
-    f.className = 'field';
-    f.innerHTML = '<label title="' + escapeHtml(title) + '">' + escapeHtml(label)
-      + '</label>' + inner;
-    div.appendChild(f);
-    return f;
-  };
-  const num = (label, value, step, set, title) => {
-    const inp = field(label, title, '<input type="number" step="' + step + '">')
-      .querySelector('input');
-    inp.value = value;
-    inp.disabled = !box;
-    inp.oninput = () => {
-      const v = parseFloat(inp.value);
-      if (!Number.isFinite(v)) return;
-      edit('bay-' + i + '-' + label);
-      set(v);
-      scheduleResolve(250);
-    };
-  };
-
-  const head = field(bay.id || 'bay', 'this bay\'s id', '<span>'
-    + escapeHtml(rowsLabel(bay.rows)) + '</span>');
-  const del = document.createElement('button');
-  del.textContent = 'x';
-  del.title = 'remove this bay';
-  del.disabled = !box;
-  del.onclick = () => { edit(); bays.splice(i, 1); bayChanged(); };
-  head.appendChild(del);
-
-  num('HP', bay.hp ?? BAY_DEFAULTS.hp, 1, (v) => { bay.hp = v; }, 'rail span in HP');
-  num('x', bay.at?.[0] ?? 0, 0.5, (v) => { bay.at = [v, bay.at?.[1] ?? 0]; },
-    'where the rails start, world x');
-  num('y', bay.at?.[1] ?? 0, 0.5, (v) => { bay.at = [bay.at?.[0] ?? 0, v]; },
-    'the bottom rail\'s outer edge, world y');
-  num('depth', bay.module_depth ?? BAY_DEFAULTS.module_depth, 1,
-    (v) => { bay.module_depth = v; },
-    'clear room behind the module panels: from the rails\' front face down to the floor, as on a frame');
-  num('panel', bay.module_panel_t ?? BAY_DEFAULTS.module_panel_t, 0.1,
-    (v) => { bay.module_panel_t = v; },
-    'the modules\' panel thickness: the rails sit this far under the deck top, so the faces are flush with it');
-
-  // rows, bottom to top, in the formats a frame takes
-  const rows = bay.rows && bay.rows.length ? bay.rows : (bay.rows = [{ format: '3U' }]);
-  rows.forEach((row, r) => {
-    const f = field('row ' + r, 'row ' + r + ', counted from the bottom',
-      '<select>' + BAY_ROW_FORMATS.map((fmt) => '<option value="' + fmt + '"'
-        + (fmt === row.format ? ' selected' : '') + '>' + fmt + '</option>').join('')
-      + '</select>');
-    const sel = f.querySelector('select');
-    sel.disabled = !box;
-    sel.onchange = () => { edit(); row.format = sel.value; bayChanged(); };
-    if (rows.length > 1) {
-      const rm = document.createElement('button');
-      rm.textContent = 'x';
-      rm.title = 'remove this row';
-      rm.disabled = !box;
-      rm.onclick = () => { edit(); rows.splice(r, 1); bayChanged(); };
-      f.appendChild(rm);
-    }
-  });
-  const addRow = document.createElement('button');
-  addRow.textContent = '+ row';
-  addRow.title = 'add a row on top';
-  addRow.disabled = !box;
-  addRow.onclick = () => { edit(); rows.push({ format: '3U' }); bayChanged(); };
-  div.appendChild(addRow);
-
-  return div;
-}
-
-/** Each bay drawn in the editing view, before and without a case build:
- *  the deck aperture at the module faces, the two cheeks from the deck top
- *  to the floor, and the rails' front face. The render view shows the built
- *  case instead. */
-const bayGroup = new THREE.Group();
-view.add(bayGroup);
+/** A hybrid's zones drawn over the built case: each section's outline at
+ *  the deck top and at its floor, and the rack's aperture over the rails.
+ *  The plates themselves are the build's; this says which stretch is which
+ *  while you place parts. The render view shows the plates alone. */
+const sectionGroup = new THREE.Group();
+view.add(sectionGroup);
 $('chk-render').addEventListener('change', () => {
-  bayGroup.visible = !$('chk-render').checked;
+  sectionGroup.visible = !$('chk-render').checked;
 });
 
-function buildBays(resolved) {
-  bayGroup.clear();
-  bayGroup.visible = !$('chk-render').checked;
-  const list = $('bay-list');
-  if (list && !list.contains(document.activeElement)) renderBays();
+function buildSections(model) {
+  sectionGroup.clear();
+  sectionGroup.visible = !$('chk-render').checked;
+  const hy = model?.extras?.hybrid;
+  if (!hy || !$('chk-case').checked) return;
   const line = (pts, color, opacity = 0.9) => {
     const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
-    bayGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+    sectionGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(
       pts.map(([x, y, z]) => new THREE.Vector3(x, y, z))), mat));
   };
   const rect = ([x0, y0, x1, y1], z, color, opacity) =>
     line([[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z], [x0, y0, z]], color, opacity);
-  for (const b of resolved.bays || []) {
-    rect(b.aperture, b.z_top, 0xf2b84b);
-    rect(b.aperture, b.z_rail, 0xd8dade, 0.5);
-    for (const c of b.cheeks) {
-      const g = new THREE.BoxGeometry(c[2] - c[0], c[3] - c[1], b.z_top - b.z_floor);
-      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(g),
-        new THREE.LineBasicMaterial({ color: 0xc8a165, transparent: true, opacity: 0.8 }));
-      edges.position.set((c[0] + c[2]) / 2, (c[1] + c[3]) / 2, (b.z_top + b.z_floor) / 2);
-      bayGroup.add(edges);
-    }
-    // the floor of the module space, and each row's centre line
-    rect(b.aperture, b.z_floor, 0xf2b84b, 0.35);
-    for (const r of b.rows) {
-      line([[b.aperture[0], r.y_mid, b.z_top], [b.aperture[2], r.y_mid, b.z_top]], 0xf2b84b, 0.3);
-    }
+  for (const z of hy.zones) {
+    if (z.rack) continue;
+    rect([0, z.y0, hy.width, z.y1], hy.z_top + 0.05, 0x5fb3f2, 0.9);
+    rect([0, z.y0, hy.width, z.y1], z.z_floor, 0x5fb3f2, 0.35);
   }
+  rect(hy.aperture, hy.z_top + 0.05, 0xf2b84b);
+  rect(hy.aperture, hy.z_rail, 0xd8dade, 0.5);
 }
 
 function renderCaseScrews() {
   const c = state.scene?.case;
   if (!c) return;
-  renderBays();
   const mode = c.case_screws || 'none';
   $('cs-mode').value = mode;
   // construction: stacked layers, or a box of jointed plates
@@ -1849,23 +1862,6 @@ function wireCaseScrews() {
     edit();
     state.scene.case.style = $('cs-style').value;
     refreshUseCase();   // layered <-> box: the panes reshape, nothing is lost
-    push();
-  };
-  $('btn-add-bay').onclick = () => {
-    edit();
-    const bays = state.scene.racks || (state.scene.racks = []);
-    const ids = new Set(bays.map((b) => b.id));
-    let n = bays.length + 1;
-    while (ids.has('bay' + n)) n++;
-    // clear of every board and every other bay, not on top of them at 0, 0
-    const boxes = (state.scene.placements || []).map((p) => placementBounds(p.id))
-      .concat((state.resolved?.bays || []).map((rb) => ({
-        x0: rb.cheeks[0][0], y0: rb.cheeks[0][1], x1: rb.cheeks[1][2], y1: rb.cheeks[1][3] })))
-      .concat(bays.map((bb) => roughBayBox(bb)));
-    bays.push({ id: 'bay' + n, at: newBayAt(boxes), hp: BAY_DEFAULTS.hp,
-                rows: [{ format: '3U' }], module_depth: BAY_DEFAULTS.module_depth,
-                module_panel_t: BAY_DEFAULTS.module_panel_t });
-    renderBays();
     push();
   };
   $('cs-box-joint').onchange = () => {
@@ -2812,6 +2808,17 @@ function frameCamera() {
     const span = Math.max(m.outer_width, m.panel_height, 100);
     controls.target.set(0, 0, m.depth / 2);
     camera.position.set(span * 0.35, -span * 0.85, span * 0.75);
+    controls.update();
+    return;
+  }
+  if (state.scene?.kind === 'hybrid' && m?.kind === 'hybrid' && m.outline?.length) {
+    // the case, not the parts in it: a new hybrid has none
+    const xs = m.outline.map((p) => p[0]), ys = m.outline.map((p) => p[1]);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 100);
+    controls.target.set(cx, cy, (m.z0 + m.z1) / 2);
+    camera.position.set(cx + span * 0.35, cy - span * 0.85, span * 0.75);
     controls.update();
     return;
   }
@@ -4284,7 +4291,7 @@ function buildEngravings(caseModel) {
   engraveGroup.clear();
   // a frame has no lid, and a box's deck carries its engraving in its cut
   if (!caseModel || caseModel.kind === 'rack' || caseModel.kind === 'box'
-      || !$('chk-case').checked) return;
+      || caseModel.kind === 'hybrid' || !$('chk-case').checked) return;
   if (caseModel.pcb) { buildPcbLayers(caseModel); return; }
   for (const layer of caseModel.layers) {
     if (!layer.engrave?.length) continue;
