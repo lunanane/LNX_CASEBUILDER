@@ -709,7 +709,7 @@ def catalog_status(refresh: bool = False):
 
 
 def _measure_product(product_id: str, download: bool = True,
-                     file: Optional[str] = None, flip: Optional[bool] = None):
+                     file: str | None = None, flip: bool | None = None):
     """(entry, draft, model files on disk) for one catalogue product.
 
     Shared by the preview and the import, so what was reviewed is exactly
@@ -767,7 +767,7 @@ def _measure_product(product_id: str, download: bool = True,
 
 @app.post("/api/catalog/preview/{product_id}")
 def catalog_preview(product_id: str, download: bool = True,
-                    file: Optional[str] = None, flip: Optional[bool] = None):
+                    file: str | None = None, flip: bool | None = None):
     """What an import would save, without saving it.
 
     The editor shows this before anything is filed: which of the product's
@@ -790,7 +790,7 @@ def catalog_preview(product_id: str, download: bool = True,
 
 @app.post("/api/catalog/import/{product_id}")
 def catalog_import(product_id: str, download: bool = True,
-                   file: Optional[str] = None, flip: Optional[bool] = None):
+                   file: str | None = None, flip: bool | None = None):
     """Measure a product's vendor model and add it to the library.
 
     The result is a draft: real envelope, real mounting holes, an orientation

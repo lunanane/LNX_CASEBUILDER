@@ -4903,6 +4903,28 @@ def test_a_file_edited_into_nonsense_says_which_field():
     assert "wall" in bad.json()["detail"]
 
 
+def test_the_import_routes_take_a_chosen_file_and_flip(monkeypatch):
+    """`file` and `flip` were annotated `Optional[...]` without `Optional`
+    being imported. Under `from __future__ import annotations` the module
+    still loads, so nothing failed until FastAPI resolved the annotation on
+    the first request that carried them -- a 500 on every reviewed import."""
+    from fastapi.testclient import TestClient
+    from hwcase import api
+
+    seen = []
+
+    def measure(product_id, download, file, flip):
+        seen.append((product_id, file, flip))
+        raise api.HTTPException(404, "stub")
+
+    monkeypatch.setattr(api, "_measure_product", measure)
+    c = TestClient(api.app)
+    params = {"file": "4884 Feather RP2040.step", "flip": "false"}
+    for route in ("/api/catalog/preview/4884", "/api/catalog/import/4884"):
+        assert c.post(route, params=params).status_code == 404
+    assert seen == [("4884", "4884 Feather RP2040.step", False)] * 2
+
+
 def test_a_scene_can_carry_its_own_parts(lib):
     """Where nothing is filed on the server, an imported board has nowhere to
     live but the scene -- so the scene has to be able to hold one, and hand
