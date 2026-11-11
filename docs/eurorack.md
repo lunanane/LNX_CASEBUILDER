@@ -194,6 +194,18 @@ drill sizes (§9). If the engine should *enforce* these rather than have them si
 in prose, the natural home is a `standards` block the checker reads — say the
 word and this lifts into YAML.
 
+**Rack bays in a box case** (`racks:`, `backend/hwcase/hybrid.py`). A bay's
+modules are listed by slot — `{id, hp_slot, row}`, both counted from 0, the slot
+in HP from the rails' left end, the row from the bottom — and the engine moves
+each module (and whatever is mated to it) so its panel's left edge lands on the
+slot and the panel is centred on the row's rails. A module's HP is its panel's
+width on the grid (a part of category `panel` in its mate tree; failing that,
+its widest board). A bare id with a hand-typed `pos` still loads, and is checked
+against the same grid to 0.05 mm. The bill of materials counts an M3 screw and a
+sliding nut per rail hole of each listed module by Doepfer's hole rule (§3, an
+estimate), and one M5 per rail end, its length the cheek plus 8 mm of thread;
+the rail's 4.4 mm end bore is tapped M5 (tap drill 4.2).
+
 ## Sources
 
 - [Doepfer A-100 construction details](https://doepfer.de/a100_man/a100m_e.htm) —
