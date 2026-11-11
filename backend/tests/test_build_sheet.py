@@ -74,3 +74,38 @@ def test_the_cut_list_carries_the_fixings():
     assert "fixings:" in cut
     assert "4 x M3 hex nut" in cut
     assert "nut in the floor's hex trap" in cut
+
+
+# --------------------------------------------------------------------------
+# the stacking sequence
+# --------------------------------------------------------------------------
+
+
+def test_the_cut_list_numbers_the_stack_from_the_floor_up():
+    res, model = _build(_scene([PI]))
+    steps = model.assembly
+    assert steps[0] == "1. layer 00 floor, outside face down"
+    assert steps[1].startswith("2. press the 4 M3 nuts into the floor")
+    assert steps[-1].endswith("bolts down through the lid into the nuts")
+    numbers = [int(s.split(".")[0]) for s in steps]
+    assert numbers == list(range(1, len(steps) + 1))
+    # every layer, in z order
+    order = [s for s in steps if s.split(". ", 1)[1].startswith("layer ")]
+    assert [s.split()[2] for s in order] == [
+        f"{l.index:02d}" for l in model.layers]
+    cut = dict(export.sheet_files(model, "svg", "s"))["s-cutlist.txt"]
+    assert "assembly order:" in cut and steps[-1] in cut
+
+
+def test_a_board_goes_in_after_the_last_layer_below_it():
+    res, model = _build(_scene([PI]))
+    steps = [s.split(". ", 1)[1] for s in model.assembly]
+    at = next(i for i, s in enumerate(steps) if s.startswith("insert pico"))
+    assert "(held by screws from below)" in steps[at]
+    board = min(s.z[0] for s in res.solids
+                if s.placement == "pico" and s.name == "pcb")
+    before = [s for s in steps[:at] if s.startswith("layer ")]
+    after = [s for s in steps[at:] if s.startswith("layer ")]
+    by_index = {f"{l.index:02d}": l for l in model.layers}
+    assert all(by_index[s.split()[1]].z1 <= board + 1e-6 for s in before)
+    assert by_index[after[0].split()[1]].z1 > board

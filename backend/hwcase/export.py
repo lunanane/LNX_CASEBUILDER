@@ -843,6 +843,10 @@ def case_cutlist(model, manifest: str) -> str:
                          "the board's far face")
         lines += [f"  {n}" for n in model.hardware_notes]
         lines.append("")
+    if model.assembly:
+        lines += ["assembly order:"]
+        lines += [f"  {s}" for s in model.assembly]
+        lines.append("")
     return "\n".join(lines)
 
 

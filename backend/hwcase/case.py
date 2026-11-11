@@ -66,6 +66,8 @@ class CaseModel:
     #: what the bench needs to know about them (a bolt too long, a nut
     #: thicker than its trap)
     hardware_notes: list[str] = field(default_factory=list)
+    #: the numbered stacking sequence; see `assembly_order`
+    assembly: list[str] = field(default_factory=list)
 
     @property
     def height(self) -> float:
@@ -199,7 +201,72 @@ def build(res: Resolved, spec: Optional[CaseSpec] = None) -> CaseModel:
     _apply_engravings(res, layers)
     model = CaseModel(spec=spec, outer=outer, layers=layers, z0=z0, z1=cursor)
     model.hardware, model.hardware_notes = hardware_for(res, model)
+    model.assembly = assembly_order(res, model)
     return model
+
+
+def assembly_order(res: Resolved, model: CaseModel) -> list[str]:
+    """The stacking sequence, numbered, bottom up.
+
+    Every layer goes on in z order. A board goes in once the last layer
+    entirely below its board (its pcb, or its lowest part when it has none)
+    is down and before the first layer that reaches it: whatever hangs under
+    the board drops through the holes cut for it, and the layers that do
+    reach it are pocketed around it, so it is held from then on. Case bolt
+    nuts go into the floor's traps before anything covers them, and the
+    bolts go in last.
+    """
+    layers = model.layers
+    if not layers:
+        return []
+    lowest: dict[str, float] = {}
+    pcb: dict[str, float] = {}
+    for s in res.solids:
+        if s.name == "pcb":
+            pcb[s.placement] = min(pcb.get(s.placement, s.z[0]), s.z[0])
+        lowest[s.placement] = min(lowest.get(s.placement, s.z[0]), s.z[0])
+    seat = {pl: pcb.get(pl, z) for pl, z in lowest.items()}
+    mode = {sp.placement: sp.mode for sp in res.supports}
+
+    after: dict[int, list[str]] = {}
+    for pl, z in sorted(seat.items(), key=lambda kv: (kv[1], kv[0])):
+        below = [l.index for l in layers if l.z1 <= z + 1e-6]
+        after.setdefault(below[-1] if below else -1, []).append(pl)
+
+    bolts = [p for p in case_screw_points(model.spec, model.outer)
+             if model.outer.contains(Point(p))]
+    nut = case_bolt_fastener(model.spec).name if bolts else ""
+    bolt = next((k for k in model.hardware
+                 if k.startswith(f"{nut}x") and k.endswith(" bolt")),
+                f"{nut} bolt")
+
+    steps: list[str] = []
+
+    def boards(idx: int) -> None:
+        for pl in after.get(idx, []):
+            how = {Support.from_floor: " (held by screws from below)",
+                   Support.from_lid: " (held by screws from above)"}.get(
+                       mode.get(pl), "")
+            steps.append(f"insert {pl}{how}")
+
+    boards(-1)
+    for layer in layers:
+        name = f"layer {layer.index:02d} {layer.role}"
+        if layer.role == "floor":
+            face = ("engraved face down (it was cut mirrored)"
+                    if layer.engrave is not None and not layer.engrave.is_empty
+                    else "outside face down")
+            steps.append(f"{name}, {face}")
+            if bolts:
+                steps.append(f"press the {len(bolts)} {nut} nuts into the "
+                             f"floor's hex traps")
+        else:
+            steps.append(f"{name} on top, the way it came off the bed")
+        boards(layer.index)
+    if bolts:
+        steps.append(f"drive the {len(bolts)} {bolt.removesuffix(' bolt')} "
+                     f"bolts down through the lid into the nuts")
+    return [f"{i}. {s}" for i, s in enumerate(steps, 1)]
 
 
 def _add(out: dict[str, int], item: str, n: int = 1) -> None:
