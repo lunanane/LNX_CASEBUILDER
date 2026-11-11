@@ -3996,10 +3996,10 @@ function renderArtwork(holder, pcb) {
   head.innerHTML = `
     <div class="field"><label title="any PNG, JPG or SVG; it is split by brightness into two or three layers">add image</label>
       <select class="art-new-bands">
-        <option value="3">3 layers</option>
-        <option value="2">2 layers</option>
-      </select>
-      <input type="file" class="art-file" accept="image/png,image/jpeg,image/svg+xml"></div>`;
+        <option value="3">split into 3 layers</option>
+        <option value="2">split into 2 layers</option>
+      </select></div>
+    <input type="file" class="art-file" accept="image/png,image/jpeg,image/svg+xml">`;
   holder.appendChild(head);
   head.querySelector('.art-file').onchange = async (ev) => {
     const file = ev.target.files?.[0];
@@ -4039,7 +4039,7 @@ function renderArtwork(holder, pcb) {
         </select>
         <label class="check"><input type="checkbox" class="art-invert"${art.invert ? ' checked' : ''}> invert</label></div>
       ${art.layers.map((l, b) => `
-        <div class="field"><label>${b === 0 ? 'darkest' : b === bands - 1 ? 'brightest' : 'middle'}</label>
+        <div class="field"><label title="${b === 0 ? 'the darkest' : b === bands - 1 ? 'the brightest' : 'the middle'} band of the image">${b === 0 ? 'dark' : b === bands - 1 ? 'bright' : 'mid'}</label>
           <select class="art-layer" data-band="${b}">${ART_LAYERS.map((k) =>
             `<option value="${k}"${k === l ? ' selected' : ''}>${escapeHtml(layerLabel(PCB_PALETTE, pcb, k))}</option>`).join('')}
           </select>
@@ -4169,7 +4169,7 @@ function buildPcbLayers(caseModel) {
   const c = caseModel.pcb.colors;
   const looks = [
     ['substrate', c.substrate, 0.0, 0.85, 0.02],
-    ['copper', c.metal, 0.75, 0.32, 0.04],
+    ['copper', c.metal, 0.45, 0.35, 0.04],
     ['silk', c.silk, 0.0, 0.9, 0.06],
   ];
   for (const [key, color, metalness, roughness, lift] of looks) {

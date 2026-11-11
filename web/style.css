@@ -369,3 +369,5 @@ body:not(.rendering) .sunctl { opacity: .35; }
   background: #000;
 }
 .artrow input[type="range"] { flex: 1; min-width: 80px; }
+#case-panel [hidden] { display: none !important; }
+#engrave-panel .art-file { display: block; width: 100%; margin: 2px 0 6px; font-size: 11px; }
