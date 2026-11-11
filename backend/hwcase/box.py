@@ -152,11 +152,15 @@ def panel_plane(res, spec) -> float:
 
 def build_box(res, spec, deck_top: Optional[float] = None,
               floor_top: Optional[float] = None, outer=None,
-              deck_cuts=(), extra=None, inside=frozenset()) -> BoxModel:
+              deck_cuts=(), extra=None, inside=frozenset(),
+              deck_fill=()) -> BoxModel:
     """The box around a resolved scene.
 
     `deck_top`, `floor_top`, `outer` and `deck_cuts` let a caller (M10's rack
     bays) fix the deck's height, the box's footprint and cut extra openings;
+    `deck_fill` is deck restored before those cuts -- a bay's footprint,
+    where its modules' own panel cutouts would otherwise bite into the
+    strip of deck its cheeks join;
     `extra(box_parts)` is called before the joints are cut, to add plates and
     joints of its own. `inside` names placements whose ports never open the
     box's walls -- a bay's modules, which are patched from the front. Left
@@ -191,6 +195,8 @@ def build_box(res, spec, deck_top: Optional[float] = None,
     # -- the deck: the faceplate, cut as a layered lid is ------------------
     deck_world, deck_notes = _layer_geometry(
         res, spec, footprint, (z1 - t, z1), "lid", (z0, z1), [(z1 - t, z1)])
+    for f in deck_fill:
+        deck_world = deck_world.union(f.intersection(footprint))
     for c in deck_cuts:
         deck_world = deck_world.difference(c)
     standoffs: list[Standoff] = []

@@ -14,8 +14,9 @@ What a bay adds to the box:
   that carry the rails with an M5 into each rail end -- the same cheek, M5s
   and rail arithmetic as a laser-cut frame (`hwcase.rack`). A cheek is
   T-slotted into the floor (an interior joint needs a slot, so a finger box
-  bolts its cheeks too) and its top is trimmed to sit just under the deck,
-  which rests on it;
+  bolts its cheeks too). Its inner face is flush with the aperture's edge,
+  so along the rails' stack it stands up through the deck and the two are
+  finger-jointed (glued) like a box corner; elsewhere the deck rests on it;
 * the **rails**, bought by length, in the cut list;
 * a **module space**, the rail span by the rail stack, from the deck top
   down to the module depth behind the rails, that nothing but the bay's own
@@ -36,6 +37,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from shapely.affinity import translate
 from shapely.geometry import Point, Polygon
 from shapely.geometry import box as rect
 
@@ -92,6 +94,12 @@ class Bay:
         return [rect(self.bx - t, y0, self.bx, y1),
                 rect(self.bx + self.width, y0, self.bx + self.width + t, y1)]
 
+    def footprint(self, t: float) -> Polygon:
+        """Cheeks and aperture together, world XY: what another bay must
+        keep clear of."""
+        y0 = self.wy(self.cheek_base)
+        return rect(self.bx - t, y0, self.bx + self.width + t, y0 + self.ph)
+
     def rail_boxes(self) -> list[tuple[Polygon, tuple[float, float]]]:
         """(world XY footprint, world z range) of every rail."""
         out = []
@@ -125,6 +133,35 @@ def place_bay(b, deck_top: float) -> Bay:
                cheek_base=rack.panel_base(rows, overhang, plan),
                ph=rack.panel_height(rows, overhang, plan),
                rail_lo=lo, rail_hi=hi)
+
+
+def cheek_outline(b: Bay, t: float, z1: float, z0: float):
+    """A cheek in its own frame -- u down from the deck top, v up the rows --
+    and its M5 holes, for a box whose deck top is `z1` and whose floor's
+    underside is `z0`.
+
+    The cheek is a frame's side panel (`rack.side_panel_section`) run down
+    to the floor's underside, where its T-slot tabs end flush. Under the
+    solid deck it stops at the deck's underside, which rests on it. Beside
+    the aperture -- the rails' stack -- it stands on up to the deck's top
+    face, so its fingers and the deck's interlock along the aperture's edge.
+    The rails' front face is `module_panel_t` below the deck top wherever that
+    puts it: above the deck's underside the cheek is cut back to it; below,
+    the cheek is carried up to meet the deck, so the deck never floats.
+    """
+    pt = b.spec.module_panel_t
+    section, holes = rack.side_panel_section(
+        b.rows, b.spec.hp, 0, 4.0, rack.RAIL_OVERHANG, b.plan,
+        b.spec.module_depth, depth=b.zr - z0)
+    body = translate(section, pt, 0.0)          # rail face at u = pt
+    if pt > t:
+        body = body.union(rect(t, 0.0, pt + 0.5, b.ph))
+    body = body.intersection(rect(t, -1.0, z1 - z0 + 1.0, b.ph + 1.0))
+    v_lo, v_hi = b.rail_lo - b.cheek_base, b.rail_hi - b.cheek_base
+    outline = body.union(rect(0.0, v_lo, t + 0.5, v_hi))
+    m5 = tuple(Point(h.at[0] + pt, h.at[1]).buffer(h.diameter / 2, quad_segs=12)
+               for h in holes)
+    return outline, m5
 
 
 def build_hybrid(res, spec):
@@ -162,22 +199,18 @@ def build_hybrid(res, spec):
         mat = ctx["mat"]
         keep = t / 2
         for b in bays:
-            depth = b.zr - z0                      # rail face down to the floor
-            outline, holes = rack.side_panel_section(
-                b.rows, b.spec.hp, 0, 4.0, rack.RAIL_OVERHANG, b.plan,
-                b.spec.module_depth, depth=depth)
-            # the cheek stops at the deck's underside, which rests on it
-            cut = max(0.0, t - b.spec.module_panel_t)
-            if cut:
-                outline = outline.difference(rect(-1.0, -1.0, cut, b.ph + 1.0))
-            m5 = tuple(Point(*h.at).buffer(h.diameter / 2, quad_segs=12)
-                       for h in holes)
+            outline, m5 = cheek_outline(b, t, ctx["z1"], z0)
+            depth = ctx["z1"] - z0                 # deck top down to the floor
             y0w = b.wy(b.cheek_base)
-            for side, xc, x_out, a_in in (
-                    ("left", b.bx - t, b.bx - t, "right"),
-                    ("right", b.bx + b.width, b.bx + b.width + t, "left")):
+            v_lo, v_hi = b.rail_lo - b.cheek_base, b.rail_hi - b.cheek_base
+            for side, xc, x_in, x_out, a_in in (
+                    ("left", b.bx - t, b.bx, b.bx - t, "right"),
+                    ("right", b.bx + b.width, b.bx + b.width,
+                     b.bx + b.width + t, "left")):
                 name = f"{b.spec.id}-cheek-{side}"
                 cheek = jn.Plate(outline, mat, m5, keep)
+                # into the floor: T-slots, whatever the box's own joint -- an
+                # interior joint needs a slot, and a slot needs a bolt
                 fu = x_out - ctx["x0"]
                 a_seg = jn.Segment((fu, y0w - ctx["y0"]),
                                    (fu, y0w + b.ph - ctx["y0"]), a_in)
@@ -190,8 +223,32 @@ def build_hybrid(res, spec):
                     raise ValueError(f"bay {b.spec.id}'s {side} cheek cannot "
                                      f"be jointed to the floor: {exc}") from None
                 joints.append(("floor", name, j))
+                # into the deck: the aperture's edge is the deck's own edge,
+                # and the cheek's inner face is flush with it, so the two
+                # meet as a box corner does -- glued fingers along the rails'
+                # stack, where the cheek stands up to the deck's top face
+                du = x_in - ctx["x0"]
+                # the aperture is the deck's edge here, not a hole to keep
+                # clear of: the fingers are cut into it
+                ap = translate(b.aperture, -ctx["x0"], -ctx["y0"]).buffer(0.01)
+                deck = parts["deck"]
+                parts["deck"] = jn.Plate(
+                    deck.geom, deck.material,
+                    tuple(h for h in deck.holes if not h.intersects(ap)),
+                    deck.keep_clear)
+                d_seg = jn.Segment.on(parts["deck"].geom,
+                                      (du, b.wy(b.rail_lo) - ctx["y0"]),
+                                      (du, b.wy(b.rail_hi) - ctx["y0"]))
+                c_seg = jn.Segment.on(cheek.geom, (0.0, v_lo), (0.0, v_hi))
+                try:
+                    parts["deck"], cheek, j = jn.finger_joint(
+                        jn.Edge(d_seg, c_seg), parts["deck"], cheek)
+                except jn.JointError as exc:
+                    raise ValueError(f"bay {b.spec.id}'s {side} cheek cannot "
+                                     f"be jointed to the deck: {exc}") from None
+                joints.append(("deck", name, j))
                 parts[name] = cheek
-                ctx["place"][name] = ("cheek", (xc, y0w, b.zr), CHEEK_AXES)
+                ctx["place"][name] = ("cheek", (xc, y0w, ctx["z1"]), CHEEK_AXES)
             ctx["notes"].append(
                 f"bay {b.spec.id}: {b.spec.hp:g} HP, "
                 f"{' + '.join(r.name for r in b.rows)}, module depth "
@@ -203,7 +260,8 @@ def build_hybrid(res, spec):
     modules = {m for b in bays for m in b.spec.modules}
     model = build_box(res, spec, deck_top=z1, floor_top=floor_top,
                       outer=outer, deck_cuts=[b.aperture for b in bays],
-                      extra=extra, inside=modules)
+                      extra=extra, inside=modules,
+                      deck_fill=[b.footprint(t) for b in bays])
 
     rail_mat = Material(name="aluminium-rail", thickness=1.0, kerf=0.0,
                         color="#d8dade")
@@ -245,8 +303,9 @@ def bay_issues(res, spec) -> list[tuple[str, str, str, list[str]]]:
     t = spec.materials[0].thickness
     z1 = panel_plane(res, spec)
     ids = {p.id for p in res.scene.placements}
-    for spec_bay in res.scene.racks:
-        b = place_bay(spec_bay, z1)
+    placed, out_geom = _bay_geometry_issues(res, spec, z1)
+    out += out_geom
+    for spec_bay, b in placed:
         modules = set(spec_bay.modules)
         for m in sorted(modules - ids):
             out.append(("error", "rack_bay",
@@ -289,6 +348,70 @@ def bay_issues(res, spec) -> list[tuple[str, str, str, list[str]]]:
                             f"{s.ref} sits in bay {spec_bay.id}'s {where}",
                             [s.placement, spec_bay.id]))
     return out
+
+
+def _bay_geometry_issues(res, spec, z1):
+    """Each bay placed, and what is wrong with where the bays are: a row
+    format that does not exist, two bays on top of each other or too close
+    for their cheeks' floor slots, panels thicker than the deck, a bay that
+    pushes the case past the outline that was set. Returns ([(spec, Bay)],
+    issues); a bay that cannot be placed at all is left out of the list."""
+    out = []
+    t = spec.materials[0].thickness
+    clearance = spec.materials[0].joint_clearance
+    placed = []
+    seen: set[str] = set()
+    for spec_bay in res.scene.racks:
+        if spec_bay.id in seen:
+            out.append(("error", "rack_bay",
+                        f"two bays are called {spec_bay.id}: give each its "
+                        f"own id", [spec_bay.id]))
+        seen.add(spec_bay.id)
+        try:
+            b = place_bay(spec_bay, z1)
+        except ValueError as exc:
+            out.append(("error", "rack_bay", str(exc), [spec_bay.id]))
+            continue
+        placed.append((spec_bay, b))
+        if spec_bay.module_panel_t > t + 1e-9:
+            out.append((
+                "warning", "rack_bay",
+                f"bay {spec_bay.id}: its {spec_bay.module_panel_t:g} mm module "
+                f"panels are thicker than the {t:g} mm deck, so the rails sit "
+                f"{spec_bay.module_panel_t - t:.1f} mm below the deck's "
+                f"underside; the cheeks are carried up to meet the deck",
+                [spec_bay.id]))
+    # Two bays' cheeks both stand in slots in the floor, so between them
+    # they need the web a wall and a cheek need: `wall_gap`.
+    need = wall_gap(t, clearance)
+    for i, (sa, a) in enumerate(placed):
+        for sb, b in placed[i + 1:]:
+            fa, fb = a.footprint(t), b.footprint(t)
+            if fa.intersection(fb).area > 0.01:
+                out.append(("error", "rack_bay",
+                            f"bays {sa.id} and {sb.id} overlap: move one so "
+                            f"their cheeks are {need:.1f} mm apart",
+                            [sa.id, sb.id]))
+            elif fa.distance(fb) < need - 1e-6:
+                out.append(("error", "rack_bay",
+                            f"bays {sa.id} and {sb.id} are "
+                            f"{fa.distance(fb):.1f} mm apart: their cheeks "
+                            f"need {need:.1f} mm of floor between their "
+                            f"slots", [sa.id, sb.id]))
+    if spec.outline is not None and placed:
+        from .case import outer_shape
+
+        x0, y0, x1, y1 = outer_shape(res, spec).bounds
+        pad = (t if spec.box_joint == "tslot" else 0.0) + t + need
+        for sa, a in placed:
+            fx0, fy0, fx1, fy1 = a.footprint(t).bounds
+            if (fx0 - pad < x0 - 1e-6 or fy0 - pad < y0 - 1e-6
+                    or fx1 + pad > x1 + 1e-6 or fy1 + pad > y1 + 1e-6):
+                out.append(("warning", "rack_bay",
+                            f"bay {sa.id} with its cheeks reaches past the "
+                            f"case outline, so the box grows past it to hold "
+                            f"the bay inside its walls", [sa.id]))
+    return placed, out
 
 
 def _z_overlap(a, b) -> float:

@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from shapely.affinity import translate
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, box
 
 from hwcase import case as case_mod
 from hwcase import export, flat, rack
@@ -119,7 +119,9 @@ def test_row5_every_joint_validates_and_every_plate_fits_the_stock(model):
         assert problems == [], (a, b, problems)
     cheek_joints = [(a, b) for a, b, _j in model.joints if "cheek" in b]
     assert cheek_joints == [("floor", "bay-cheek-left"),
-                            ("floor", "bay-cheek-right")]
+                            ("deck", "bay-cheek-left"),
+                            ("floor", "bay-cheek-right"),
+                            ("deck", "bay-cheek-right")]
     sheets = export.pack_sheets(flat.from_box(model), stock=model.spec)
     placed = {pl.part.name for s in sheets for pl in s.placements}
     assert placed == {p.name for p in model.plates}
@@ -210,8 +212,10 @@ def test_both_joint_types_build_the_hybrid(joint):
     case = scene.case.model_copy(update={"box_joint": joint})
     model = case_mod.build(resolve(scene.model_copy(update={"case": case}), LIB))
     assert len(model.plates) == 8
-    # interior joints need slots: a finger box still bolts its cheeks
-    assert all(j.kind == "tslot" for a, b, j in model.joints if "cheek" in b)
+    # interior joints need slots: a finger box still bolts its cheeks to
+    # the floor; the deck meets them at the aperture's edge, a box corner
+    kinds = {(a, j.kind) for a, b, j in model.joints if "cheek" in b}
+    assert kinds == {("floor", "tslot"), ("deck", "finger")}
 
 
 def test_the_editor_gets_plates_rails_and_the_bay(model):
@@ -234,3 +238,114 @@ def test_the_command_line_builds_the_hybrid(tmp_path, capsys):
     assert "hybrid-trellis-amyboard-cutlist.txt" in names
     out = capsys.readouterr().out
     assert "8 plates" in out
+
+
+# --------------------------------------------------------------------------
+# the cheeks hold the deck, not just the rails
+# --------------------------------------------------------------------------
+
+
+def _cheek_world_z(cheek):
+    """World z of a cheek's top and bottom edges."""
+    _u0, _v0, u1, _v1 = cheek.geom.bounds
+    return cheek.to_world(0.0, 0.0)[2], cheek.to_world(u1, 0.0)[2]
+
+
+def test_the_cheeks_are_jointed_into_the_deck_along_the_aperture(model):
+    """Each cheek stands up to the deck's top face beside the rails, where
+    its fingers and the deck's interlock; the deck's fingers are cut into
+    the aperture's edge."""
+    deck = model.plate("deck")
+    deck_top = deck.origin[2] + deck.material.thickness
+    for side in ("left", "right"):
+        cheek = model.plate(f"bay-cheek-{side}")
+        top, bottom = _cheek_world_z(cheek)
+        assert top == pytest.approx(deck_top, abs=0.01)
+        assert bottom == pytest.approx(model.z0, abs=0.01)
+        j = next(j for a, b, j in model.joints
+                 if a == "deck" and b == cheek.name)
+        assert j.kind == "finger" and j.edge.length > 120.0
+
+
+def test_panels_thicker_than_the_deck_never_leave_it_floating():
+    """4 mm panels put the rails a millimetre under a 3 mm deck: the cheeks
+    are carried up to meet it, and the scene says so."""
+    scene = _scene()
+    bay = scene.racks[0].model_copy(update={"module_panel_t": 4.0})
+    scene = scene.model_copy(update={"racks": [bay]})
+    res = resolve(scene, LIB)
+    issues = [i for i in check(res, LIB) if i.code == "rack_bay"]
+    assert any(i.level == "warning" and "thicker than the 3 mm deck"
+               in i.message for i in issues)
+    model = case_mod.build(res)
+    deck = model.plate("deck")
+    under = deck.origin[2]
+    cheek = model.plate("bay-cheek-left")
+    # under the solid deck -- the margin below the rails -- the cheek's top
+    # edge is the deck's underside
+    probe = cheek.geom.intersection(box(-1.0, 0.0, 10.0, 3.0))
+    assert cheek.to_world(probe.bounds[0], 0.0)[2] == pytest.approx(
+        under, abs=0.01)
+    rail_face = max(m.origin[2] for m in model.members)
+    assert deck.origin[2] + 3.0 - rail_face == pytest.approx(4.0, abs=0.01)
+
+
+# --------------------------------------------------------------------------
+# where a bay may go: issues, never exceptions
+# --------------------------------------------------------------------------
+
+
+def _with_bays(*bays):
+    scene = _scene()
+    return scene.model_copy(update={"racks": list(bays)})
+
+
+def test_two_bays_side_by_side_are_an_issue_not_a_crash():
+    """Rails end to end: the second bay's left cheek stands where the first
+    bay's right cheek is."""
+    scene = _scene()
+    a = scene.racks[0]
+    b = a.model_copy(update={"id": "bay2", "modules": [],
+                             "at": (a.at[0] + 28 * 5.08, a.at[1])})
+    issues = check(resolve(_with_bays(a, b), LIB), LIB)
+    hits = [i for i in issues if i.code == "rack_bay" and i.level == "error"
+            and "overlap" in i.message]
+    assert hits and set(hits[0].refs) == {"bay", "bay2"}
+
+
+def test_two_bays_too_close_for_their_floor_slots_are_named():
+    scene = _scene()
+    a = scene.racks[0]
+    b = a.model_copy(update={"id": "bay2", "modules": [],
+                             "at": (a.at[0] + 28 * 5.08 + 3.0 + 3.0 + 1.0,
+                                    a.at[1])})
+    issues = check(resolve(_with_bays(a, b), LIB), LIB)
+    assert any(i.code == "rack_bay" and "mm apart" in i.message
+               for i in issues)
+
+
+def test_two_bays_far_enough_apart_build():
+    scene = _scene()
+    a = scene.racks[0]
+    b = a.model_copy(update={"id": "bay2", "modules": [], "hp": 8,
+                             "at": (a.at[0], a.at[1] - 200.0)})
+    scene = _with_bays(a, b)
+    res = resolve(scene, LIB)
+    assert not [i for i in check(res, LIB)
+                if i.code == "rack_bay" and i.level == "error"]
+
+
+def test_an_unknown_row_format_is_an_issue():
+    scene = _scene()
+    bay = scene.racks[0].model_copy(update={
+        "rows": [scene.racks[0].rows[0].model_copy(update={"format": "5U"})]})
+    issues = check(resolve(_with_bays(bay), LIB), LIB)
+    assert any(i.code == "rack_bay" and "5U" in i.message for i in issues)
+
+
+def test_two_bays_with_one_id_are_named():
+    scene = _scene()
+    a = scene.racks[0]
+    b = a.model_copy(update={"modules": [], "at": (a.at[0], -250.0)})
+    issues = check(resolve(_with_bays(a, b), LIB), LIB)
+    assert any("two bays are called bay" in i.message for i in issues)
