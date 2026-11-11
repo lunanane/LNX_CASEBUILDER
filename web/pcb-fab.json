@@ -1,0 +1,34 @@
+{
+  "_comment": "What a PCB service will make a Eurorack panel out of. ONE table, read by the backend (hwcase.pcbfab: validation, fab notes, checks) and the editor (swatches, the image preview, the 3D colours). Colours are sRGB previews of the real thing, not the fab's own renderings. Limits are the conservative end of JLCPCB / PCBWay / Aisler / OSH Park's published capabilities.",
+  "thickness": [0.8, 1.0, 1.2, 1.6, 2.0],
+  "mask": {
+    "green":       {"label": "green",       "color": "#1f6b3c", "silk": ["white"]},
+    "matte-green": {"label": "matte green", "color": "#2f5b3e", "silk": ["white"]},
+    "black":       {"label": "black",       "color": "#1e1f21", "silk": ["white"]},
+    "matte-black": {"label": "matte black", "color": "#1a1a1a", "silk": ["white"]},
+    "white":       {"label": "white",       "color": "#f1f1ec", "silk": ["black"]},
+    "blue":        {"label": "blue",        "color": "#1d3f8c", "silk": ["white"]},
+    "red":         {"label": "red",         "color": "#a52429", "silk": ["white"]},
+    "yellow":      {"label": "yellow",      "color": "#e2c12c", "silk": ["white", "black"]},
+    "purple":      {"label": "purple",      "color": "#4a2b6e", "silk": ["white"]}
+  },
+  "silk": {
+    "white": {"label": "white", "color": "#f4f4ef"},
+    "black": {"label": "black", "color": "#141414"}
+  },
+  "finish": {
+    "enig":           {"label": "ENIG (gold)",             "metal": "gold",   "color": "#d4af37"},
+    "hasl":           {"label": "HASL (silver)",           "metal": "silver", "color": "#c7cacf"},
+    "hasl-lead-free": {"label": "lead-free HASL (silver)", "metal": "silver", "color": "#c3c6cb"}
+  },
+  "substrate": {"label": "bare FR4", "color": "#c8b77a"},
+  "limits": {
+    "silk_line": 0.15,
+    "silk_text": 1.0,
+    "copper_feature": 0.15,
+    "copper_edge": 0.3,
+    "ring": 0.15,
+    "art_hole_clearance": 0.5,
+    "rail_zone": 2.5
+  }
+}
