@@ -269,6 +269,15 @@ def case_to_json(case: CaseModel) -> dict:
 
     if isinstance(case, BoxModel):
         return box_to_json(case)
+    out = _case_json(case)
+    art = getattr(case, "pcb", None)
+    if art is not None:
+        from .pcb import preview_json
+        out["pcb"] = preview_json(case.spec, art)
+    return out
+
+
+def _case_json(case: CaseModel) -> dict:
     return {
         "z0": case.z0, "z1": case.z1,
         "bom": case.bill_of_materials(),

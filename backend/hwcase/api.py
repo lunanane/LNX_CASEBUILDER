@@ -350,6 +350,14 @@ PANEL_STARTER = """# A new Eurorack module panel.
 # Anything reaching further behind the panel's face than `module_depth` is an
 # error -- it would not fit the case. Add a power header from the palette to
 # have its ribbon counted too.
+#
+# Made as a PCB instead of a cut sheet: set `fab: pcb` under eurorack_panel
+# and choose what a board house offers --
+#   pcb: {{thickness: 1.6, mask: black, silk: white, finish: enig, ring: 0}}
+# (colours and finishes from web/pcb-fab.json). Each engraving then takes a
+# `layer`: silk (printed), copper (exposed metal: gold with enig, silver with
+# hasl) or substrate (bare FR4). Holes are drilled, the rail slots routed,
+# and "export for PCB fab" gives the Gerbers and the notes for the order.
 
 name: {name}
 panels:
@@ -671,6 +679,67 @@ def export_sheets(fmt: str, scene: Scene = Body(...), as_json: bool = False):
     return Response(buf.getvalue(), media_type="application/zip", headers={
         "Content-Disposition": f'attachment; filename="{base}-sheets-{fmt}.zip"',
     })
+
+
+@app.get("/api/pcb/palette")
+def pcb_palette():
+    """What a PCB service makes a panel out of: mask, silk and finish colours
+    with their preview sRGB, board thicknesses and the fab's limits. The same
+    table the backend validates against (web/pcb-fab.json)."""
+    from .pcbfab import palette
+    return palette()
+
+
+@app.post("/api/export/pcb")
+def export_pcb(scene: Scene = Body(...)):
+    """A panel made as a PCB, as the zip a board house takes: Gerbers for
+    copper, mask, silk and outline, the NPTH drill file, and fab notes
+    saying what to tick on the order form."""
+    ep = scene.case.eurorack_panel
+    if scene.kind == "rack" or ep is None or ep.fab != "pcb":
+        raise HTTPException(400, "not a panel made as a PCB -- set the "
+                                 "panel's 'made as' to PCB first")
+    from .pcb import gerber_zip
+
+    base = re.sub(r"[^A-Za-z0-9._-]+", "-", scene.name or "panel").strip("-") or "panel"
+    lib = _lib_for(scene)
+    try:
+        res = resolve(scene, lib)
+        model = case_mod.build(res, scene.case)
+        data = gerber_zip(model, base)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, str(exc))
+    return Response(data, media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="{base}-pcb.zip"',
+    })
+
+
+@app.post("/api/pcb/trace")
+def pcb_trace(payload: dict = Body(...)):
+    """Trace one artwork into its layers, for the editor to show before the
+    scene is rebuilt: {art: PanelArt} -> {layers: {layer: rings}, dropped}.
+    Not clipped to a panel -- the build does that."""
+    from pydantic import ValidationError
+
+    from .artwork import trace
+    from .export import _rings
+    from .geom import polygons
+    from .schema import PanelArt
+
+    try:
+        art = PanelArt.model_validate(payload.get("art"))
+    except ValidationError as exc:
+        raise HTTPException(422, str(exc))
+    try:
+        layers, dropped = trace(art)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {
+        "layers": {k: [[list(c) for c in ring] for p in polygons(g)
+                       for ring in _rings(p)] for k, g in layers.items()},
+        "area": {k: round(g.area, 3) for k, g in layers.items()},
+        "dropped": {k: round(v, 3) for k, v in dropped.items()},
+    }
 
 
 @app.post("/api/case/freeze")
