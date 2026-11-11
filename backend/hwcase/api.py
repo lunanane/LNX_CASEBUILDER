@@ -278,6 +278,32 @@ case:
 """
 
 
+BOX_STARTER = """# A new box case.
+#
+# Boards placed as in a layered case, but the case is a deck, four walls and
+# a floor, jointed -- depth for the cost of six plates. The sheet is the first
+# material, at whatever thickness it measures.
+#
+# Eurorack rails can be set into the deck as rack bays (the case pane): the
+# module faces become the case's surface, and only the placements listed as a
+# bay's modules may enter its space.
+
+name: {name}
+placements: []
+case:
+  style: box
+  box_joint: tslot
+  materials:
+    - {{name: plywood-3mm, thickness: 3.0, kerf: 0.15, sheet: [600.0, 400.0], color: "#c8a165"}}
+  wall: 8.0
+  floor_gap: 4.0
+  ceiling_gap: 1.0
+  part_clearance: 0.6
+  cable_clearance: 5.0
+  corner_radius: 8.0
+"""
+
+
 RACK_STARTER = """# A new Eurorack frame.
 #
 # This project is built from the format, not from boards: set a width in HP
@@ -344,7 +370,8 @@ case:
 
 #: Which starter text a new project of each kind begins from. A panel is a
 #: parts scene -- boards placed by hand -- whose case is one Eurorack panel.
-STARTERS = {"parts": STARTER, "rack": RACK_STARTER, "panel": PANEL_STARTER}
+STARTERS = {"parts": STARTER, "box": BOX_STARTER, "rack": RACK_STARTER,
+            "panel": PANEL_STARTER}
 
 
 def _starter_text(name: str, kind: str) -> str:

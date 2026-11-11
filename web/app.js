@@ -9,6 +9,7 @@ import { choiceOf, importQuery, reviewHtml } from './importer.js';
 import { STOCK, restockName } from './stock.js';
 import { wireMenus } from './menu.js';
 import { store, files, nameFromFile, NAME_RE } from './store.js';
+import { applyUseCase, STARTER_KIND, useCaseOf } from './usecase.js';
 
 // ---------------------------------------------------------------------------
 // state
@@ -50,6 +51,7 @@ async function applyScene(scene) {
     state.selection = null;
   }
   shellFor = placementsSig = issuesSig = null;
+  refreshUseCase();
   $('sel-interior').value = state.scene.case?.interior || 'pocketed';
   renderCaseScrews();
   renderPlates();
@@ -828,15 +830,22 @@ function renderFramePanel() {
 // discouraged.
 
 const PROJECT_KINDS = {
-  parts: {
+  layered: {
     label: 'new laser-cut layered case',
     blurb: 'Place the boards you have measured; the case is generated around '
          + 'them as a stack of sheet layers, ready for a laser.',
   },
-  rack: {
-    label: 'new Eurorack U-profile case',
+  box: {
+    label: 'new box case',
+    blurb: 'The same boards, in a box of six jointed plates -- deep cases for '
+         + 'little material. Eurorack rails can be set into its deck as rack '
+         + 'bays, so modules and your own hardware share one case.',
+  },
+  frame: {
+    label: 'new Eurorack frame',
     blurb: 'Set a width in HP and a stack of rows; the frame follows -- rails, '
-         + 'a folded aluminium body, and side panels that drill themselves.',
+         + 'and either a folded aluminium body or plates cut from one sheet, '
+         + 'with side panels that drill themselves.',
   },
   panel: {
     label: 'new Eurorack module panel',
@@ -896,9 +905,10 @@ async function freeSceneName(base) {
  *  with a 409 the dialog had no way to show. From the outside the whole
  *  dialog just did nothing.
  */
-async function startProject(kind) {
+async function startProject(useCase) {
+  const kind = STARTER_KIND[useCase] || 'parts';
   let suggested = await freeSceneName(
-    kind === 'rack' ? 'frame' : kind === 'panel' ? 'panel' : 'case');
+    { frame: 'frame', panel: 'panel', box: 'box' }[useCase] || 'case');
   for (;;) {
     const name = askName('Name for the new project', suggested);
     if (!name) return null;
@@ -907,9 +917,9 @@ async function startProject(kind) {
       sceneHandle = null;
       await refreshScenes(name);
       await loadScene(name);
-      if (kind === 'rack') {
-        document.querySelector('[data-pane="pane-frame"]')?.click();
-      }
+      // open on the pane that use case starts from
+      if (useCase === 'frame') showPane('pane-frame');
+      else if (useCase === 'panel') showPane('pane-case');
       ensureCaseVisible();
       status(`started ${name}`, 'ok');
       return name;
@@ -1560,6 +1570,45 @@ function renderCaseScrews() {
     : '';
 }
 
+/** The module panel's own settings (`case.eurorack_panel`). Until the split
+ *  these lived only in the scene file; the panel use case was the one route
+ *  with no controls of its own. */
+const PANEL_SETTINGS = [
+  ['ep-hp', 'hp', 10],
+  ['ep-t', 'thickness', 2.0],
+  ['ep-depth', 'module_depth', 40.0],
+];
+
+function renderPanelSettings() {
+  const ep = state.scene?.case?.eurorack_panel;
+  if (!ep || !$('ep-hp')) return;
+  for (const [id, key, dflt] of PANEL_SETTINGS) {
+    const el = $(id);
+    if (document.activeElement !== el) el.value = ep[key] ?? dflt;
+  }
+  $('ep-hp-mm').textContent = '= ' + ((ep.hp ?? 10) * 5.08).toFixed(2) + ' mm of rail';
+}
+
+function wirePanelSettings() {
+  for (const [id, key] of PANEL_SETTINGS) {
+    $(id).oninput = () => {
+      const ep = state.scene?.case?.eurorack_panel;
+      const v = parseFloat($(id).value);
+      if (!ep || !Number.isFinite(v) || v <= 0) return;
+      edit('panel-' + key);
+      ep[key] = v;
+      // the panel's material is the one it names; keep its thickness in step,
+      // or the cut and the depth check disagree about the sheet
+      if (key === 'thickness') {
+        const m = state.scene.case.materials?.find((x) => x.name === ep.material);
+        if (m) m.thickness = v;
+      }
+      renderPanelSettings();
+      scheduleResolve(250);
+    };
+  }
+}
+
 function wireCaseScrews() {
   const push = () => {
     if (!$('chk-case').checked) $('chk-case').checked = true;
@@ -1575,6 +1624,7 @@ function wireCaseScrews() {
   $('cs-style').onchange = () => {
     edit();
     state.scene.case.style = $('cs-style').value;
+    refreshUseCase();   // layered <-> box: the panes reshape, nothing is lost
     push();
   };
   $('btn-add-bay').onclick = () => {
@@ -2510,6 +2560,7 @@ async function loadScene(name) {
   state.scene = await sceneStore.read(name);
   await reloadParts();           // the scene may bring boards of its own
   history.clear();
+  refreshUseCase();
   $('sel-interior').value = state.scene.case?.interior || 'pocketed';
   renderCaseScrews();
   renderPlates();
@@ -3216,6 +3267,21 @@ function wireTabs() {
 
 let showPane = () => {};
 
+/** Show only what serves the open scene's use case (usecase.js). If that
+ *  hides the pane you were on, fall back to the first tab still offered. */
+function refreshUseCase() {
+  const uc = useCaseOf(state.scene);
+  document.body.dataset.use = uc;
+  applyUseCase(document.querySelectorAll('[data-uses]'), uc);
+  renderPanelSettings();
+  const tabs = [...document.querySelectorAll('.tabs .tab')];
+  const active = tabs.find((t) => t.classList.contains('active'));
+  if (!active || active.hidden) {
+    const first = tabs.find((t) => !t.hidden);
+    if (first) showPane(first.dataset.pane);
+  }
+}
+
 /** Badge the issues tab, so a problem is visible from whichever pane you are in. */
 function markIssueCount(issues) {
   const el = $('issue-count');
@@ -3814,6 +3880,7 @@ function buildEngravings(caseModel) {
   resize();
   tick();
   wireCaseScrews();
+  wirePanelSettings();
   wireModal();
   wireCatalog();
   wireMenus();

@@ -186,3 +186,18 @@ def test_the_command_line_builds_a_box_into_sheets(res, tmp_path, capsys):
     assert any(n.endswith(".dxf") for n in written)
     assert any(n.endswith("cutlist.txt") for n in written)
     assert "box:" in capsys.readouterr().out
+
+
+def test_the_box_starter_is_a_parts_project_whose_case_is_a_box():
+    """The project chooser offers a box case on its own, so a new one has to
+    start as one -- not as a layered case the user then has to find the
+    construction dropdown to change."""
+    import yaml
+    from hwcase.api import STARTERS, _starter_text
+    from hwcase.schema import Scene
+
+    assert "box" in STARTERS
+    scene = Scene.model_validate(yaml.safe_load(_starter_text("my-box", "box")))
+    assert scene.kind == "parts"
+    assert scene.case.style == "box"
+    assert scene.case.eurorack_panel is None

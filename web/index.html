@@ -55,23 +55,23 @@
         <button id="btn-undo">undo<kbd>ctrl Z</kbd></button>
         <button id="btn-redo">redo<kbd>ctrl &#8679; Z</kbd></button>
         <hr>
-        <button id="btn-ccw">rotate 90&deg; left<kbd>&#8679; R</kbd></button>
-        <button id="btn-cw">rotate 90&deg; right<kbd>R</kbd></button>
-        <button id="btn-delete">remove selected<kbd>del</kbd></button>
+        <button id="btn-ccw" data-uses="layered box panel">rotate 90&deg; left<kbd>&#8679; R</kbd></button>
+        <button id="btn-cw" data-uses="layered box panel">rotate 90&deg; right<kbd>R</kbd></button>
+        <button id="btn-delete" data-uses="layered box panel">remove selected<kbd>del</kbd></button>
       </div>
     </div>
 
     <div class="menu" data-menu="view">
       <button class="menu-btn" aria-haspopup="true" aria-expanded="false">view</button>
       <div class="menu-pop" role="menu">
-        <label><input type="checkbox" id="chk-corridors"> plug corridors</label>
-        <label><input type="checkbox" id="chk-panels" checked> panel plane</label>
-        <label><input type="checkbox" id="chk-openings" checked> open sides</label>
-        <label><input type="checkbox" id="chk-supports" checked> screws</label>
+        <label data-uses="layered box panel"><input type="checkbox" id="chk-corridors"> plug corridors</label>
+        <label data-uses="layered box panel"><input type="checkbox" id="chk-panels" checked> panel plane</label>
+        <label data-uses="layered box"><input type="checkbox" id="chk-openings" checked> open sides</label>
+        <label data-uses="layered box panel"><input type="checkbox" id="chk-supports" checked> screws</label>
         <label><input type="checkbox" id="chk-grid" checked> grid</label>
-        <label title="draw parts as their vendor models where they have one; checks and cuts still use the boxes"><input type="checkbox" id="chk-models"> real models</label>
-        <hr>
-        <label><input type="checkbox" id="chk-snap" checked>snap board edges</label>
+        <label data-uses="layered box panel" title="draw parts as their vendor models where they have one; checks and cuts still use the boxes"><input type="checkbox" id="chk-models"> real models</label>
+        <hr data-uses="layered box panel">
+        <label data-uses="layered box panel"><input type="checkbox" id="chk-snap" checked>snap board edges</label>
         <hr>
         <button id="btn-frame">frame the scene</button>
       </div>
@@ -97,8 +97,8 @@
   <span class="sep"></span>
   <!-- These two stay on the bar: they change what you are looking at, and you
        reach for them constantly. -->
-  <label><input type="checkbox" id="chk-case" checked> case</label>
-  <select id="sel-interior" title="what the layers between the hardware look like">
+  <label data-uses="layered box panel"><input type="checkbox" id="chk-case" checked> case</label>
+  <select id="sel-interior" data-uses="layered" title="what the layers between the hardware look like">
     <option value="pocketed">pocketed</option>
     <option value="hollow">hollow</option>
     <option value="ribs">ribs</option>
@@ -116,7 +116,7 @@
 </header>
 
 <main>
-  <aside id="palette">
+  <aside id="palette" data-uses="layered box panel">
     <h2>parts</h2>
     <div id="part-list"></div>
 
@@ -137,11 +137,11 @@
          only by scrolling past everything about the selected board, which
          meant most people never found them at all. -->
     <nav class="tabs" role="tablist">
-      <button class="tab active" data-pane="pane-layout" role="tab">layout</button>
-      <button class="tab" data-pane="pane-case" role="tab">case</button>
-      <button class="tab" data-pane="pane-frame" role="tab">frame</button>
+      <button class="tab active" data-pane="pane-layout" data-uses="layered box panel" role="tab">layout</button>
+      <button class="tab" data-pane="pane-case" data-uses="layered box panel" role="tab">case</button>
+      <button class="tab" data-pane="pane-frame" data-uses="frame" role="tab">frame</button>
       <button class="tab" data-pane="pane-look" role="tab">look</button>
-      <button class="tab" data-pane="pane-issues" role="tab">
+      <button class="tab" data-pane="pane-issues" data-uses="layered box panel" role="tab">
         issues<span id="issue-count"></span></button>
     </nav>
 
@@ -153,33 +153,56 @@
     </section>
 
     <section id="pane-case" class="pane" hidden>
-      <h2>size</h2>
-      <div id="case-size"></div>
-
-      <h2>construction</h2>
-      <div class="field">
-        <label title="stacked layers: a slab per sheet, pockets cut around the hardware. Box: a deck, four walls and a floor, jointed -- depth for the cost of six plates.">style</label>
-        <select id="cs-style">
-          <option value="layered">stacked layers</option>
-          <option value="box">box of plates</option>
-        </select>
-      </div>
-      <div class="field">
-        <label title="box only: T-slots take an M3 bolt and a captive nut and come apart again; finger joints are glued">joints</label>
-        <select id="cs-box-joint">
-          <option value="tslot">T-slot + M3 nut</option>
-          <option value="finger">finger (glued)</option>
-        </select>
+      <!-- Each group says which use cases it serves (usecase.js); the others
+           are hidden, not greyed out. -->
+      <div data-uses="panel">
+        <h2>panel</h2>
+        <div id="case-panel">
+          <div class="field"><label title="width in HP; the panel's width is Doepfer's table value for it">HP</label>
+            <input type="number" id="ep-hp" step="1" min="1" max="200"><span class="unit" id="ep-hp-mm"></span></div>
+          <div class="field"><label title="row format. Only 3U has its rail-hole positions recorded.">format</label>
+            <span>3U</span></div>
+          <div class="field"><label title="sheet thickness. 2 mm aluminium is the Doepfer panel; 3 mm stretches a jack's thread.">thick</label>
+            <input type="number" id="ep-t" step="0.1" min="0.5" max="10"><span class="unit">mm</span></div>
+          <div class="field"><label title="how far behind the panel's face anything may reach and still fit the case: 25 a skiff, 40 a shallow case, 50-60 a deep one">depth</label>
+            <input type="number" id="ep-depth" step="1" min="5"><span class="unit">mm</span></div>
+        </div>
       </div>
 
-      <h2>rack bays</h2>
-      <p class="note">Eurorack rails set into a box's deck. The module faces are
-      the case's surface: the rails sit a module panel's thickness under the
-      deck top. List the placements that are modules in the bay; nothing else
-      may enter its space.</p>
-      <div id="bay-list"></div>
-      <button id="btn-add-bay" title="add a 3U rack bay to this box case">+ rack bay</button>
+      <div data-uses="layered box">
+        <h2>size</h2>
+        <div id="case-size"></div>
+      </div>
 
+      <div data-uses="layered box">
+        <h2>construction</h2>
+        <div class="field">
+          <label title="stacked layers: a slab per sheet, pockets cut around the hardware. Box: a deck, four walls and a floor, jointed -- depth for the cost of six plates.">style</label>
+          <select id="cs-style">
+            <option value="layered">stacked layers</option>
+            <option value="box">box of plates</option>
+          </select>
+        </div>
+        <div class="field" data-uses="box">
+          <label title="T-slots take an M3 bolt and a captive nut and come apart again; finger joints are glued">joints</label>
+          <select id="cs-box-joint">
+            <option value="tslot">T-slot + M3 nut</option>
+            <option value="finger">finger (glued)</option>
+          </select>
+        </div>
+      </div>
+
+      <div data-uses="box">
+        <h2>rack bays</h2>
+        <p class="note">Eurorack rails set into a box's deck. The module faces are
+        the case's surface: the rails sit a module panel's thickness under the
+        deck top. List the placements that are modules in the bay; nothing else
+        may enter its space.</p>
+        <div id="bay-list"></div>
+        <button id="btn-add-bay" title="add a 3U rack bay to this box case">+ rack bay</button>
+      </div>
+
+      <div data-uses="layered">
       <h2>screws</h2>
       <div id="case-screws">
         <div class="field">
@@ -200,6 +223,7 @@
         <div class="field"><label title="material thinner than this is opened out rather than left to snap">min web</label><input type="number" id="cs-min-seg" step="0.5" min="0"><span class="unit">mm</span></div>
         <div class="field"><label title="width of the channels carved so internal leads can reach each other -- 5 mm passes an I2C lead with its plug">cable ch.</label><input type="number" id="cs-cable" step="0.5" min="2"><span class="unit">mm</span></div>
         <p class="note" id="cs-note"></p>
+      </div>
       </div>
 
       <h2>sheet</h2>
@@ -225,8 +249,7 @@
     <section id="pane-frame" class="pane" hidden>
       <p class="note" id="fr-note">A Eurorack frame is two side panels, one
       folded body, and two rails per row bolted between the panels with an M5
-      at each end. Everything below the width is derived from the format.
-      The kind of project is chosen when it is created, not here.</p>
+      at each end. Everything below the width is derived from the format.</p>
 
       <h2>width</h2>
       <div class="field">

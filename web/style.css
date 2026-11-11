@@ -90,12 +90,13 @@ h2:first-child { margin-top: 0; }
 .issue .code { color: var(--dim); font-size: 11px; }
 .issue .msg { font-size: 12px; }
 
-#selection .field, #case-screws .field {
+#selection .field, #case-screws .field, #case-panel .field {
   display: flex; gap: 6px; align-items: center; margin-bottom: 4px;
 }
 #selection label, #case-screws .field label { width: 44px; color: var(--dim); }
-#case-screws .field label { width: 58px; }
-#selection input, #case-screws input[type=number], #case-screws select {
+#case-screws .field label, #case-panel .field label { width: 58px; color: var(--dim); }
+#selection input, #case-screws input[type=number], #case-screws select,
+#case-panel input[type=number] {
   width: 70px; background: var(--panel-2); color: var(--fg);
   border: 1px solid var(--line); border-radius: 3px; padding: 2px 5px; font: inherit;
 }
@@ -259,6 +260,10 @@ body:not(.rendering) .sunctl { opacity: .35; }
 .tabs .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .pane { flex: 1; overflow-y: auto; padding: 8px; min-height: 0; }
 .pane[hidden] { display: none; }
+/* A control that does not serve the open scene's use case (usecase.js).
+   `.field`, the menu labels and the tabs all set a display of their own, which
+   beats the hidden attribute's -- so this has to win outright. */
+[data-uses][hidden] { display: none !important; }
 #issue-count {
   margin-left: 5px; font-size: 11px; padding: 0 4px; border-radius: 7px;
   background: var(--line); color: var(--fg);
