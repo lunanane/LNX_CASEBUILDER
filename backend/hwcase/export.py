@@ -901,7 +901,7 @@ def rack_cutlist(model, sheets: list[PackedSheet], stock) -> str:
     datum edge, then the rails, the M5s and the U-channel order."""
     from .fasteners import TAP_DRILL
     from .flat import from_rack
-    from .rack import M5_ENGAGEMENT, MODULE_HP_ESTIMATE, RAIL_END_BORE
+    from .rack import M5_ENGAGEMENT, RAIL_END_BORE
 
     plates = from_rack(model)
     rows = " + ".join(r.fmt.name for r in model.rows)
@@ -946,16 +946,6 @@ def rack_cutlist(model, sheets: list[PackedSheet], stock) -> str:
     for item, n in model.bill_of_materials().items():
         if item.endswith((" bolt", " nut")):
             lines.append(f"  {n} x {item}")
-    fix = model.module_fixings()
-    if fix:
-        lines += ["", "module fixings (an ESTIMATE -- count your modules' "
-                      f"holes: about one module per {MODULE_HP_ESTIMATE:g} HP, "
-                      f"two screws each, four from 12 HP):"]
-        for f in fix:
-            lines.append(
-                f"  row {f['row']} ({f['format']}, {f['hp']:g} HP): "
-                f"~{f['screws']} x {f['screw']} screw + ~{f['screws']} x M3 "
-                f"sliding nut, or 2 x M3 threaded strip {f['strip_mm']:g} mm")
     order = model.order_spec()
     if order is not None:
         lines += [

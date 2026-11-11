@@ -73,15 +73,6 @@ M5_CLEAR = 5.0
 #: usual rule for a steel screw in a soft alloy.
 M5_ENGAGEMENT = 10.0
 
-#: Module fixings are bought by the row and not designed here, so they are
-#: an estimate: modules average about this wide...
-MODULE_HP_ESTIMATE = 8.0
-#: ...and take a screw at the top and the bottom of the panel (4 from 12 HP,
-#: which the average hides). An M3 goes through a 2 mm panel into a sliding
-#: nut about 3 mm thick.
-MODULE_PANEL_T = 2.0
-SLIDING_NUT_T = 3.0
-
 # --------------------------------------------------------------------------
 # the body
 # --------------------------------------------------------------------------
@@ -494,26 +485,6 @@ class RackModel:
         from .fasteners import fastener
         return fastener("M5").bolt_length(self.panel_t + M5_ENGAGEMENT)
 
-    def module_fixings(self) -> list[dict[str, float | int | str]]:
-        """An estimate per row of the M3s and sliding nuts its modules take.
-
-        Not designed -- what goes in a row is the user's choice -- so it is
-        sized by HP at `MODULE_HP_ESTIMATE` per module and two screws each,
-        and always labelled an estimate.
-        """
-        import math
-
-        from .fasteners import fastener
-        m3 = fastener("M3")
-        length = m3.bolt_length(MODULE_PANEL_T + SLIDING_NUT_T)
-        out = []
-        for i, r in enumerate(self.rows):
-            n = 2 * math.ceil(self.hp / MODULE_HP_ESTIMATE)
-            out.append({"row": i + 1, "format": r.fmt.name, "hp": self.hp,
-                        "screws": n, "screw": f"M3x{length:g}",
-                        "strip_mm": round(self.width, 1)})
-        return out
-
     def bill_of_materials(self) -> dict[str, int | float]:
         screws = 2 * len(self.rails)
         if self.style != "laser":
@@ -533,11 +504,6 @@ class RackModel:
                 "M5 screws": screws,
             }
         out["M5 screw length mm"] = self.rail_screw_length()
-        fix = self.module_fixings()
-        if fix:
-            n = sum(int(f["screws"]) for f in fix)
-            out[f"{fix[0]['screw']} module screws (estimate)"] = n
-            out["M3 sliding nuts (estimate)"] = n
         for j in self.joints:
             for item, n in j.bom().items():
                 out[item] = out.get(item, 0) + n

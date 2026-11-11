@@ -143,17 +143,15 @@ def test_the_frame_cut_list_says_tap_m5_and_how_long_the_screw_is():
     assert "tap both ends of every rail M5" in cut and "4.2 mm" in cut
 
 
-def test_module_fixings_are_sized_by_hp_and_called_an_estimate():
+def test_a_frame_lists_no_module_fixings_only_the_rails_m5s():
+    """The modules are whatever the user buys later: no M3s, no sliding nuts."""
     model = rack.build(SIX_U, 84.0)
-    fix = model.module_fixings()
-    assert [f["row"] for f in fix] == [1, 2]
-    assert all(f["screws"] == 2 * 11 and f["screw"] == "M3x6" for f in fix)
     bom = model.bill_of_materials()
-    assert bom["M3x6 module screws (estimate)"] == 44
-    assert bom["M3 sliding nuts (estimate)"] == 44
+    assert not any("M3" in k or "sliding" in k for k in bom)
+    assert bom["M5 screws"] == 2 * bom["rails"]
     cut = export.rack_sheet_files(model, "svg", "f", WIDE)[-1][1]
-    assert "module fixings (an ESTIMATE" in cut
-    assert "row 2 (3U, 84 HP): ~22 x M3x6 screw + ~22 x M3 sliding nut" in cut
+    assert "module fixings" not in cut and "sliding nut" not in cut
+    assert "M5 screw, 16 mm long" in cut
 
 
 # --------------------------------------------------------------------------
