@@ -228,7 +228,7 @@ test('rack bays can be added to a box, and the box draws its rails', () => {
   assert.match(js, /\[\.\.\.model\.plates, \.\.\.\(model\.members \|\| \[\]\)\]/);
 });
 
-test('a bay is drawn while editing, and its modules move by HP slot', () => {
+test('a bay is drawn while editing, and knows nothing of modules', () => {
   // the overlay comes from /api/resolve's bays, built after every resolve
   assert.match(js, /buildSupports\(resolved\);\s+buildBays\(resolved\);/);
   assert.match(js, /for \(const b of resolved\.bays \|\| \[\]\)/);
@@ -237,11 +237,11 @@ test('a bay is drawn while editing, and its modules move by HP slot', () => {
   assert.match(js, /bay\.hp \?\? BAY_DEFAULTS\.hp/);
   assert.match(js, /bay\.module_panel_t \?\? BAY_DEFAULTS\.module_panel_t/);
   assert.match(js, /BAY_ROW_FORMATS\.map/);
-  // modules picked from the scene's placements, each on a slot
-  assert.match(js, /add a module\.\.\./);
-  assert.match(js, /setModuleSlot\(bay, m\.id, s, r\)/);
-  // a drag of a bay's module snaps to slots, not to other boards' edges
-  assert.match(js, /d = drag\.bay \? applyBaySnap\(d\) : applySnap\(d\)/);
+  // no module picker, no slots, no slot-snapping drag: a bay is rails and
+  // room, and whatever is screwed in later is not the editor's business
+  assert.doesNotMatch(js, /add a module|setModuleSlot|applyBaySnap|nearestSlot|hp_slot/);
+  assert.match(js, /if \(!drag\.vertical\) d = applySnap\(d\);/);
+  assert.match(html, /Nothing may enter a bay's space: it is kept clear for the\s+modules you screw in later\./);
   // the rack bay controls still belong to the box use case only
   assert.match(html, /<div data-uses="box">\s*<h2>rack bays<\/h2>/);
 });

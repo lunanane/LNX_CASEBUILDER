@@ -11,9 +11,7 @@ import { wireMenus } from './menu.js';
 import { store, files, nameFromFile, NAME_RE } from './store.js';
 import { applyUseCase, STARTER_KIND, useCaseOf } from './usecase.js';
 import {
-  BAY_DEFAULTS, ROW_FORMATS as BAY_ROW_FORMATS, findModule, firstFreeSlot,
-  moduleEntries, nearestSlot, newBayAt, removeModule, roughBayBox, rowsLabel,
-  setModuleSlot,
+  BAY_DEFAULTS, ROW_FORMATS as BAY_ROW_FORMATS, newBayAt, roughBayBox, rowsLabel,
 } from './bays.js';
 import {
   ART_LAYERS, ELEMENT_LAYERS, PCB_DEFAULTS, decodeGray, encodeGray, fitSize, layerColor,
@@ -1539,8 +1537,8 @@ function wirePlates() {
 
 /** The case pane's rack bays: Eurorack rails set into a box's deck (M10).
  *  Each bay is a block of fields -- HP, where it is, its rows, its depth and
- *  panel thickness -- and the modules in it, each on an HP slot. Edits go
- *  straight back to the engine, which puts every module on its slot. */
+ *  panel thickness. The modules screwed in later are not the editor's
+ *  business; edits go straight back to the engine. */
 function renderBays() {
   const list = $('bay-list');
   if (!list || !state.scene) return;
@@ -1555,20 +1553,6 @@ function renderBays() {
 function bayChanged(delay = 0) {
   renderBays();
   scheduleResolve(delay);
-}
-
-/** What the engine last said about bay `id` (/api/resolve's `bays`). */
-function resolvedBay(id) {
-  return (state.resolved?.bays || []).find((b) => b.id === id) || null;
-}
-
-/** A module's HP: as the engine measured it, or -- not resolved yet -- its
- *  assembly's width on the grid. */
-function moduleHp(bayId, id) {
-  const known = resolvedBay(bayId)?.modules.find((m) => m.id === id);
-  if (known) return known.hp;
-  const b = assemblyBounds(id);
-  return b ? Math.max(1, Math.ceil((b.x1 - b.x0) / 5.08 - 0.01)) : 1;
 }
 
 function bayBlock(bay, i, bays, box) {
@@ -1643,57 +1627,6 @@ function bayBlock(bay, i, bays, box) {
   addRow.onclick = () => { edit(); rows.push({ format: '3U' }); bayChanged(); };
   div.appendChild(addRow);
 
-  // modules, each on a slot
-  const entries = moduleEntries(bay);
-  for (const m of entries) {
-    const slotted = m.hp_slot != null;
-    const f = field(m.id, slotted
-      ? 'HP from the rails\' left end, from 0' + (rows.length > 1 ? '; row from the bottom, from 0' : '')
-      : 'placed by hand -- give it a slot to have the engine put it on the rails',
-    '<input type="number" step="1" min="0" class="slot">'
-      + (rows.length > 1 ? '<input type="number" step="1" min="0" class="row">' : ''));
-    const si = f.querySelector('.slot');
-    si.value = slotted ? m.hp_slot : '';
-    si.placeholder = 'slot';
-    si.disabled = !box;
-    const ri = f.querySelector('.row');
-    if (ri) { ri.value = m.row ?? 0; ri.disabled = !box; }
-    const set = () => {
-      const s = parseInt(si.value, 10);
-      const r = ri ? parseInt(ri.value, 10) : 0;
-      if (!Number.isFinite(s) || s < 0 || !Number.isFinite(r) || r < 0) return;
-      edit('bay-' + i + '-mod-' + m.id);
-      setModuleSlot(bay, m.id, s, r);
-      scheduleResolve(250);
-    };
-    si.oninput = set;
-    if (ri) ri.oninput = set;
-    const rm = document.createElement('button');
-    rm.textContent = 'x';
-    rm.title = 'take this module out of the bay';
-    rm.disabled = !box;
-    rm.onclick = () => { edit(); removeModule(bay, m.id); bayChanged(); };
-    f.appendChild(rm);
-  }
-  // add a module: any free-standing placement no bay has yet
-  const free = (state.scene.placements || []).filter(
-    (p) => !p.parent && !findModule(bays, p.id));
-  const add = field('module', 'put a placement into this bay, in the first slot it fits',
-    '<select><option value="">add a module...</option>' + free.map((p) =>
-      '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.label || p.id)
-      + '</option>').join('') + '</select>');
-  const pick = add.querySelector('select');
-  pick.disabled = !box || !free.length;
-  pick.onchange = () => {
-    const id = pick.value;
-    if (!id) return;
-    edit();
-    const hp = moduleHp(bay.id, id);
-    const taken = entries.filter((m) => m.hp_slot != null).map((m) => ({
-      slot: m.hp_slot, row: m.row, hp: moduleHp(bay.id, m.id) }));
-    setModuleSlot(bay, id, firstFreeSlot(taken, hp, bay.hp ?? BAY_DEFAULTS.hp) ?? 0, 0);
-    bayChanged();
-  };
   return div;
 }
 
@@ -1706,33 +1639,6 @@ view.add(bayGroup);
 $('chk-render').addEventListener('change', () => {
   bayGroup.visible = !$('chk-render').checked;
 });
-
-/** If placement `id` is a module in a bay the engine has measured, what a
- *  drag needs to keep it on the bay's HP slots; otherwise null. */
-function bayDragOf(id) {
-  const hit = findModule(state.scene?.racks, id);
-  if (!hit || state.scene.case?.style !== 'box') return null;
-  return { bay: hit.bay, id };
-}
-
-/** A module being dragged goes from HP slot to HP slot of its own bay --
- *  never between them -- and the bay entry follows, so the engine puts it
- *  exactly where it is drawn. */
-function applyBaySnap(d) {
-  snapGroup.clear();
-  drag.snapped = null;
-  const rb = resolvedBay(drag.bay.bay.id);
-  const mod = rb?.modules.find((m) => m.id === drag.bay.id);
-  if (!rb || !mod) return d;
-  const [x0, y0, x1, y1] = mod.box;
-  const s = nearestSlot({ x0: x0 + d.x, y0: y0 + d.y, x1: x1 + d.x, y1: y1 + d.y }, rb, mod.hp);
-  if (!s) return d;
-  d.x += s.dx;
-  d.y += s.dy;
-  setModuleSlot(drag.bay.bay, drag.bay.id, s.hp_slot, s.row);
-  drag.bay.slot = s;
-  return d;
-}
 
 function buildBays(resolved) {
   bayGroup.clear();
@@ -1958,7 +1864,7 @@ function wireCaseScrews() {
       .concat(bays.map((bb) => roughBayBox(bb)));
     bays.push({ id: 'bay' + n, at: newBayAt(boxes), hp: BAY_DEFAULTS.hp,
                 rows: [{ format: '3U' }], module_depth: BAY_DEFAULTS.module_depth,
-                module_panel_t: BAY_DEFAULTS.module_panel_t, modules: [] });
+                module_panel_t: BAY_DEFAULTS.module_panel_t });
     renderBays();
     push();
   };
@@ -2601,7 +2507,6 @@ function startMove(ev, point) {
     lines: snapLines(state.scene.placements.map((p) => p.id), placementBounds, family),
     snapped: null,
     noSnap: ev.altKey,          // hold alt to place something off-grid
-    bay: bayDragOf(pl.id),      // a bay's module moves by HP slot
   };
   captureGroups();
   gizmoGroup.visible = false;
@@ -2660,7 +2565,7 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
     if (drag.vertical) { d.x = 0; d.y = 0; } else { d.z = 0; }
     drag.noSnap = ev.altKey;
     if (drag.vertical && pl.mount !== 'manual') pl.mount = 'manual';   // same rule
-    if (!drag.vertical) d = drag.bay ? applyBaySnap(d) : applySnap(d);
+    if (!drag.vertical) d = applySnap(d);
     for (const m of drag.moved) m.group.position.copy(m.base).add(d);
     pl.pos = [drag.origin[0] + d.x, drag.origin[1] + d.y, drag.origin[2] + d.z];
     const [sx, sy] = drag.snapped || [null, null];
@@ -2668,11 +2573,8 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
       ? ` &nbsp; <span style="color:#6bd68a">snapped to ${
           [...new Set([sx && sx.id, sy && sy.id].filter(Boolean))].join(' + ')}</span>`
       : '';
-    const slotNote = drag.bay?.slot
-      ? ` &nbsp; <span style="color:#f2b84b">bay ${escapeHtml(drag.bay.bay.id)}, slot ${
-          drag.bay.slot.hp_slot} HP, row ${drag.bay.slot.row}</span>` : '';
     hint(`<b>${drag.id}</b> &nbsp; x ${pl.pos[0].toFixed(1)} &nbsp; y ${pl.pos[1].toFixed(1)}` +
-         `${drag.vertical ? ` &nbsp; z ${pl.pos[2].toFixed(1)}` : ''}${snapNote}${slotNote}`);
+         `${drag.vertical ? ` &nbsp; z ${pl.pos[2].toFixed(1)}` : ''}${snapNote}`);
   } else {
     const angle = Math.atan2(now.y - drag.center[1], now.x - drag.center[0]);
     let deg = THREE.MathUtils.radToDeg(angle - drag.startAngle);
